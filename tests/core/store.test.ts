@@ -124,3 +124,15 @@ test('Hub publish/subscribe/unsubscribe', () => {
   h.publish(ev); un(); h.publish(ev);
   expect(got).toEqual([ev]);
 });
+
+test('orphan call_end nâng lastEventAt của agent đã có, vẫn trả []', () => {
+  const s = new Store(':memory:'); s.applyEvent(agentEv);
+  expect(s.applyEvent({ type: 'call_end', agentId: 'claude:s1', callId: 'zz', endedAt: 9000, ok: true, errorPreview: null })).toEqual([]);
+  expect(s.getAgent('claude:s1')!.lastEventAt).toBe(9000);
+});
+
+test('orphan call_end tự tạo agent thì phát sự kiện agent', () => {
+  const s = new Store(':memory:');
+  const out = s.applyEvent({ type: 'call_end', agentId: 'claude:new', callId: 'zz', endedAt: 4000, ok: true, errorPreview: null });
+  expect(out).toEqual([expect.objectContaining({ type: 'agent', agent: expect.objectContaining({ id: 'claude:new', lastEventAt: 4000 }) })]);
+});

@@ -224,11 +224,11 @@ export class Store {
   }
 
   private applyCallEnd(e: Extract<NormalizedEvent, { type: 'call_end' }>): HubEvent[] {
-    this.ensureAgent(e.agentId, e.endedAt);
+    const created = this.ensureAgent(e.agentId, e.endedAt);
+    this.touch(e.agentId, e.endedAt);
     const r = this.db.prepare('UPDATE calls SET ended_at = ?, ok = ?, error_preview = ? WHERE id = ? AND agent_id = ?')
       .run(e.endedAt, e.ok ? 1 : 0, e.errorPreview, e.callId, e.agentId);
-    if (Number(r.changes) === 0) return []; // call_end without call_start: ignored
-    this.touch(e.agentId, e.endedAt);
+    if (Number(r.changes) === 0) return created ? this.agentOut(e.agentId) : []; // orphan call_end: only emit a newly created agent
     return [...this.agentOut(e.agentId), ...this.callOut(e.callId)];
   }
 
