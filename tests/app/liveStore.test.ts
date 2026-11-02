@@ -46,3 +46,29 @@ describe('reduce', () => {
     expect(s.lastUpdateAt).toBe(99);
   });
 });
+
+describe('reduce: độ bền', () => {
+  test('reduce: action lạ trả về đúng state cũ', () => {
+    const s = reduce(initialState(), { type: 'agent', agent: agent('a') });
+    expect(reduce(s, { type: 'bogus' } as never)).toBe(s);
+  });
+  test('reduce: agent event mới hơn snapshot không bị snapshot ghi đè', () => {
+    let s = reduce(initialState(), { type: 'agent', agent: agent('a', { lastEventAt: 200, label: 'new' }) });
+    s = reduce(s, { type: 'agent', agent: agent('b', { lastEventAt: 50 }) });
+    s = reduce(s, {
+      type: 'snapshot', generatedAt: 150, agents: [agent('a', { lastEventAt: 100, label: 'old' }), agent('b', { lastEventAt: 60, label: 'snap' })],
+      alerts: [], metrics: { running: 0, alerts: 0, okRate1h: null, p50_1h: null }, agentMetrics: {},
+    });
+    expect(s.agents.a.label).toBe('new');
+    expect(s.agents.b.label).toBe('snap');
+  });
+  test('reduce: alert event sau generatedAt sống sót qua snapshot, kể cả khi bị gỡ', () => {
+    let s = reduce(initialState(), { type: 'alert', alert: alert({ id: 'x' }), at: 200 });
+    s = reduce(s, { type: 'alert', alert: alert({ id: 'gone', active: false }), at: 200 });
+    s = reduce(s, {
+      type: 'snapshot', generatedAt: 100, agents: [], alerts: [alert({ id: 'gone' }), alert({ id: 'old' })],
+      metrics: { running: 0, alerts: 0, okRate1h: null, p50_1h: null }, agentMetrics: {},
+    });
+    expect(Object.keys(s.alerts).sort()).toEqual(['old', 'x']);
+  });
+});

@@ -8,13 +8,16 @@ export interface LiveState {
   conn: ConnState; lastUpdateAt: number | null; agents: Record<string, AgentInfo>;
   alerts: Record<string, Alert>; metrics: GlobalMetrics | null; agentMetrics: Record<string, AgentMetrics>;
   calls: Record<string, CallRecord[]>; selectedAgentId: string | null;
+  /** local time (ms) of the last applied alert event per alert id; used to resolve snapshot/WS races */
+  alertEventAt: Record<string, number>;
 }
 export interface SnapshotAction {
   type: 'snapshot'; generatedAt: number; agents: AgentInfo[]; alerts: Alert[];
   metrics: GlobalMetrics; agentMetrics: Record<string, AgentMetrics>;
 }
 export type LiveAction =
-  | HubEvent
+  | Exclude<HubEvent, { type: 'alert' }>
+  | { type: 'alert'; alert: Alert; at?: number }
   | { type: 'metrics'; metrics: GlobalMetrics; at: number }
   | { type: 'conn'; conn: ConnState }
   | SnapshotAction
@@ -24,7 +27,7 @@ export type LiveAction =
 export function initialState(): LiveState {
   return {
     conn: 'connecting', lastUpdateAt: null, agents: {}, alerts: {}, metrics: null,
-    agentMetrics: {}, calls: {}, selectedAgentId: null,
+    agentMetrics: {}, calls: {}, selectedAgentId: null, alertEventAt: {},
   };
 }
 
@@ -44,18 +47,27 @@ export function reduce(s: LiveState, e: LiveAction): LiveState {
     case 'alert': {
       const alerts = { ...s.alerts };
       if (e.alert.active) alerts[e.alert.id] = e.alert; else delete alerts[e.alert.id];
-      return { ...s, alerts };
+      return { ...s, alerts, alertEventAt: { ...s.alertEventAt, [e.alert.id]: e.at ?? 0 } };
     }
     case 'metrics': return { ...s, metrics: e.metrics, lastUpdateAt: e.at };
     case 'conn': return { ...s, conn: e.conn };
-    case 'snapshot': return {
-      ...s,
-      agents: Object.fromEntries(e.agents.map((a) => [a.id, a])),
-      alerts: Object.fromEntries(e.alerts.filter((a) => a.active).map((a) => [a.id, a])),
-      metrics: e.metrics, agentMetrics: e.agentMetrics, lastUpdateAt: e.generatedAt,
-    };
+    case 'snapshot': {
+      // keep per-entity data that is newer than the snapshot (events that raced the fetch)
+      const agents: Record<string, AgentInfo> = Object.fromEntries(e.agents.map((a) => [a.id, a]));
+      for (const [id, cur] of Object.entries(s.agents)) {
+        const snap = agents[id];
+        if (!snap || cur.lastEventAt > snap.lastEventAt) agents[id] = cur;
+      }
+      const alerts: Record<string, Alert> = Object.fromEntries(e.alerts.filter((a) => a.active).map((a) => [a.id, a]));
+      for (const [id, at] of Object.entries(s.alertEventAt)) {
+        if (at <= e.generatedAt) continue;
+        if (s.alerts[id]) alerts[id] = s.alerts[id]; else delete alerts[id];
+      }
+      return { ...s, agents, alerts, metrics: e.metrics, agentMetrics: e.agentMetrics, lastUpdateAt: e.generatedAt };
+    }
     case 'calls': return { ...s, calls: { ...s.calls, [e.agentId]: mergeCalls(s.calls[e.agentId], e.calls) } };
     case 'select': return { ...s, selectedAgentId: e.id };
+    default: return s;
   }
 }
 
@@ -66,7 +78,7 @@ const loadedCalls = new Set<string>();
 let started = false;
 
 function dispatch(a: LiveAction): void {
-  state = reduce(state, a);
+  state = reduce(state, a.type === 'alert' ? { ...a, at: Date.now() } : a);
   listeners.forEach((l) => l());
 }
 
@@ -89,7 +101,7 @@ function connect(attempt: number): void {
     if (state.selectedAgentId) void loadCalls(state.selectedAgentId);
   };
   ws.onmessage = (m) => {
-    try { dispatch(JSON.parse(String(m.data))); } catch { /* ignore malformed */ }
+    try { dispatch(JSON.parse(String(m.data))); } catch { /* ignore malformed or unexpected messages */ }
   };
   let retried = false;
   const retry = () => {
