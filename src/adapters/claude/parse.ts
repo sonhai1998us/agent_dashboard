@@ -12,8 +12,12 @@ export interface ClaudeFileCtx {
   resumed: boolean;
   /** Subagent only: id of the parent's Agent/Task call (from meta.json `toolUseId`). */
   parentToolUseId?: string | null;
-  /** Subagent only: meta.json was missing when the ctx was made; re-read on later reads. */
-  metaPending?: boolean;
+  /** Subagent only: meta.json `requestShape`. */
+  requestShape?: 'background' | 'foreground' | null;
+  /** Subagent only: mtime of the meta.json last applied (re-read whenever it changes). */
+  metaMtime?: number;
+  /** Subagent only: last seen meta.json `finished` flag (an end signal, like SubagentHandback/end_turn). */
+  metaFinished?: boolean;
   /** First cwd seen in this file (records without one do not reset it). */
   cwd?: string | null;
   /** Subagent only: undefined until the first status is emitted; true after end_turn, false while running. */
@@ -22,7 +26,11 @@ export interface ClaudeFileCtx {
 
 const norm = (p: string) => p.replace(/\\/g, '/');
 
-export interface ClaudeSubagentMeta { agentType?: string; description?: string; toolUseId?: string }
+export interface ClaudeSubagentMeta {
+  agentType?: string; description?: string; toolUseId?: string; requestShape?: string; finished?: boolean;
+}
+
+const shapeOf = (v: unknown): 'background' | 'foreground' | null => (v === 'background' || v === 'foreground' ? v : null);
 
 export function claudeCtxForPath(
   file: string,
@@ -47,20 +55,39 @@ export function claudeCtxForPath(
       lastTs: null,
       resumed,
       parentToolUseId: typeof meta?.toolUseId === 'string' ? meta.toolUseId : null,
-      metaPending: !meta,
+      requestShape: shapeOf(meta?.requestShape),
     };
   }
   return { agentId: `claude:${stem}`, sessionId: stem, parentId: null, role: null, label: meta?.description ?? null, lastTs: null, resumed };
 }
 
-/** Applies a subagent meta.json found after the ctx was made; emits an update if the agent is already known. */
-export function applyClaudeMeta(ctx: ClaudeFileCtx, meta: ClaudeSubagentMeta): NormalizedEvent[] {
-  ctx.metaPending = false;
+/**
+ * Applies a (new or changed) subagent meta.json after the transcript records read so far.
+ * Fills missing role/label/parentToolUseId/requestShape, and treats a change of `finished`
+ * as a status signal: false/absent → true ends the subagent, true → false resumes it.
+ * Only the change counts, so later transcript records still flip a meta-ended subagent back to running.
+ * Returns [] (and leaves `finished` unconsumed) while the agent has not been introduced yet.
+ */
+export function applyClaudeMeta(ctx: ClaudeFileCtx, meta: ClaudeSubagentMeta, now: number = Date.now()): NormalizedEvent[] {
   const patch: Record<string, unknown> = {};
   if (typeof meta.agentType === 'string' && !ctx.role) { ctx.role = meta.agentType; patch.role = meta.agentType; }
   if (typeof meta.description === 'string' && meta.description && !ctx.label) { ctx.label = meta.description; patch.label = meta.description; }
   if (typeof meta.toolUseId === 'string' && !ctx.parentToolUseId) { ctx.parentToolUseId = meta.toolUseId; patch.parentToolUseId = meta.toolUseId; }
-  if (ctx.lastTs === null || Object.keys(patch).length === 0) return []; // not introduced yet: the intro event carries it
+  const shape = shapeOf(meta.requestShape);
+  if (shape && shape !== ctx.requestShape) { ctx.requestShape = shape; patch.requestShape = shape; }
+  if (ctx.lastTs === null) return []; // not introduced yet: the intro event carries the fields
+  const finished = meta.finished === true;
+  if (finished && ctx.metaFinished !== true) {
+    ctx.metaFinished = true;
+    ctx.ended = true;
+    patch.status = 'ended';
+  } else if (!finished && ctx.metaFinished === true) {
+    ctx.metaFinished = false;
+    ctx.ended = false;
+    patch.status = 'running';
+    patch.lastEventAt = now; // a resume happening now (not a replay of an old record)
+  }
+  if (Object.keys(patch).length === 0) return [];
   return [{ type: 'agent', agent: { id: ctx.agentId, source: 'claude', sessionId: ctx.sessionId, ...patch } }];
 }
 
@@ -115,6 +142,7 @@ export function parseClaudeLine(line: string, ctx: ClaudeFileCtx): NormalizedEve
     if (!ctx.resumed) agent.startedAt = ts;
     if (ctx.role) agent.role = ctx.role;
     if (ctx.parentToolUseId) agent.parentToolUseId = ctx.parentToolUseId;
+    if (ctx.requestShape) agent.requestShape = ctx.requestShape;
     out.push({ type: 'agent', agent });
   } else if (newCwd && prevTs !== null) {
     // the agent was introduced by a record without cwd: project/label come from the first record that has one

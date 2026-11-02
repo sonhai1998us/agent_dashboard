@@ -40,8 +40,8 @@ export interface TailWatcherSpec<Ctx> {
   options?: WatcherOptions;
   /** Agent id of a ctx when known (used to count skipped lines as parse errors). */
   agentId?(ctx: Ctx): string | null;
-  /** Called before each read of a file (after its ctx exists); returned events are applied first. */
-  beforeRead?(file: string, ctx: Ctx): NormalizedEvent[];
+  /** Called at the end of each read of a file (after its new records); returned events are applied then. */
+  refresh?(file: string, ctx: Ctx): NormalizedEvent[];
   /** Called after each file read with the file and its ctx. */
   afterRead?(file: string, ctx: Ctx): void;
 }
@@ -59,6 +59,8 @@ export interface TailCore {
    * re-reads it when its size differs from the saved offset.
    */
   rescan(isActive: (agentId: string) => boolean): void;
+  /** Files read so far with their ctx. */
+  entries(): IterableIterator<[string, unknown]>;
 }
 
 const DEFAULT_RETRY_MS = [1000, 2000, 5000];
@@ -117,12 +119,6 @@ export function createTailCore<Ctx>(spec: TailWatcherSpec<Ctx>): TailCore {
         ctxs.set(file, ctx);
       }
       const c = ctx;
-      const pre = spec.beforeRead?.(file, c) ?? [];
-      if (pre.length) {
-        const out: HubEvent[] = [];
-        spec.store.transaction(() => { for (const ev of pre) out.push(...spec.store.applyEvent(ev)); });
-        if (out.length) spec.onEvents(out);
-      }
       let first = true;
       for await (const chunk of tailChunks(file, saved ?? { offset: 0, lines: 0 }, spec.options?.chunkBytes ?? CHUNK_BYTES)) {
         if (stopped) return;
@@ -143,6 +139,12 @@ export function createTailCore<Ctx>(spec: TailWatcherSpec<Ctx>): TailCore {
           }
           spec.store.setOffset(file, chunk.offset, chunk.lineCount);
         });
+        if (out.length) spec.onEvents(out);
+      }
+      const post = spec.refresh?.(file, c) ?? [];
+      if (post.length) {
+        const out: HubEvent[] = [];
+        spec.store.transaction(() => { for (const ev of post) out.push(...spec.store.applyEvent(ev)); });
         if (out.length) spec.onEvents(out);
       }
       spec.afterRead?.(file, ctx);
@@ -243,6 +245,7 @@ export function createTailCore<Ctx>(spec: TailWatcherSpec<Ctx>): TailCore {
       await attaching;
       await backfilling;
     },
+    entries: () => ctxs.entries(),
     rescan(isActive) {
       if (stopped) return;
       for (const [file, ctx] of ctxs) {

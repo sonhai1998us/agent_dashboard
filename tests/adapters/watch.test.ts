@@ -449,16 +449,81 @@ test('meta.json xuất hiện muộn → được đọc lại ở lần đọc 
   expect(store.getAgent('claude:sess-main:late')).toMatchObject({ role: 'office-qc', label: 'QC' });
 });
 
-test('subagent bị ngắt (không handback/end_turn) kết thúc khi call Agent của cha đóng', async () => {
+test('subagent foreground bị ngắt (không handback/end_turn) kết thúc khi call Agent của cha đóng; resume sau đó → running', async () => {
   fs.writeFileSync(mainFile(), userRec() + agentToolRec('toolu_par'));
   fs.mkdirSync(subDir(), { recursive: true });
   const sub = path.join(subDir(), 'agent-cut.jsonl');
-  fs.writeFileSync(sub.replace('.jsonl', '.meta.json'), JSON.stringify({ agentType: 'office-dev', description: 'Dev', toolUseId: 'toolu_par' }));
+  fs.writeFileSync(sub.replace('.jsonl', '.meta.json'), JSON.stringify({ agentType: 'office-dev', description: 'Dev', toolUseId: 'toolu_par', requestShape: 'foreground' }));
   fs.writeFileSync(sub, userRec() + asstRec('tool_use'));
   sessionFile(process.pid, 'busy');
   const w = claudeWatcher();
   await w.start(); await w.backfilled();
-  expect(store.getAgent('claude:sess-main:cut')).toMatchObject({ status: 'running', parentToolUseId: 'toolu_par' });
+  expect(store.getAgent('claude:sess-main:cut')).toMatchObject({ status: 'running', parentToolUseId: 'toolu_par', requestShape: 'foreground' });
   fs.appendFileSync(mainFile(), recLine({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_par', content: '[Request interrupted by user]', is_error: true }] } }));
   await waitFor(() => store.getAgent('claude:sess-main:cut')?.status === 'ended');
+  // resume (vd. SendMessage): bản ghi mới, sau lúc call của cha đóng
+  fs.appendFileSync(sub, recLine({ type: 'user', timestamp: new Date(Date.now() + 2000).toISOString(), message: { role: 'user', content: 'tiếp tục' } }));
+  await waitFor(() => store.getAgent('claude:sess-main:cut')?.status === 'running');
+});
+
+const asyncLaunchedRec = (id: string) => recLine({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: 'Async agent launched successfully' }] } });
+const bgMeta = (extra: object = {}) => JSON.stringify({ agentType: 'general-purpose', description: 'Nền', toolUseId: 'toolu_bg', spawnDepth: 1, requestShape: 'background', requestNonInteractive: true, model: 'opus', ...extra });
+
+test('subagent background: call Agent của cha đã đóng ngay khi khởi chạy, con vẫn ghi → running và stuck có thể bật', async () => {
+  const { DetectEngine } = await import('@/src/detect/engine');
+  const t0 = Date.now() - 4 * 60_000;
+  const at = (ms: number) => ({ timestamp: new Date(t0 + ms).toISOString() });
+  fs.writeFileSync(mainFile(), recLine({ type: 'user', ...at(0), message: { role: 'user', content: 'hi' } })
+    + recLine({ type: 'assistant', ...at(1000), message: { id: 'mp', role: 'assistant', stop_reason: 'tool_use', content: [{ type: 'tool_use', id: 'toolu_bg', name: 'Agent', input: { prompt: 'x' } }] } })
+    + recLine({ type: 'user', ...at(1100), message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_bg', content: 'Async agent launched successfully' }] } }));
+  fs.mkdirSync(subDir(), { recursive: true });
+  const sub = path.join(subDir(), 'agent-bg.jsonl');
+  fs.writeFileSync(sub.replace('.jsonl', '.meta.json'), bgMeta());
+  fs.writeFileSync(sub, recLine({ type: 'user', ...at(1200), message: { role: 'user', content: 'làm đi' } })
+    + recLine({ type: 'assistant', ...at(5000), message: { id: 'ms', role: 'assistant', stop_reason: 'tool_use', content: [{ type: 'text', text: 'đang làm' }] } }));
+  sessionFile(process.pid, 'busy');
+  const w = claudeWatcher();
+  await w.start(); await w.backfilled();
+  expect(store.listCalls('claude:sess-main').find((c) => c.id === 'toolu_bg')?.endedAt).not.toBeNull();
+  expect(store.getAgent('claude:sess-main:bg')).toMatchObject({ status: 'running', requestShape: 'background' });
+  // vẫn ghi sau khi call của cha đóng
+  fs.appendFileSync(sub, recLine({ type: 'user', ...at(6000), message: { role: 'user', content: [{ type: 'text', text: 'tiếp' }] } }));
+  await waitFor(() => (store.getAgent('claude:sess-main:bg')?.lastEventAt ?? 0) >= t0 + 6000);
+  expect(store.getAgent('claude:sess-main:bg')?.status).toBe('running');
+  new DetectEngine(store, cfg, () => {}).tick(Date.now());
+  expect(store.activeAlerts()).toContainEqual(expect.objectContaining({ agentId: 'claude:sess-main:bg', kind: 'stuck', active: true }));
+});
+
+test('subagent background: meta finished:true ghi muộn → ended; finished bị gỡ → running', async () => {
+  fs.writeFileSync(mainFile(), userRec() + agentToolRec('toolu_bg') + asyncLaunchedRec('toolu_bg'));
+  fs.mkdirSync(subDir(), { recursive: true });
+  const sub = path.join(subDir(), 'agent-fin.jsonl');
+  const meta = sub.replace('.jsonl', '.meta.json');
+  fs.writeFileSync(meta, bgMeta());
+  fs.writeFileSync(sub, userRec() + asstRec('tool_use'));
+  sessionFile(process.pid, 'busy');
+  const w = createClaudeWatcher(cfg, store, () => {}, { livenessMs: 80 });
+  closers.push(() => w.stop());
+  await w.start(); await w.backfilled();
+  expect(store.getAgent('claude:sess-main:fin')?.status).toBe('running');
+  await new Promise((r) => setTimeout(r, 30)); // mtime mới khác hẳn
+  fs.writeFileSync(meta, bgMeta({ finished: true }));
+  await waitFor(() => store.getAgent('claude:sess-main:fin')?.status === 'ended');
+  await new Promise((r) => setTimeout(r, 30));
+  fs.writeFileSync(meta, bgMeta());
+  await waitFor(() => store.getAgent('claude:sess-main:fin')?.status === 'running');
+});
+
+test('subagent kết thúc nhờ meta finished, bản ghi transcript mới sau đó → running', async () => {
+  fs.writeFileSync(mainFile(), userRec());
+  fs.mkdirSync(subDir(), { recursive: true });
+  const sub = path.join(subDir(), 'agent-again2.jsonl');
+  fs.writeFileSync(sub.replace('.jsonl', '.meta.json'), bgMeta({ finished: true }));
+  fs.writeFileSync(sub, userRec() + asstRec('tool_use'));
+  sessionFile(process.pid, 'busy');
+  const w = claudeWatcher();
+  await w.start(); await w.backfilled();
+  expect(store.getAgent('claude:sess-main:again2')?.status).toBe('ended');
+  fs.appendFileSync(sub, recLine({ type: 'user', message: { role: 'user', content: 'thêm việc' } }));
+  await waitFor(() => store.getAgent('claude:sess-main:again2')?.status === 'running');
 });

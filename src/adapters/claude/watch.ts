@@ -6,15 +6,21 @@ import type { Store } from '@/src/core/store';
 import { applyClaudeMeta, claudeCtxForPath, parseClaudeLine, type ClaudeFileCtx, type ClaudeSubagentMeta } from './parse';
 import { createTailCore, RESCAN_ACTIVE_MS, type Watcher, type WatcherOptions } from '../watchBase';
 
+const isSubagentFile = (file: string): boolean => /[\\/]subagents[\\/]/.test(file);
+const metaPathOf = (file: string): string => file.replace(/\.jsonl$/i, '.meta.json');
+
 function readMeta(file: string): ClaudeSubagentMeta | undefined {
-  if (!/[\\/]subagents[\\/]/.test(file)) return undefined;
+  if (!isSubagentFile(file)) return undefined;
   try {
-    const metaFile = file.replace(/\.jsonl$/i, '.meta.json');
-    const j = JSON.parse(fs.readFileSync(metaFile, 'utf8'));
+    const j = JSON.parse(fs.readFileSync(metaPathOf(file), 'utf8'));
     return j && typeof j === 'object' ? j : undefined;
   } catch {
     return undefined;
   }
+}
+
+function metaMtime(file: string): number | undefined {
+  try { return fs.statSync(metaPathOf(file)).mtimeMs; } catch { return undefined; }
 }
 
 function pidAlive(pid: number): boolean {
@@ -30,20 +36,41 @@ export function createClaudeWatcher(
   cfg: Config, store: Store, onEvents: (evs: HubEvent[]) => void, options: WatcherOptions = {},
 ): Watcher {
   let backfillDone: Promise<void> = Promise.resolve();
+  const ctxByAgent = new Map<string, ClaudeFileCtx>();
+  // A subagent can be ended by signals outside its transcript (parent's call closed, meta.json finished,
+  // parent process gone). Mark its ctx ended so the next transcript record emits `running` again.
+  const forward = (evs: HubEvent[]): void => {
+    for (const e of evs) {
+      if (e.type !== 'agent' || !e.agent.parentId || e.agent.status !== 'ended') continue;
+      const c = ctxByAgent.get(e.agent.id);
+      if (c) c.ended = true;
+    }
+    onEvents(evs);
+  };
   const core = createTailCore<ClaudeFileCtx>({
     name: 'claude',
     root: path.join(cfg.claudeDir, 'projects'),
     match: (f) => f.toLowerCase().endsWith('.jsonl'),
-    makeCtx: (f, resumed) => claudeCtxForPath(f, cfg.claudeDir, readMeta(f), { resumed }),
+    makeCtx: (f, resumed) => {
+      const c = claudeCtxForPath(f, cfg.claudeDir, readMeta(f), { resumed });
+      ctxByAgent.set(c.agentId, c);
+      return c;
+    },
     parse: parseClaudeLine,
-    // meta.json may be written after the transcript: keep looking for it while it is missing
-    beforeRead: (f, c) => {
-      if (!c.metaPending) return [];
+    // meta.json changes while a subagent runs (late creation, requestShape, `finished`): re-apply it
+    // whenever its mtime changed, after the transcript records of this read
+    refresh: (f, c) => {
+      if (!c.parentId) return [];
+      const m = metaMtime(f);
+      if (m === undefined || m === c.metaMtime) return [];
       const meta = readMeta(f);
-      return meta ? applyClaudeMeta(c, meta) : [];
+      if (!meta) return [];
+      const evs = applyClaudeMeta(c, meta);
+      if (c.lastTs !== null) c.metaMtime = m; // not introduced yet: apply again on the next read
+      return evs;
     },
     agentId: (c) => c.agentId,
-    store, onEvents,
+    store, onEvents: forward,
     backfillMs: cfg.backfillHours * 3600_000,
     options,
   });
@@ -57,6 +84,15 @@ export function createClaudeWatcher(
       const since = Date.now() - RESCAN_ACTIVE_MS;
       const active = new Set(store.listAgents({ since }).map((a) => a.id));
       core.rescan((id) => active.has(id));
+      // meta.json of live (or recently active) subagents: re-read when it changed (e.g. `finished`)
+      for (const [file, raw] of core.entries()) {
+        const c = raw as ClaudeFileCtx;
+        if (!c.parentId) continue;
+        const a = store.getAgent(c.agentId);
+        if (!a || (a.status === 'ended' && !active.has(a.id))) continue;
+        const m = metaMtime(file);
+        if (m !== undefined && m !== c.metaMtime) void core.enqueue(file);
+      }
     } catch (err) {
       console.warn(`[acctv] rescan failed: ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -94,7 +130,7 @@ export function createClaudeWatcher(
         const updated = store.setAgentStatus(a.id, status, pid);
         if (updated) out.push({ type: 'agent', agent: updated });
       }
-      if (out.length) onEvents(out);
+      if (out.length) forward(out);
     } catch (err) {
       console.warn(`[acctv] claude liveness failed: ${err instanceof Error ? err.message : String(err)}`);
     }
