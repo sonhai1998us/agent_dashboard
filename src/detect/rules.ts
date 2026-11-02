@@ -18,7 +18,8 @@ export function detectStuck(a: AgentInfo, open: CallRecord[], now: number, t: Th
   if (a.status !== 'running' || tools(open).length > 0) return null;
   const quiet = now - a.lastEventAt;
   if (quiet <= t.stuckMs) return null;
-  return mk(a, 'stuck', 'warn', `im lặng ${fmtDur(quiet)}`, a.lastEventAt + t.stuckMs);
+  // since = start of the silence, so `now - since` equals the duration in the message
+  return mk(a, 'stuck', 'warn', `im lặng ${fmtDur(quiet)}`, a.lastEventAt);
 }
 
 export function detectLongTool(a: AgentInfo, open: CallRecord[], now: number, t: Thresholds): Alert | null {
@@ -27,7 +28,8 @@ export function detectLongTool(a: AgentInfo, open: CallRecord[], now: number, t:
   if (!oldest) return null;
   const dur = now - oldest.startedAt;
   if (dur <= t.longToolMs) return null;
-  return mk(a, 'long_tool', 'warn', `${oldest.name} chạy ${fmtDur(dur)}`, oldest.startedAt + t.longToolMs);
+  // since = when the call started, so `now - since` equals the duration in the message
+  return mk(a, 'long_tool', 'warn', `${oldest.name} chạy ${fmtDur(dur)}`, oldest.startedAt);
 }
 
 const keyOf = (c: CallRecord) => `${c.name}:${c.inputHash}`;

@@ -1,5 +1,5 @@
 import type { AgentInfo, Alert, CallRecord } from '@/src/core/model';
-import { fmtDuration } from './format';
+import { ALERT_LABEL, fmtDuration } from './format';
 
 /** errorPreview giống nhau nhiều nhất trong các call tool, chỉ khi lặp ≥ 2 lần */
 export function topRepeatedError(calls: CallRecord[]): { preview: string; count: number } | null {
@@ -34,7 +34,11 @@ export function callRowState(c: CallRecord, agent: Pick<AgentInfo, 'status'> | u
 /** Văn bản pill cảnh báo; stuck/long_tool tính trực tiếp từ since vì message không được phát lại mỗi tick */
 export function alertPill(a: Alert, now: number): string {
   const live = fmtDuration(Math.max(0, now - a.since));
-  if (a.kind === 'stuck') return `treo ${live}`;
-  if (a.kind === 'long_tool') return `tool lâu ${live}`;
+  if (a.kind === 'stuck' || a.kind === 'long_tool') return `${ALERT_LABEL[a.kind]} ${live}`;
   return a.message;
+}
+
+/** Nhãn ngắn trên lane timeline: biểu tượng mức + loại (tiếng Việt) + thời gian từ since. */
+export function alertTag(a: Alert, now: number): string {
+  return `${a.level === 'critical' ? '■' : '▲'} ${ALERT_LABEL[a.kind]} ${fmtDuration(Math.max(0, now - a.since))}`;
 }

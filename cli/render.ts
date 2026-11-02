@@ -1,5 +1,5 @@
 import type { AgentInfo, Alert, CallRecord } from '@/src/core/model';
-import { fmtClock, fmtDuration } from '@/app/lib/format';
+import { ALERT_LABEL, fmtClock, fmtDuration } from '@/app/lib/format';
 import { buildRoots, flattenTree } from '@/app/lib/tree';
 
 const ESC = '\x1b[';
@@ -64,7 +64,7 @@ export function renderList(
     nodes.forEach(({ agent: a }, i) => {
       const al = worst(activeAlerts(a.id, alerts));
       const n = callCounts[a.id];
-      const alertCol = al ? `${alertIcon(al.level, color)} ${al.kind}` : '';
+      const alertCol = al ? `${alertIcon(al.level, color)} ${ALERT_LABEL[al.kind]}` : '';
       rows.push([
         statusIcon(a, color),
         shortId(a),

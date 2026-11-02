@@ -17,6 +17,7 @@ test('kẹt: running, 121s không sự kiện, không call mở → warn', () =>
   const a = detectStuck(agent(), [], 1000 + 121000, T)!;
   expect(a.kind).toBe('stuck'); expect(a.level).toBe('warn'); expect(a.id).toBe('claude:s1:stuck');
   expect(a.message).toBe('im lặng 2m01s');
+  expect(a.since).toBe(1000); // bắt đầu im lặng = lastEventAt → now - since khớp thời lượng trong message
   expect(detectStuck(agent(), [], 1000 + 100000, T)).toBeNull();
 });
 
@@ -29,6 +30,7 @@ test('long_tool: call mở 301s ở agent running → warn; agent ended → null
   const open = [call('Bash', 'x', { startedAt: 1000, endedAt: null, ok: null })];
   const a = detectLongTool(agent(), open, 1000 + 301000, T)!;
   expect(a.kind).toBe('long_tool'); expect(a.message).toBe('Bash chạy 5m01s');
+  expect(a.since).toBe(1000); // = startedAt của call đang mở
   expect(detectLongTool(agent({ status: 'ended' }), open, 1000 + 301000, T)).toBeNull();
   expect(detectLongTool(agent(), open, 1000 + 100000, T)).toBeNull();
 });

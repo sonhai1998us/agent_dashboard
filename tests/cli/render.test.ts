@@ -52,3 +52,10 @@ test('renderWatch hiện cây ├/└ và 10 call gần nhất', () => {
   expect(out.split('\n').filter((l) => l.includes('Bash')).length).toBe(10);
   expect(out).not.toMatch(ANSI);
 });
+
+test('renderList ghi loại cảnh báo bằng tiếng Việt', () => {
+  const a = agent({ id: 'claude:abcdef1234567890' });
+  expect(renderList([a], [alert({ agentId: a.id, kind: 'long_tool' })], false)).toContain('▲ tool lâu');
+  expect(renderList([a], [alert({ agentId: a.id, kind: 'long_tool' })], false)).not.toContain('long_tool');
+  expect(renderList([a], [alert({ agentId: a.id, kind: 'stuck' })], false)).toContain('▲ kẹt');
+});
