@@ -1,0 +1,9 @@
+.shell { min-height: 100vh; display: flex; flex-direction: column; }
+.grid { display: grid; grid-template-columns: 170px 1fr 240px; gap: 8px; padding: 8px; align-items: stretch; flex: 1; }
+.panel { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 10px; min-height: 200px; }
+.ph { color: var(--muted); font-size: 12px; }
+
+/* dưới 1024px: một cột; thứ tự DOM là trái (select), giữa, phải => cột phải nằm dưới */
+@media (max-width: 1023px) {
+  .grid { grid-template-columns: 1fr; }
+}

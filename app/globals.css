@@ -1,0 +1,35 @@
+:root {
+  --bg: #0F172A;
+  --card: #1B2336;
+  --border: #334155;
+  --fg: #F8FAFC;
+  --muted: #94A3B8;
+  --ok: #22C55E;
+  --err: #EF4444;
+  --run: #3B82F6;
+  --warn: #FBBF24;
+  --wait: #64748B;
+  --sel: #16203a;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg); }
+
+body {
+  font-family: var(--font-fira-sans), system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+}
+
+.mono { font-family: var(--font-fira-code), ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+
+:focus-visible { outline: 2px solid var(--run); outline-offset: 2px; }
+
+button, select, input { font: inherit; color: inherit; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+}
