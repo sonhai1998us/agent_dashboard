@@ -73,3 +73,16 @@ test('engine: agent nạp lúc ended rồi chuyển running → tick kế tiếp
   e.tick(3300);
   expect(ev.filter((x) => x.type === 'alert' && x.alert.kind === 'loop').length).toBe(ev.slice(0, n).filter((x) => x.type === 'alert' && x.alert.kind === 'loop').length);
 });
+
+test('engine: call Agent của cha đang chờ subagent chưa ended → không báo long_tool; subagent ended → báo', () => {
+  const { s, e } = setup();
+  start(s, 'Agent', 'viết code', 1000);
+  const callId = s.openCalls(ID)[0].id;
+  s.applyEvent({ type: 'agent', agent: { id: `${ID}:k1`, source: 'claude', sessionId: 's1', parentId: ID, parentToolUseId: callId, status: 'running', startedAt: 1100, lastEventAt: 1100 } } as any);
+  e.tick(1000 + 600_000);
+  expect(s.activeAlerts().filter((a) => a.agentId === ID).map((a) => a.kind)).not.toContain('long_tool');
+  expect(s.activeAlerts().filter((a) => a.agentId === ID).map((a) => a.kind)).not.toContain('stuck');
+  s.setAgentStatus(`${ID}:k1`, 'ended');
+  e.tick(1000 + 601_000);
+  expect(s.activeAlerts()).toContainEqual(expect.objectContaining({ agentId: ID, kind: 'long_tool' }));
+});

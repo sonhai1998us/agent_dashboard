@@ -3,7 +3,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState, type KeyboardE
 import type { AgentInfo, Alert, CallRecord } from '@/src/core/model';
 import { ensureCalls, selectAgent, selectCall, useLive } from '../lib/liveStore';
 import { flattenTree } from '../lib/tree';
-import { DEFAULT_WINDOW_MIN, WINDOWS_MIN, layoutLane, type Bar, type LoopZone } from '../lib/lanes';
+import { DEFAULT_WINDOW_MIN, WINDOWS_MIN, layoutLane, waitingCallIds, type Bar, type LoopZone } from '../lib/lanes';
 import { fmtClock, fmtDuration } from '../lib/format';
 import { statusOf } from './SessionList';
 import styles from './AgentTimeline.module.css';
@@ -85,7 +85,9 @@ export default function AgentTimeline() {
 
   const win = useMemo(() => ({ start: frame.now - winMin * 60_000, end: frame.now }), [frame.now, winMin]);
   const lanes = useMemo(
-    () => nodes.map((n) => layoutLane(frame.calls[n.agent.id] ?? EMPTY_CALLS, n.agent, win, width, frame.alerts)),
+    () => nodes.map((n) => layoutLane(
+      frame.calls[n.agent.id] ?? EMPTY_CALLS, n.agent, win, width, frame.alerts, waitingCallIds(n.agent.id, Object.values(frame.agents)),
+    )),
     [nodes, frame, win, width],
   );
 
@@ -206,6 +208,7 @@ export default function AgentTimeline() {
         <span><i className={styles.sw} data-s="ok" /> ok</span>
         <span><i className={styles.sw} data-s="error" /> lỗi</span>
         <span><i className={styles.sw} data-s="running" /> đang chạy</span>
+        <span><i className={styles.sw} data-s="wait" /> chờ subagent</span>
         <span><i className={styles.sw} data-s="unknown" /> không rõ</span>
         <span><i className={styles.sw} data-s="loop" /> vùng lặp</span>
         <span><i className={styles.nowSw} /> bây giờ</span>

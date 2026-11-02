@@ -36,6 +36,7 @@
 .bar[data-state='error'] { fill: var(--err); }
 .bar[data-state='running'] { fill: var(--run); }
 .bar[data-state='unknown'] { fill: var(--wait); }
+.bar[data-state='wait'] { fill: var(--wait); stroke: var(--run); stroke-width: 1; stroke-dasharray: 3 2; }
 .bar:hover { stroke: var(--fg); stroke-width: 1; }
 .bar:focus { outline: none; stroke: var(--fg); stroke-width: 2; }
 .now { stroke: var(--fg); stroke-opacity: .5; stroke-width: 1; }
@@ -47,6 +48,7 @@
 .sw[data-s='error'] { background: var(--err); }
 .sw[data-s='running'] { background: var(--run); }
 .sw[data-s='unknown'] { background: var(--wait); }
+.sw[data-s='wait'] { background: var(--wait); outline: 1px dashed var(--run); outline-offset: -1px; }
 .sw[data-s='loop'] { background: repeating-linear-gradient(45deg, color-mix(in srgb, var(--warn) 50%, transparent) 0 2px, color-mix(in srgb, var(--warn) 12%, transparent) 2px 4px); }
 .nowSw { display: inline-block; width: 1px; height: 10px; background: var(--fg); opacity: .5; }
 

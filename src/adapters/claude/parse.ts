@@ -10,6 +10,10 @@ export interface ClaudeFileCtx {
   label: string | null;
   lastTs: number | null;
   resumed: boolean;
+  /** Subagent only: id of the parent's Agent/Task call (from meta.json `toolUseId`). */
+  parentToolUseId?: string | null;
+  /** Subagent only: meta.json was missing when the ctx was made; re-read on later reads. */
+  metaPending?: boolean;
   /** First cwd seen in this file (records without one do not reset it). */
   cwd?: string | null;
   /** Subagent only: undefined until the first status is emitted; true after end_turn, false while running. */
@@ -18,10 +22,12 @@ export interface ClaudeFileCtx {
 
 const norm = (p: string) => p.replace(/\\/g, '/');
 
+export interface ClaudeSubagentMeta { agentType?: string; description?: string; toolUseId?: string }
+
 export function claudeCtxForPath(
   file: string,
   _claudeDir: string,
-  meta?: { agentType?: string; description?: string },
+  meta?: ClaudeSubagentMeta,
   opts?: { resumed?: boolean },
 ): ClaudeFileCtx {
   const resumed = opts?.resumed ?? false;
@@ -40,9 +46,22 @@ export function claudeCtxForPath(
       label: meta?.description ?? null,
       lastTs: null,
       resumed,
+      parentToolUseId: typeof meta?.toolUseId === 'string' ? meta.toolUseId : null,
+      metaPending: !meta,
     };
   }
   return { agentId: `claude:${stem}`, sessionId: stem, parentId: null, role: null, label: meta?.description ?? null, lastTs: null, resumed };
+}
+
+/** Applies a subagent meta.json found after the ctx was made; emits an update if the agent is already known. */
+export function applyClaudeMeta(ctx: ClaudeFileCtx, meta: ClaudeSubagentMeta): NormalizedEvent[] {
+  ctx.metaPending = false;
+  const patch: Record<string, unknown> = {};
+  if (typeof meta.agentType === 'string' && !ctx.role) { ctx.role = meta.agentType; patch.role = meta.agentType; }
+  if (typeof meta.description === 'string' && meta.description && !ctx.label) { ctx.label = meta.description; patch.label = meta.description; }
+  if (typeof meta.toolUseId === 'string' && !ctx.parentToolUseId) { ctx.parentToolUseId = meta.toolUseId; patch.parentToolUseId = meta.toolUseId; }
+  if (ctx.lastTs === null || Object.keys(patch).length === 0) return []; // not introduced yet: the intro event carries it
+  return [{ type: 'agent', agent: { id: ctx.agentId, source: 'claude', sessionId: ctx.sessionId, ...patch } }];
 }
 
 function textOf(content: unknown): string {
@@ -95,6 +114,7 @@ export function parseClaudeLine(line: string, ctx: ClaudeFileCtx): NormalizedEve
     if (ctx.label) agent.label = ctx.label;
     if (!ctx.resumed) agent.startedAt = ts;
     if (ctx.role) agent.role = ctx.role;
+    if (ctx.parentToolUseId) agent.parentToolUseId = ctx.parentToolUseId;
     out.push({ type: 'agent', agent });
   } else if (newCwd && prevTs !== null) {
     // the agent was introduced by a record without cwd: project/label come from the first record that has one
@@ -164,16 +184,18 @@ export function parseClaudeLine(line: string, ctx: ClaudeFileCtx): NormalizedEve
       && content.some((b: any) => b && b.type === 'tool_use' && b.name === 'SubagentHandback');
     const toolResultsOnly = rec.type === 'user' && Array.isArray(content) && content.length > 0
       && content.every((b: any) => b && b.type === 'tool_result');
+    // lastEventAt = this record's time: lets the store tell a replayed old record from a resume
+    const stamp = ts !== null ? { lastEventAt: ts } : {};
     if (isHandback || (rec.type === 'assistant' && rec.message?.stop_reason === 'end_turn')) {
       if (ctx.ended !== true) {
         ctx.ended = true;
-        out.push({ type: 'agent', agent: { ...base, status: 'ended' } });
+        out.push({ type: 'agent', agent: { ...base, status: 'ended', ...stamp } });
       }
     } else if (ctx.ended === true && toolResultsOnly) {
       // results of the final turn's tool calls (handback or others): the subagent stays finished
     } else if (ctx.ended !== false) {
       ctx.ended = false;
-      out.push({ type: 'agent', agent: { ...base, status: 'running' } });
+      out.push({ type: 'agent', agent: { ...base, status: 'running', ...stamp } });
     }
   }
 

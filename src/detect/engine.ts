@@ -51,7 +51,13 @@ export class DetectEngine {
 
   tick(now: number): void {
     const t = this.cfg.thresholds;
-    for (const a of this.store.listAgents()) {
+    const agents = this.store.listAgents();
+    // calls (Agent/Task) whose foreground subagent is still live: the parent is waiting, not slow
+    const waiting = new Set<string>();
+    for (const a of agents) {
+      if (a.parentId && a.parentToolUseId && a.status !== 'ended') waiting.add(`${a.parentId}\u0000${a.parentToolUseId}`);
+    }
+    for (const a of agents) {
       if (a.status === 'ended') {
         for (const k of KINDS) this.reconcile(a.id, k, null);
         continue;
@@ -59,7 +65,8 @@ export class DetectEngine {
       if (a.status === 'running') {
         const open = this.store.openCalls(a.id);
         this.reconcile(a.id, 'stuck', detectStuck(a, open, now, t));
-        this.reconcile(a.id, 'long_tool', detectLongTool(a, open, now, t));
+        const own = open.filter((c) => !waiting.has(`${a.id}\u0000${c.id}`));
+        this.reconcile(a.id, 'long_tool', detectLongTool(a, own, now, t));
         this.onCall(a.id); // loop / error_burst: status may have changed after the calls were ingested
       } else {
         this.reconcile(a.id, 'stuck', null);

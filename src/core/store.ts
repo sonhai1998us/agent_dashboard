@@ -7,7 +7,7 @@ type Row = Record<string, any>;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS agents (
-  id TEXT PRIMARY KEY, source TEXT NOT NULL, session_id TEXT NOT NULL, parent_id TEXT,
+  id TEXT PRIMARY KEY, source TEXT NOT NULL, session_id TEXT NOT NULL, parent_id TEXT, parent_tool_use_id TEXT,
   label TEXT NOT NULL, role TEXT, model TEXT, effort TEXT, cwd TEXT, pid INTEGER,
   started_at INTEGER NOT NULL, last_event_at INTEGER NOT NULL,
   status TEXT NOT NULL DEFAULT 'idle', parse_errors INTEGER NOT NULL DEFAULT 0
@@ -37,6 +37,7 @@ const PREVIEW_MAX = 200;
 function toAgent(r: Row): AgentInfo {
   return {
     id: r.id, source: r.source as Source, sessionId: r.session_id, parentId: r.parent_id ?? null,
+    parentToolUseId: r.parent_tool_use_id ?? null,
     label: r.label, role: r.role ?? null, model: r.model ?? null, effort: r.effort ?? null,
     cwd: r.cwd ?? null, pid: r.pid ?? null,
     startedAt: r.started_at, lastEventAt: r.last_event_at,
@@ -75,6 +76,9 @@ export class Store {
     this.db.exec('PRAGMA journal_mode = WAL;');
     this.db.exec('PRAGMA synchronous = NORMAL;');
     this.db.exec(SCHEMA);
+    // DBs created before parent_tool_use_id existed
+    const cols = (this.db.prepare('PRAGMA table_info(agents)').all() as Row[]).map((c) => c.name);
+    if (!cols.includes('parent_tool_use_id')) this.db.exec('ALTER TABLE agents ADD COLUMN parent_tool_use_id TEXT');
   }
 
   transaction<T>(fn: () => T): T {
@@ -209,10 +213,10 @@ export class Store {
     const now = at ?? Date.now();
     const startedAt = init.startedAt ?? now;
     this.db.prepare(
-      `INSERT OR IGNORE INTO agents (id, source, session_id, parent_id, label, role, model, effort, cwd, pid, started_at, last_event_at, status, parse_errors)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT OR IGNORE INTO agents (id, source, session_id, parent_id, parent_tool_use_id, label, role, model, effort, cwd, pid, started_at, last_event_at, status, parse_errors)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
-      id, source, sid, init.parentId ?? null,
+      id, source, sid, init.parentId ?? null, init.parentToolUseId ?? null,
       init.label ?? (init.cwd ? lastSegment(init.cwd) : id),
       init.role ?? null, init.model ?? null, init.effort ?? null, init.cwd ?? null, init.pid ?? null,
       startedAt, init.lastEventAt ?? startedAt, init.status ?? 'idle', init.parseErrors ?? 0,
@@ -224,7 +228,7 @@ export class Store {
     const created = this.ensureAgent(patch.id, patch.lastEventAt ?? patch.startedAt, patch);
     if (!created) {
       const cols: Record<string, string> = {
-        source: 'source', sessionId: 'session_id', parentId: 'parent_id', label: 'label', role: 'role',
+        source: 'source', sessionId: 'session_id', parentId: 'parent_id', parentToolUseId: 'parent_tool_use_id', label: 'label', role: 'role',
         model: 'model', effort: 'effort', cwd: 'cwd', pid: 'pid', startedAt: 'started_at',
         lastEventAt: 'last_event_at', status: 'status', parseErrors: 'parse_errors',
       };
@@ -239,7 +243,22 @@ export class Store {
       if (sets.length) this.db.prepare(`UPDATE agents SET ${sets.join(', ')} WHERE id = ?`).run(...vals, patch.id);
       if (patch.lastEventAt !== undefined) this.touch(patch.id, patch.lastEventAt);
     }
+    if (patch.status === 'running' || patch.parentToolUseId !== undefined) this.settleChild(patch.id, patch.lastEventAt);
     return this.agentOut(patch.id);
+  }
+
+  /**
+   * A subagent whose spawning call in the parent has already ended (at or after `at`, the time of the
+   * record being applied) is finished: replaying its old records must not flip it back to running.
+   * Records newer than the parent's call end (a resumed subagent) still count.
+   */
+  private settleChild(id: string, at?: number): void {
+    const a = this.getAgent(id);
+    if (!a || a.status === 'ended' || !a.parentId || !a.parentToolUseId) return;
+    const r = this.db.prepare('SELECT ended_at FROM calls WHERE id = ? AND agent_id = ?').get(a.parentToolUseId, a.parentId) as Row | undefined;
+    if (r && r.ended_at !== null && r.ended_at !== undefined && r.ended_at >= (at ?? a.lastEventAt)) {
+      this.db.prepare("UPDATE agents SET status = 'ended' WHERE id = ?").run(id);
+    }
   }
 
   private applyCallStart(c: Omit<CallRecord, 'endedAt' | 'ok' | 'errorPreview'>): HubEvent[] {
@@ -267,7 +286,16 @@ export class Store {
     const r = this.db.prepare('UPDATE calls SET ended_at = ?, ok = ?, error_preview = ? WHERE id = ? AND agent_id = ?')
       .run(e.endedAt, e.ok ? 1 : 0, e.errorPreview, e.callId, e.agentId);
     if (Number(r.changes) === 0) return created ? this.agentOut(e.agentId) : []; // orphan call_end: only emit a newly created agent
-    return [...this.agentOut(e.agentId), ...this.callOut(e.callId)];
+    // the spawning call (Agent/Task) closed: subagents still marked live (e.g. interrupted, no handback) are done
+    const kids = this.db.prepare(
+      "SELECT id FROM agents WHERE parent_id = ? AND parent_tool_use_id = ? AND status != 'ended'",
+    ).all(e.agentId, e.callId) as Row[];
+    const out: HubEvent[] = [...this.agentOut(e.agentId), ...this.callOut(e.callId)];
+    for (const k of kids) {
+      this.db.prepare("UPDATE agents SET status = 'ended' WHERE id = ?").run(k.id);
+      out.push(...this.agentOut(k.id));
+    }
+    return out;
   }
 
   private callOut(id: string): HubEvent[] {

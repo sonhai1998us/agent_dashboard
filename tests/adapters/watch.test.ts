@@ -432,3 +432,33 @@ test('file mới tạo ngay sau start luôn được đọc (10 lần, mỗi l�
     await w.stop();
   }
 });
+
+const agentToolRec = (id: string) => recLine({ type: 'assistant', message: { id: 'm' + Math.random(), role: 'assistant', stop_reason: 'tool_use', content: [{ type: 'tool_use', id, name: 'Agent', input: { prompt: 'làm việc' } }] } });
+
+test('meta.json xuất hiện muộn → được đọc lại ở lần đọc sau: role, label, parentToolUseId', async () => {
+  fs.writeFileSync(mainFile(), userRec());
+  fs.mkdirSync(subDir(), { recursive: true });
+  const sub = path.join(subDir(), 'agent-late.jsonl');
+  fs.writeFileSync(sub, userRec());
+  const w = claudeWatcher();
+  await w.start(); await w.backfilled();
+  expect(store.getAgent('claude:sess-main:late')).toMatchObject({ role: null, parentToolUseId: null });
+  fs.writeFileSync(sub.replace('.jsonl', '.meta.json'), JSON.stringify({ agentType: 'office-qc', description: 'QC', toolUseId: 'toolu_late' }));
+  fs.appendFileSync(sub, userRec());
+  await waitFor(() => store.getAgent('claude:sess-main:late')?.parentToolUseId === 'toolu_late');
+  expect(store.getAgent('claude:sess-main:late')).toMatchObject({ role: 'office-qc', label: 'QC' });
+});
+
+test('subagent bị ngắt (không handback/end_turn) kết thúc khi call Agent của cha đóng', async () => {
+  fs.writeFileSync(mainFile(), userRec() + agentToolRec('toolu_par'));
+  fs.mkdirSync(subDir(), { recursive: true });
+  const sub = path.join(subDir(), 'agent-cut.jsonl');
+  fs.writeFileSync(sub.replace('.jsonl', '.meta.json'), JSON.stringify({ agentType: 'office-dev', description: 'Dev', toolUseId: 'toolu_par' }));
+  fs.writeFileSync(sub, userRec() + asstRec('tool_use'));
+  sessionFile(process.pid, 'busy');
+  const w = claudeWatcher();
+  await w.start(); await w.backfilled();
+  expect(store.getAgent('claude:sess-main:cut')).toMatchObject({ status: 'running', parentToolUseId: 'toolu_par' });
+  fs.appendFileSync(mainFile(), recLine({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_par', content: '[Request interrupted by user]', is_error: true }] } }));
+  await waitFor(() => store.getAgent('claude:sess-main:cut')?.status === 'ended');
+});

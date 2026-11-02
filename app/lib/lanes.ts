@@ -1,17 +1,26 @@
 import type { AgentInfo, Alert, CallRecord } from '@/src/core/model';
 import { fmtDuration } from './format';
 
-export type BarState = 'ok' | 'error' | 'running' | 'unknown';
+export type BarState = 'ok' | 'error' | 'running' | 'unknown' | 'wait';
 export interface Bar { callId: string; x: number; w: number; state: BarState; title: string; }
 export interface LoopZone { x: number; w: number; }
 
 export const WINDOWS_MIN = [1, 5, 15, 60] as const;
 export const DEFAULT_WINDOW_MIN = 5;
 const MIN_W = 2;
-const STATE_TEXT: Record<BarState, string> = { ok: 'ok', error: 'lỗi', running: 'đang chạy', unknown: 'không rõ' };
+const STATE_TEXT: Record<BarState, string> = { ok: 'ok', error: 'lỗi', running: 'đang chạy', unknown: 'không rõ', wait: 'chờ subagent' };
 const LOOP_SPAN = 20; // số call tool gần nhất dùng để tìm khoá lặp
+const NO_WAIT: Set<string> = new Set();
 
-function stateOf(c: CallRecord, agent: AgentInfo): BarState {
+/** Ids of this agent's calls that spawned a subagent which has not ended yet (the parent is waiting on it). */
+export function waitingCallIds(agentId: string, agents: Iterable<AgentInfo>): Set<string> {
+  const out = new Set<string>();
+  for (const a of agents) if (a.parentId === agentId && a.parentToolUseId && a.status !== 'ended') out.add(a.parentToolUseId);
+  return out;
+}
+
+function stateOf(c: CallRecord, agent: AgentInfo, waiting: Set<string>): BarState {
+  if (c.endedAt === null && waiting.has(c.id)) return 'wait';
   if (c.endedAt === null) return agent.status === 'running' ? 'running' : 'unknown';
   if (c.ok === false) return 'error';
   if (c.ok === true) return 'ok';
@@ -20,6 +29,7 @@ function stateOf(c: CallRecord, agent: AgentInfo): BarState {
 
 export function layoutLane(
   calls: CallRecord[], agent: AgentInfo, win: { start: number; end: number }, width: number, alerts: Alert[],
+  waiting: Set<string> = NO_WAIT,
 ): { bars: Bar[]; loopZones: LoopZone[] } {
   const span = win.end - win.start;
   if (span <= 0 || width <= 0) return { bars: [], loopZones: [] };
@@ -32,10 +42,11 @@ export function layoutLane(
     if (end < win.start || c.startedAt > win.end) continue;
     const x = px(c.startedAt);
     const w = Math.max(MIN_W, px(end) - x);
-    const dur = c.endedAt === null ? 'đang chạy' : fmtDuration(c.endedAt - c.startedAt);
+    const state = stateOf(c, agent, waiting);
+    const dur = c.endedAt === null ? STATE_TEXT[state === 'wait' ? 'wait' : 'running'] : fmtDuration(c.endedAt - c.startedAt);
     bars.push({
-      callId: c.id, x, w: Math.min(w, Math.max(MIN_W, width - x)), state: stateOf(c, agent),
-      title: `${STATE_TEXT[stateOf(c, agent)]} · ${c.name}${c.inputPreview ? ` · ${c.inputPreview}` : ''} · ${dur}`,
+      callId: c.id, x, w: Math.min(w, Math.max(MIN_W, width - x)), state,
+      title: `${STATE_TEXT[state]} · ${c.name}${c.inputPreview ? ` · ${c.inputPreview}` : ''} · ${dur}`,
     });
   }
 

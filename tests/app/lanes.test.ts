@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import type { AgentInfo, Alert, CallRecord } from '@/src/core/model';
-import { layoutLane, WINDOWS_MIN } from '@/app/lib/lanes';
+import { layoutLane, waitingCallIds, WINDOWS_MIN } from '@/app/lib/lanes';
 
 const MIN = 60_000;
 const call = (id: string, startedAt: number, o: Partial<CallRecord> = {}): CallRecord => ({
@@ -8,7 +8,7 @@ const call = (id: string, startedAt: number, o: Partial<CallRecord> = {}): CallR
   ok: true, errorPreview: null, tokensIn: null, tokensOut: null, ...o,
 });
 const agent = (o: Partial<AgentInfo> = {}): AgentInfo => ({
-  id: 'a', source: 'claude', sessionId: 'a', parentId: null, label: 'a', role: null, model: null, effort: null,
+  id: 'a', source: 'claude', sessionId: 'a', parentId: null, parentToolUseId: null, label: 'a', role: null, model: null, effort: null,
   cwd: null, pid: null, startedAt: 0, lastEventAt: 0, status: 'running', parseErrors: 0, ...o,
 });
 const loopAlert = (o: Partial<Alert> = {}): Alert => ({ id: 'a:loop', agentId: 'a', kind: 'loop', level: 'warn', message: 'x', since: 0, active: true, ...o });
@@ -78,5 +78,26 @@ describe('layoutLane: trạng thái trong title', () => {
     expect(e.bars[0].title.startsWith('lỗi')).toBe(true);
     const o = layoutLane([call('c', MIN)], agent(), win, 500, []);
     expect(o.bars[0].title.startsWith('ok')).toBe(true);
+  });
+});
+
+describe('layoutLane: chờ subagent', () => {
+  test('call mở đang chờ subagent → state wait, title "chờ subagent"', () => {
+    const r = layoutLane([call('toolu_P', MIN, { endedAt: null, ok: null, name: 'Agent' })], agent(), win, 500, [], new Set(['toolu_P']));
+    expect(r.bars[0].state).toBe('wait');
+    expect(r.bars[0].title.startsWith('chờ subagent')).toBe(true);
+  });
+  test('call đã đóng hoặc không chờ → state bình thường', () => {
+    expect(layoutLane([call('toolu_P', MIN)], agent(), win, 500, [], new Set(['toolu_P'])).bars[0].state).toBe('ok');
+    expect(layoutLane([call('x', MIN, { endedAt: null, ok: null })], agent(), win, 500, [], new Set(['toolu_P'])).bars[0].state).toBe('running');
+  });
+  test('waitingCallIds: parentToolUseId của con chưa ended thuộc agent này', () => {
+    const kids = [
+      agent({ id: 'k1', parentId: 'a', parentToolUseId: 't1', status: 'running' }),
+      agent({ id: 'k2', parentId: 'a', parentToolUseId: 't2', status: 'ended' }),
+      agent({ id: 'k3', parentId: 'b', parentToolUseId: 't3', status: 'running' }),
+      agent({ id: 'k4', parentId: 'a', parentToolUseId: null, status: 'idle' }),
+    ];
+    expect([...waitingCallIds('a', kids)]).toEqual(['t1']);
   });
 });

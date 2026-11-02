@@ -6,6 +6,8 @@ export interface AgentInfo {
   source: Source;
   sessionId: string;
   parentId: string | null;
+  /** Subagent only: id of the parent's tool call (Agent/Task) that spawned it. */
+  parentToolUseId: string | null;
   label: string;
   role: string | null;
   model: string | null;

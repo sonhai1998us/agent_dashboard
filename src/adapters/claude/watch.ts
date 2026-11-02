@@ -3,10 +3,10 @@ import path from 'node:path';
 import type { Config } from '@/src/core/config';
 import type { AgentStatus, HubEvent } from '@/src/core/model';
 import type { Store } from '@/src/core/store';
-import { claudeCtxForPath, parseClaudeLine, type ClaudeFileCtx } from './parse';
+import { applyClaudeMeta, claudeCtxForPath, parseClaudeLine, type ClaudeFileCtx, type ClaudeSubagentMeta } from './parse';
 import { createTailCore, RESCAN_ACTIVE_MS, type Watcher, type WatcherOptions } from '../watchBase';
 
-function readMeta(file: string): { agentType?: string; description?: string } | undefined {
+function readMeta(file: string): ClaudeSubagentMeta | undefined {
   if (!/[\\/]subagents[\\/]/.test(file)) return undefined;
   try {
     const metaFile = file.replace(/\.jsonl$/i, '.meta.json');
@@ -36,6 +36,12 @@ export function createClaudeWatcher(
     match: (f) => f.toLowerCase().endsWith('.jsonl'),
     makeCtx: (f, resumed) => claudeCtxForPath(f, cfg.claudeDir, readMeta(f), { resumed }),
     parse: parseClaudeLine,
+    // meta.json may be written after the transcript: keep looking for it while it is missing
+    beforeRead: (f, c) => {
+      if (!c.metaPending) return [];
+      const meta = readMeta(f);
+      return meta ? applyClaudeMeta(c, meta) : [];
+    },
     agentId: (c) => c.agentId,
     store, onEvents,
     backfillMs: cfg.backfillHours * 3600_000,

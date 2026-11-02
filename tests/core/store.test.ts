@@ -166,3 +166,60 @@ test('calls có index theo started_at (recentCalls không quét toàn bảng)', 
   const plan = (s as any).db.prepare('EXPLAIN QUERY PLAN SELECT * FROM calls WHERE started_at >= ? ORDER BY started_at DESC, rowid DESC').all(0) as { detail: string }[];
   expect(plan.map((p) => p.detail).join(' | ')).toMatch(/USING INDEX idx_calls_started/);
 });
+
+const parentWithAgentCall = () => {
+  const s = new Store(':memory:'); s.applyEvent(agentEv);
+  s.applyEvent(callStart({ id: 'toolu_P', name: 'Agent', startedAt: 2000 }));
+  s.applyEvent({ type: 'agent', agent: { id: 'claude:s1:k1', source: 'claude', sessionId: 's1', parentId: 'claude:s1', parentToolUseId: 'toolu_P', startedAt: 2100, lastEventAt: 2100 } } as any);
+  s.applyEvent({ type: 'agent', agent: { id: 'claude:s1:k1', source: 'claude', sessionId: 's1', status: 'running', lastEventAt: 2100 } } as any);
+  return s;
+};
+
+test('subagent lưu parentToolUseId', () => {
+  const s = parentWithAgentCall();
+  expect(s.getAgent('claude:s1:k1')).toMatchObject({ parentId: 'claude:s1', parentToolUseId: 'toolu_P', status: 'running' });
+  expect(s.getAgent('claude:s1')?.parentToolUseId).toBeNull();
+});
+
+test('call Agent của cha kết thúc → subagent bị bỏ dở (không handback) chuyển ended và phát sự kiện', () => {
+  const s = parentWithAgentCall();
+  const out = s.applyEvent({ type: 'call_end', agentId: 'claude:s1', callId: 'toolu_P', endedAt: 9000, ok: false, errorPreview: 'interrupted' });
+  expect(s.getAgent('claude:s1:k1')?.status).toBe('ended');
+  expect(out).toContainEqual({ type: 'agent', agent: expect.objectContaining({ id: 'claude:s1:k1', status: 'ended' }) });
+});
+
+test('đọc lại transcript subagent sau khi call của cha đã đóng: bản ghi cũ không lật lại running, bản ghi mới hơn (resume) thì có', () => {
+  const s = parentWithAgentCall();
+  s.applyEvent({ type: 'call_end', agentId: 'claude:s1', callId: 'toolu_P', endedAt: 9000, ok: true, errorPreview: null });
+  s.applyEvent({ type: 'agent', agent: { id: 'claude:s1:k1', source: 'claude', sessionId: 's1', status: 'running', lastEventAt: 5000 } } as any);
+  expect(s.getAgent('claude:s1:k1')?.status).toBe('ended');
+  s.applyEvent({ type: 'agent', agent: { id: 'claude:s1:k1', source: 'claude', sessionId: 's1', status: 'running', lastEventAt: 9500 } } as any);
+  expect(s.getAgent('claude:s1:k1')?.status).toBe('running');
+});
+
+test('parentToolUseId biết muộn (call của cha đã đóng trước đó) → subagent ended', () => {
+  const s = new Store(':memory:'); s.applyEvent(agentEv);
+  s.applyEvent(callStart({ id: 'toolu_Q', name: 'Agent', startedAt: 2000 }));
+  s.applyEvent({ type: 'call_end', agentId: 'claude:s1', callId: 'toolu_Q', endedAt: 9000, ok: true, errorPreview: null });
+  s.applyEvent({ type: 'agent', agent: { id: 'claude:s1:k2', source: 'claude', sessionId: 's1', parentId: 'claude:s1', status: 'running', startedAt: 3000, lastEventAt: 8000 } } as any);
+  expect(s.getAgent('claude:s1:k2')?.status).toBe('running');
+  s.applyEvent({ type: 'agent', agent: { id: 'claude:s1:k2', source: 'claude', sessionId: 's1', parentToolUseId: 'toolu_Q' } } as any);
+  expect(s.getAgent('claude:s1:k2')?.status).toBe('ended');
+});
+
+test('DB cũ chưa có cột parent_tool_use_id được bổ sung khi mở', async () => {
+  const { DatabaseSync } = await import('node:sqlite');
+  const os = await import('node:os'); const fs = await import('node:fs'); const path = await import('node:path');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'acctv-mig-'));
+  const f = path.join(dir, 'old.db');
+  const db = new DatabaseSync(f);
+  db.exec(`CREATE TABLE agents (id TEXT PRIMARY KEY, source TEXT NOT NULL, session_id TEXT NOT NULL, parent_id TEXT,
+    label TEXT NOT NULL, role TEXT, model TEXT, effort TEXT, cwd TEXT, pid INTEGER, started_at INTEGER NOT NULL,
+    last_event_at INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'idle', parse_errors INTEGER NOT NULL DEFAULT 0)`);
+  db.close();
+  const s = new Store(f);
+  s.applyEvent({ type: 'agent', agent: { id: 'claude:x:k', source: 'claude', sessionId: 'x', parentToolUseId: 'toolu_Z', startedAt: 1, lastEventAt: 1 } } as any);
+  expect(s.getAgent('claude:x:k')?.parentToolUseId).toBe('toolu_Z');
+  s.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+});

@@ -226,3 +226,18 @@ describe('cwd đến muộn', () => {
     expect(b.agent).not.toHaveProperty('label');
   });
 });
+
+describe('subagent: toolUseId từ meta', () => {
+  test('meta.toolUseId → parentToolUseId trong sự kiện giới thiệu agent', () => {
+    const ctx = claudeCtxForPath(subPath, CD, { agentType: 'office-dev', description: 'WP-1', toolUseId: 'toolu_X' });
+    expect(ctx.parentToolUseId).toBe('toolu_X');
+    const ev = parseClaudeLine(fx('sub.jsonl')[0], ctx);
+    expect((ev[0] as any).agent).toMatchObject({ parentId: 'claude:sess-main', parentToolUseId: 'toolu_X' });
+  });
+  test('trạng thái subagent kèm lastEventAt = timestamp của bản ghi', () => {
+    const ctx = claudeCtxForPath(subPath, CD);
+    const ev = parseClaudeLine(JSON.stringify({ type: 'user', timestamp: '2026-11-02T10:00:05.000Z', message: { content: 'hi' } }), ctx);
+    const st = ev.find((e) => e.type === 'agent' && (e.agent as any).status) as any;
+    expect(st.agent).toMatchObject({ status: 'running', lastEventAt: Date.parse('2026-11-02T10:00:05.000Z') });
+  });
+});
