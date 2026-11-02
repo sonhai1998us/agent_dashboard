@@ -144,3 +144,8 @@ test('transaction: commit gộp ghi, lỗi thì rollback', () => {
   expect(() => s.transaction(() => { s.setOffset('c', 3, 3); throw new Error('boom'); })).toThrow('boom');
   expect(s.getOffset('c')).toBeUndefined();
 });
+
+test('PRAGMA synchronous = NORMAL (1)', () => {
+  const s = new Store(':memory:');
+  expect((s as any).db.prepare('PRAGMA synchronous').get()).toEqual({ synchronous: 1 });
+});

@@ -36,6 +36,7 @@ export function createClaudeWatcher(
     match: (f) => f.toLowerCase().endsWith('.jsonl'),
     makeCtx: (f, resumed) => claudeCtxForPath(f, cfg.claudeDir, readMeta(f), { resumed }),
     parse: parseClaudeLine,
+    agentId: (c) => c.agentId,
     store, onEvents,
     backfillMs: cfg.backfillHours * 3600_000,
     options,
@@ -45,6 +46,7 @@ export function createClaudeWatcher(
   const warned = new Set<string>();
 
   function liveness(): void {
+    void core.ensureWatching();
     try {
       const dir = path.join(cfg.claudeDir, 'sessions');
       let names: string[] = [];

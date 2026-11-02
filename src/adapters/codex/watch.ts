@@ -18,6 +18,7 @@ export function createCodexWatcher(
     match: (f) => /\.jsonl(\.zst)?$/i.test(f),
     makeCtx: (f, resumed) => codexCtxForPath(f, { resumed }),
     parse: parseCodexLine,
+    agentId: (c) => c.agentId,
     store, onEvents,
     backfillMs: cfg.backfillHours * 3600_000,
     options,
@@ -27,6 +28,7 @@ export function createCodexWatcher(
   let timer: NodeJS.Timeout | null = null;
 
   function liveness(): void {
+    void core.ensureWatching();
     try {
       const now = Date.now();
       const out: HubEvent[] = [];

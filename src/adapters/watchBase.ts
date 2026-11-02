@@ -3,7 +3,7 @@ import path from 'node:path';
 import chokidar from 'chokidar';
 import type { HubEvent, NormalizedEvent } from '@/src/core/model';
 import type { Store } from '@/src/core/store';
-import { readNewLines } from './tail';
+import { tailChunks, CHUNK_BYTES } from './tail';
 
 export interface Watcher {
   start(): Promise<void>;
@@ -15,6 +15,8 @@ export interface WatcherOptions {
   polling?: boolean;
   /** Liveness check period in ms (default 5000). */
   livenessMs?: number;
+  /** Max bytes read per chunk (default 2MB). */
+  chunkBytes?: number;
 }
 
 export interface TailWatcherSpec<Ctx> {
@@ -26,6 +28,8 @@ export interface TailWatcherSpec<Ctx> {
   onEvents(evs: HubEvent[]): void;
   backfillMs: number;
   options?: WatcherOptions;
+  /** Agent id of a ctx when known (used to count skipped lines as parse errors). */
+  agentId?(ctx: Ctx): string | null;
   /** Called after each file read with the file and its ctx. */
   afterRead?(file: string, ctx: Ctx): void;
 }
@@ -34,6 +38,8 @@ export interface TailCore {
   start(): Promise<void>;
   stop(): Promise<void>;
   enqueue(file: string): Promise<void>;
+  /** Starts watching the root (and backfills it) once it exists. Idempotent. */
+  ensureWatching(): Promise<void>;
 }
 
 function walk(dir: string, out: string[]): void {
@@ -57,10 +63,10 @@ export function createTailCore<Ctx>(spec: TailWatcherSpec<Ctx>): TailCore {
   let fsw: ReturnType<typeof chokidar.watch> | null = null;
   let stopped = false;
 
-  const warnOnce = (file: string, err: unknown) => {
+  const warnOnce = (file: string, err: unknown, where = '') => {
     if (warned.has(file)) return;
     warned.add(file);
-    console.warn(`[acctv] cannot read ${file}: ${err instanceof Error ? err.message : String(err)}`);
+    console.warn(`[acctv] cannot read ${file}${where ? ' (' + where + ')' : ''}: ${err instanceof Error ? err.message : String(err)}`);
   };
 
   async function readFile(file: string): Promise<void> {
@@ -73,18 +79,30 @@ export function createTailCore<Ctx>(spec: TailWatcherSpec<Ctx>): TailCore {
         ctx = spec.makeCtx(file, resumed);
         ctxs.set(file, ctx);
       }
-      const res = await readNewLines(file, saved ?? { offset: 0, lines: 0 });
-      if (stopped) return;
-      const out: HubEvent[] = [];
       const c = ctx;
-      spec.store.transaction(() => {
-        for (const line of res.lines) {
-          for (const ev of spec.parse(line, c)) out.push(...spec.store.applyEvent(ev));
-        }
-        spec.store.setOffset(file, res.offset, res.lineCount);
-      });
+      let first = true;
+      for await (const chunk of tailChunks(file, saved ?? { offset: 0, lines: 0 }, spec.options?.chunkBytes ?? CHUNK_BYTES)) {
+        if (stopped) return;
+        if (!first) await new Promise<void>((r) => setImmediate(r));
+        first = false;
+        const out: HubEvent[] = [];
+        spec.store.transaction(() => {
+          for (const line of chunk.lines) {
+            try {
+              for (const ev of spec.parse(line, c)) out.push(...spec.store.applyEvent(ev));
+            } catch (err) {
+              warnOnce(file, err, `line near byte ${chunk.startOffset}`);
+              const id = spec.agentId?.(c);
+              if (id) {
+                try { out.push(...spec.store.applyEvent({ type: 'parse_error', agentId: id })); } catch { /* ignore */ }
+              }
+            }
+          }
+          spec.store.setOffset(file, chunk.offset, chunk.lineCount);
+        });
+        if (out.length) spec.onEvents(out);
+      }
       spec.afterRead?.(file, ctx);
-      if (out.length) spec.onEvents(out);
     } catch (err) {
       warnOnce(file, err);
     }
@@ -118,31 +136,49 @@ export function createTailCore<Ctx>(spec: TailWatcherSpec<Ctx>): TailCore {
     for (const { f } of recent) await enqueue(f);
   }
 
+  let attaching: Promise<void> | null = null;
+
+  async function attach(): Promise<void> {
+    const polling = spec.options?.polling ?? false;
+    const w = chokidar.watch(spec.root, {
+      ignoreInitial: true,
+      awaitWriteFinish: false,
+      usePolling: polling,
+      interval: polling ? 50 : undefined,
+      ignored: (p: string, stats?: fs.Stats) => !!stats?.isFile() && !spec.match(p),
+    });
+    fsw = w;
+    const onFile = (f: string) => {
+      if (spec.match(f)) void enqueue(f);
+    };
+    w.on('add', onFile).on('change', onFile);
+    w.on('error', (err) => console.warn(`[acctv] watcher error: ${err instanceof Error ? err.message : String(err)}`));
+    await new Promise<void>((resolve) => {
+      w.once('ready', () => resolve());
+    });
+    if (stopped) return;
+    await backfill(); // files that predate the watcher (ignoreInitial skips them)
+  }
+
+  function ensureWatching(): Promise<void> {
+    if (stopped || fsw || attaching) return attaching ?? Promise.resolve();
+    if (!fs.existsSync(spec.root)) return Promise.resolve();
+    attaching = attach()
+      .catch((err) => console.warn(`[acctv] cannot watch ${spec.root}: ${err instanceof Error ? err.message : String(err)}`))
+      .finally(() => { attaching = null; });
+    return attaching;
+  }
+
   return {
     enqueue,
+    ensureWatching,
     async start() {
       stopped = false;
-      await backfill();
-      if (!fs.existsSync(spec.root)) return;
-      const polling = spec.options?.polling ?? false;
-      fsw = chokidar.watch(spec.root, {
-        ignoreInitial: true,
-        awaitWriteFinish: false,
-        usePolling: polling,
-        interval: polling ? 50 : undefined,
-        ignored: (p: string, stats?: fs.Stats) => !!stats?.isFile() && !spec.match(p),
-      });
-      const onFile = (f: string) => {
-        if (spec.match(f)) void enqueue(f);
-      };
-      fsw.on('add', onFile).on('change', onFile);
-      fsw.on('error', (err) => console.warn(`[acctv] watcher error: ${err instanceof Error ? err.message : String(err)}`));
-      await new Promise<void>((resolve) => {
-        fsw!.once('ready', () => resolve());
-      });
+      await ensureWatching();
     },
     async stop() {
       stopped = true;
+      await attaching;
       const w = fsw;
       fsw = null;
       if (w) await w.close();

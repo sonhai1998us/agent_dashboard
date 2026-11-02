@@ -10,7 +10,7 @@ vi.mock('node:fs', async (orig) => {
   return { ...actual, readFileSync, default: { ...actual.default, readFileSync } };
 });
 
-import { readNewLines } from '@/src/adapters/tail';
+import { readNewLines, tailChunks } from '@/src/adapters/tail';
 
 let dir: string;
 beforeAll(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'acctv-tail-')); });
@@ -72,4 +72,21 @@ test('.jsonl.zst: chỉ trả các dòng mới sau from.lines', async () => {
   expect(r2.lines).toEqual(['l3', 'l4']);
   expect(r2.lineCount).toBe(4);
   expect(r2.offset).toBe(fs.statSync(f).size);
+});
+
+test('tailChunks: file lớn hơn một chunk được đọc đủ, offset từng chunk tăng dần, dòng vắt ngang chunk không bị mất', async () => {
+  const f = path.join(dir, 'chunked.jsonl');
+  const expected = Array.from({ length: 400 }, (_, i) => JSON.stringify({ i, t: 'tiếng Việt ' + 'y'.repeat(i % 37) }));
+  fs.writeFileSync(f, expected.join('\n') + '\n{"partial":');
+  const got: string[] = [];
+  const offsets: number[] = [];
+  for await (const c of tailChunks(f, { offset: 0, lines: 0 }, 1000)) {
+    got.push(...c.lines);
+    offsets.push(c.offset);
+  }
+  expect(got).toEqual(expected);
+  expect(offsets.length).toBeGreaterThan(5);
+  expect(offsets[0]).toBeLessThan(offsets[offsets.length - 1]);
+  expect([...offsets].sort((a, b) => a - b)).toEqual(offsets);
+  expect(offsets[offsets.length - 1]).toBe(Buffer.byteLength(expected.join('\n') + '\n'));
 });

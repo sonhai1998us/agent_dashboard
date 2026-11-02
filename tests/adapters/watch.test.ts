@@ -161,10 +161,10 @@ test('Codex: đọc .jsonl.zst và .jsonl thường; trạng thái idle khi turn
   expect(a).toBeTruthy();
   expect(b).toBeTruthy();
   expect(store.listCalls(a!.id).length).toBeGreaterThan(0);
-  expect(['running', 'idle']).toContain(a!.status);
+  expect(a!.status).toBe('idle');
 });
 
-test('file hỏng: ghi cảnh báo một lần và watcher vẫn chạy tiếp', async () => {
+test('file hỏng: cảnh báo một lần, sau đó ghi dữ liệu hợp lệ vào cùng file thì được đọc lại', async () => {
   const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
   const dir = path.join(cfg.codexDir, 'sessions', '2026', '11', '02');
   const bad = path.join(dir, 'rollout-2026-11-02T09-18-10-019e5949-0000-7000-8000-000000000003.jsonl.zst');
@@ -172,10 +172,98 @@ test('file hỏng: ghi cảnh báo một lần và watcher vẫn chạy tiếp',
   const w = createCodexWatcher(cfg, store, () => {}, { polling: true, livenessMs: 100000 });
   closers.push(() => w.stop());
   await w.start();
-  fs.appendFileSync(bad, 'more');
-  await new Promise((r) => setTimeout(r, 300));
   expect(warn).toHaveBeenCalledTimes(1);
-  const good = path.join(dir, 'rollout-2026-11-02T09-18-10-019e5947-01fe-7393-b890-65ac89a98961.jsonl');
-  fs.writeFileSync(good, fs.readFileSync('tests/fixtures/codex/rollout.jsonl'));
+  fs.appendFileSync(bad, 'more'); // still invalid: retried, but no second warning
+  await new Promise((r) => setTimeout(r, 200));
+  expect(warn).toHaveBeenCalledTimes(1);
+  fs.writeFileSync(bad, zlib.zstdCompressSync(fs.readFileSync('tests/fixtures/codex/rollout.jsonl')));
   await waitFor(() => store.getAgent('codex:019e5947-01fe-7393-b890-65ac89a98961') !== undefined);
+  expect(warn).toHaveBeenCalledTimes(1);
+});
+
+test('root chưa tồn tại lúc start: tạo sau đó vẫn được theo dõi và đọc file mới; không tạo gì trong claudeDir', async () => {
+  fs.rmSync(path.join(cfg.claudeDir, 'projects'), { recursive: true, force: true });
+  const w = createClaudeWatcher(cfg, store, () => {}, { polling: true, livenessMs: 100 });
+  closers.push(() => w.stop());
+  await w.start();
+  expect(fs.existsSync(path.join(cfg.claudeDir, 'projects'))).toBe(false);
+  fs.mkdirSync(path.dirname(mainFile()), { recursive: true });
+  await new Promise((r) => setTimeout(r, 350)); // a liveness tick attaches the watcher
+  fs.writeFileSync(mainFile(), fxClaude('main.jsonl'));
+  await waitFor(() => store.getAgent('claude:sess-main') !== undefined && store.listCalls('claude:sess-main').length > 0);
+});
+
+test('file lớn nhiều chunk: offset được lưu sau chunk đầu và cuối cùng bằng kích thước file', async () => {
+  const lines = Array.from({ length: 1500 }, (_, i) => JSON.stringify({ type: 'user', timestamp: new Date(Date.now() - 1000 + i).toISOString(), sessionId: 'sess-main', cwd: 'D:/x', message: { role: 'user', content: 'dòng ' + i + ' ' + 'z'.repeat(40) } }));
+  fs.writeFileSync(mainFile(), lines.join('\n') + '\n');
+  const size = fs.statSync(mainFile()).size;
+  const seen: number[] = [];
+  const w = createClaudeWatcher(cfg, store, () => seen.push(store.getOffset(mainFile())?.offset ?? -1), { polling: true, livenessMs: 100000, chunkBytes: 20000 });
+  closers.push(() => w.stop());
+  await w.start();
+  expect(seen.length).toBeGreaterThan(2);
+  expect(seen[0]).toBeGreaterThan(0);
+  expect(seen[0]).toBeLessThan(size);
+  expect(store.getOffset(mainFile())).toEqual({ offset: size, lines: 1500 });
+});
+
+test('dòng độc: applyEvent ném một lần → bỏ qua dòng đó, các dòng sau vẫn được đọc, offset tới cuối, cảnh báo một lần', async () => {
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  const ts = (i: number) => new Date(Date.now() - 10000 + i).toISOString();
+  const rec = (i: number) => JSON.stringify({ type: 'user', timestamp: ts(i), sessionId: 'sess-main', cwd: 'D:/x', message: { role: 'user', content: 'm' + i } });
+  fs.writeFileSync(mainFile(), [rec(1), rec(2), rec(3), rec(4)].join('\n') + '\n');
+  const orig = store.applyEvent.bind(store);
+  let calls = 0;
+  vi.spyOn(store, 'applyEvent').mockImplementation((e) => {
+    calls++;
+    if (calls === 2) throw new Error('poison');
+    return orig(e);
+  });
+  const w = claudeWatcher();
+  await w.start();
+  expect(store.getOffset(mainFile())).toEqual({ offset: fs.statSync(mainFile()).size, lines: 4 });
+  expect(warn).toHaveBeenCalledTimes(1);
+  expect(String(warn.mock.calls[0][0])).toContain('sess-main.jsonl');
+  expect(String(warn.mock.calls[0][0])).toContain('byte');
+  expect(calls).toBeGreaterThan(3);
+  expect(store.getAgent('claude:sess-main')).toBeTruthy();
+});
+
+test('Codex: file không ghi quá 30 phút → ended', async () => {
+  const dir = path.join(cfg.codexDir, 'sessions', '2026', '11', '02');
+  const f = path.join(dir, 'rollout-2026-11-02T09-18-10-019e5947-01fe-7393-b890-65ac89a98961.jsonl');
+  fs.writeFileSync(f, fs.readFileSync('tests/fixtures/codex/rollout.jsonl'));
+  const old = new Date(Date.now() - 31 * 60_000);
+  fs.utimesSync(f, old, old);
+  const w = createCodexWatcher(cfg, store, () => {}, { polling: true, livenessMs: 100000 });
+  closers.push(() => w.stop());
+  await w.start();
+  expect(store.getAgent('codex:019e5947-01fe-7393-b890-65ac89a98961')?.status).toBe('ended');
+});
+
+test('Claude: subagent chỉ running nếu lastEventAt trong 10 phút gần nhất', async () => {
+  const line = (ageMs: number) => JSON.stringify({ type: 'user', timestamp: new Date(Date.now() - ageMs).toISOString(), sessionId: 'sess-main', cwd: 'D:/x', message: { role: 'user', content: 'hi' } }) + '\n';
+  fs.writeFileSync(mainFile(), line(1000));
+  const subDir = path.join(cfg.claudeDir, 'projects', 'proj', 'sess-main', 'subagents');
+  fs.mkdirSync(subDir, { recursive: true });
+  fs.writeFileSync(path.join(subDir, 'agent-fresh.jsonl'), line(60_000));
+  fs.writeFileSync(path.join(subDir, 'agent-stale.jsonl'), line(20 * 60_000));
+  fs.writeFileSync(path.join(cfg.claudeDir, 'sessions', `${process.pid}.json`), JSON.stringify({ pid: process.pid, sessionId: 'sess-main' }));
+  const w = claudeWatcher();
+  await w.start();
+  expect(store.getAgent('claude:sess-main')?.status).toBe('running');
+  expect(store.getAgent('claude:sess-main:fresh')?.status).toBe('running');
+  expect(store.getAgent('claude:sess-main:stale')?.status).toBe('ended');
+});
+
+test('stop() dọn timer và handle của watcher', async () => {
+  const timeouts = () => process.getActiveResourcesInfo().filter((t) => t === 'Timeout').length;
+  const before = timeouts();
+  const w = createClaudeWatcher(cfg, store, () => {}, { polling: true, livenessMs: 50 });
+  const w2 = createCodexWatcher(cfg, store, () => {}, { polling: true, livenessMs: 50 });
+  await w.start(); await w2.start();
+  expect(timeouts()).toBeGreaterThan(before);
+  await w.stop(); await w2.stop();
+  await new Promise((r) => setTimeout(r, 150));
+  expect(timeouts()).toBeLessThanOrEqual(before);
 });
