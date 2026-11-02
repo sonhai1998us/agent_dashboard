@@ -9,6 +9,7 @@ export interface ClaudeFileCtx {
   role: string | null;
   label: string | null;
   lastTs: number | null;
+  resumed: boolean;
 }
 
 const norm = (p: string) => p.replace(/\\/g, '/');
@@ -17,7 +18,9 @@ export function claudeCtxForPath(
   file: string,
   _claudeDir: string,
   meta?: { agentType?: string; description?: string },
+  opts?: { resumed?: boolean },
 ): ClaudeFileCtx {
+  const resumed = opts?.resumed ?? false;
   const parts = norm(file).split('/').filter(Boolean);
   const base = parts[parts.length - 1] ?? '';
   const stem = base.replace(/\.jsonl$/i, '');
@@ -32,9 +35,10 @@ export function claudeCtxForPath(
       role: meta?.agentType ?? null,
       label: meta?.description ?? null,
       lastTs: null,
+      resumed,
     };
   }
-  return { agentId: `claude:${stem}`, sessionId: stem, parentId: null, role: null, label: meta?.description ?? null, lastTs: null };
+  return { agentId: `claude:${stem}`, sessionId: stem, parentId: null, role: null, label: meta?.description ?? null, lastTs: null, resumed };
 }
 
 function textOf(content: unknown): string {
@@ -76,8 +80,9 @@ export function parseClaudeLine(line: string, ctx: ClaudeFileCtx): NormalizedEve
   if (ts !== null && prevTs === null) {
     const cwd = typeof rec.cwd === 'string' ? rec.cwd : null;
     const cwdBase = cwd ? path.win32.basename(norm(cwd)) : '';
-    const label = ctx.label ?? (cwdBase || null);
-    const agent: any = { ...base, startedAt: ts, parentId: ctx.parentId };
+    const label = ctx.label ?? (ctx.resumed ? null : cwdBase || null);
+    const agent: any = { ...base, parentId: ctx.parentId };
+    if (!ctx.resumed) agent.startedAt = ts;
     if (cwd) agent.cwd = cwd;
     if (label) agent.label = label;
     if (ctx.role) agent.role = ctx.role;

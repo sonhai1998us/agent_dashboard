@@ -101,4 +101,43 @@ describe('claude parser', () => {
     parseClaudeLine('{"type":"weird-new-type"}', ctx);
     expect(ctx.lastTs).toBe(Date.parse('2026-11-02T10:00:20.000Z'));
   });
+
+  test('resumed: không có startedAt và không đặt label theo cwd', () => {
+    const ctx = claudeCtxForPath(mainPath, CD, undefined, { resumed: true });
+    const ev = parseClaudeLine(fx('main.jsonl')[4], ctx);
+    const a = (ev[0] as any).agent;
+    expect(a.id).toBe('claude:sess-main');
+    expect(a).not.toHaveProperty('startedAt');
+    expect(a).not.toHaveProperty('label');
+    expect(a.cwd).toBe('D:\\Work\\demo-app');
+    const t = parseClaudeLine('{"type":"custom-title","customTitle":"Tieu de"}', ctx);
+    expect((t[0] as any).agent.label).toBe('Tieu de');
+  });
+
+  test('message.id lặp qua nhiều dòng → cùng id llm được phát lại', () => {
+    const ctx = claudeCtxForPath(mainPath, CD);
+    const mk = (ts: string, out: number) => JSON.stringify({ type: 'assistant', timestamp: ts, message: { id: 'msg_dup', model: 'm', usage: { input_tokens: 1, output_tokens: out }, content: [] } });
+    const ev = [...parseClaudeLine(mk('2026-11-02T10:00:00.000Z', 5), ctx), ...parseClaudeLine(mk('2026-11-02T10:00:01.000Z', 9), ctx)];
+    const starts = ev.filter((e) => e.type === 'call_start') as any[];
+    expect(starts.map((s) => s.call.id)).toEqual(['msg_dup', 'msg_dup']);
+    expect(starts.map((s) => s.call.tokensOut)).toEqual([5, 9]);
+  });
+
+  test('errorPreview cắt ở 200 ký tự', () => {
+    const ctx = claudeCtxForPath(mainPath, CD);
+    const l = JSON.stringify({ type: 'user', timestamp: '2026-11-02T10:00:00.000Z', message: { content: [{ type: 'tool_result', tool_use_id: 't1', content: 'x'.repeat(500), is_error: true }] } });
+    const end = parseClaudeLine(l, ctx).find((e) => e.type === 'call_end') as any;
+    expect(end.errorPreview).toHaveLength(200);
+  });
+
+  test('subagent: llm tokens và label từ meta.description', () => {
+    const ctx = claudeCtxForPath(subPath, CD, { agentType: 'office-dev', description: 'WP-1' });
+    const ev: NormalizedEvent[] = [];
+    for (const l of fx('sub.jsonl')) ev.push(...parseClaudeLine(l, ctx));
+    expect(ctx.label).toBe('WP-1');
+    const llm = ev.find((e) => e.type === 'call_start' && e.call.kind === 'llm') as any;
+    expect(llm.call.tokensIn).toBe(5 + 10 + 100);
+    expect(llm.call.tokensOut).toBe(7);
+    expect(llm.call.agentId).toBe('claude:sess-main:ab12');
+  });
 });
