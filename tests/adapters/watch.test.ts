@@ -48,7 +48,7 @@ async function waitFor(fn: () => boolean, ms = 5000): Promise<void> {
 }
 
 function claudeWatcher(on: (e: HubEvent[]) => void = () => {}, s = store) {
-  const w = createClaudeWatcher(cfg, s, on, { polling: true, livenessMs: 100000 });
+  const w = createClaudeWatcher(cfg, s, on, { livenessMs: 100000 });
   closers.push(() => w.stop());
   return w;
 }
@@ -139,7 +139,7 @@ test('watcher không bao giờ ghi vào claudeDir/codexDir', async () => {
   };
   const before = snap();
   const w1 = claudeWatcher();
-  const w2 = createCodexWatcher(cfg, store, () => {}, { polling: true, livenessMs: 100000 });
+  const w2 = createCodexWatcher(cfg, store, () => {}, { livenessMs: 100000 });
   closers.push(() => w2.stop());
   await w1.start(); await w1.backfilled(); await w2.start(); await w2.backfilled();
   expect(store.getAgent('claude:sess-main')).toBeTruthy();
@@ -153,7 +153,7 @@ test('Codex: đọc .jsonl.zst và .jsonl thường; trạng thái idle khi turn
   const raw = fs.readFileSync('tests/fixtures/codex/rollout.jsonl');
   fs.writeFileSync(path.join(dir, 'rollout-2026-11-02T09-18-10-019e5947-01fe-7393-b890-65ac89a98961.jsonl.zst'), zlib.zstdCompressSync(raw));
   fs.writeFileSync(path.join(dir, 'rollout-2026-11-02T09-18-10-019e5948-0000-7000-8000-000000000002.jsonl'), raw.toString().replaceAll('019e5947-01fe-7393-b890-65ac89a98961', '019e5948-0000-7000-8000-000000000002'));
-  const w = createCodexWatcher(cfg, store, () => {}, { polling: true, livenessMs: 100000 });
+  const w = createCodexWatcher(cfg, store, () => {}, { livenessMs: 100000 });
   closers.push(() => w.stop());
   await w.start(); await w.backfilled();
   const a = store.getAgent('codex:019e5947-01fe-7393-b890-65ac89a98961');
@@ -169,7 +169,7 @@ test('file hỏng: cảnh báo một lần, sau đó ghi dữ liệu hợp lệ 
   const dir = path.join(cfg.codexDir, 'sessions', '2026', '11', '02');
   const bad = path.join(dir, 'rollout-2026-11-02T09-18-10-019e5949-0000-7000-8000-000000000003.jsonl.zst');
   fs.writeFileSync(bad, 'not zstd at all');
-  const w = createCodexWatcher(cfg, store, () => {}, { polling: true, livenessMs: 100000 });
+  const w = createCodexWatcher(cfg, store, () => {}, { livenessMs: 100000 });
   closers.push(() => w.stop());
   await w.start(); await w.backfilled();
   expect(warn).toHaveBeenCalledTimes(1);
@@ -183,7 +183,7 @@ test('file hỏng: cảnh báo một lần, sau đó ghi dữ liệu hợp lệ 
 
 test('root chưa tồn tại lúc start: tạo sau đó vẫn được theo dõi và đọc file mới; không tạo gì trong claudeDir', async () => {
   fs.rmSync(path.join(cfg.claudeDir, 'projects'), { recursive: true, force: true });
-  const w = createClaudeWatcher(cfg, store, () => {}, { polling: true, livenessMs: 100 });
+  const w = createClaudeWatcher(cfg, store, () => {}, { livenessMs: 100 });
   closers.push(() => w.stop());
   await w.start(); await w.backfilled();
   expect(fs.existsSync(path.join(cfg.claudeDir, 'projects'))).toBe(false);
@@ -198,7 +198,7 @@ test('file lớn nhiều chunk: offset được lưu sau chunk đầu và cuối
   fs.writeFileSync(mainFile(), lines.join('\n') + '\n');
   const size = fs.statSync(mainFile()).size;
   const seen: number[] = [];
-  const w = createClaudeWatcher(cfg, store, () => seen.push(store.getOffset(mainFile())?.offset ?? -1), { polling: true, livenessMs: 100000, chunkBytes: 20000 });
+  const w = createClaudeWatcher(cfg, store, () => seen.push(store.getOffset(mainFile())?.offset ?? -1), { livenessMs: 100000, chunkBytes: 20000 });
   closers.push(() => w.stop());
   await w.start(); await w.backfilled();
   expect(seen.length).toBeGreaterThan(2);
@@ -235,7 +235,7 @@ test('Codex: file không ghi quá 30 phút → ended', async () => {
   fs.writeFileSync(f, fs.readFileSync('tests/fixtures/codex/rollout.jsonl'));
   const old = new Date(Date.now() - 31 * 60_000);
   fs.utimesSync(f, old, old);
-  const w = createCodexWatcher(cfg, store, () => {}, { polling: true, livenessMs: 100000 });
+  const w = createCodexWatcher(cfg, store, () => {}, { livenessMs: 100000 });
   closers.push(() => w.stop());
   await w.start(); await w.backfilled();
   expect(store.getAgent('codex:019e5947-01fe-7393-b890-65ac89a98961')?.status).toBe('ended');
@@ -299,7 +299,7 @@ test('Claude: cha chết → các subagent chưa ended bị hạ xuống ended',
   fs.mkdirSync(subDir(), { recursive: true });
   fs.writeFileSync(path.join(subDir(), 'agent-resumed.jsonl'), userRec() + asstRec('end_turn') + userRec());
   sessionFile(process.pid, 'busy');
-  const w = createClaudeWatcher(cfg, store, () => {}, { polling: true, livenessMs: 100 });
+  const w = createClaudeWatcher(cfg, store, () => {}, { livenessMs: 100 });
   closers.push(() => w.stop());
   await w.start(); await w.backfilled();
   expect(store.getAgent('claude:sess-main:resumed')?.status).toBe('running');
@@ -311,8 +311,8 @@ test('Claude: cha chết → các subagent chưa ended bị hạ xuống ended',
 test('stop() dọn timer và handle của watcher', async () => {
   const timeouts = () => process.getActiveResourcesInfo().filter((t) => t === 'Timeout').length;
   const before = timeouts();
-  const w = createClaudeWatcher(cfg, store, () => {}, { polling: true, livenessMs: 50 });
-  const w2 = createCodexWatcher(cfg, store, () => {}, { polling: true, livenessMs: 50 });
+  const w = createClaudeWatcher(cfg, store, () => {}, { livenessMs: 50 });
+  const w2 = createCodexWatcher(cfg, store, () => {}, { livenessMs: 50 });
   await w.start(); await w.backfilled(); await w2.start(); await w2.backfilled();
   expect(timeouts()).toBeGreaterThan(before);
   await w.stop(); await w2.stop();
@@ -333,7 +333,7 @@ test('Codex: turn đang mở, 6 phút không ghi → vẫn running và long_tool
     + codexRec(t0 + 2, 'response_item', { type: 'function_call', name: 'shell_command', arguments: '{"command":"npm run build"}', call_id: 'call_long' }));
   const old = new Date(t0 + 2);
   fs.utimesSync(codexFile(uuid), old, old);
-  const w = createCodexWatcher(cfg, store, () => {}, { polling: true, livenessMs: 100000 });
+  const w = createCodexWatcher(cfg, store, () => {}, { livenessMs: 100000 });
   closers.push(() => w.stop());
   await w.start(); await w.backfilled();
   expect(store.getAgent(`codex:${uuid}`)?.status).toBe('running');
@@ -345,7 +345,7 @@ test('Codex: turn đã đóng → idle dù file vừa ghi', async () => {
   const uuid = '019e5951-0000-7000-8000-000000000011';
   const t0 = Date.now() - 1000;
   fs.writeFileSync(codexFile(uuid), codexRec(t0, 'session_meta', { id: uuid }) + codexRec(t0 + 1, 'event_msg', { type: 'task_started' }) + codexRec(t0 + 2, 'event_msg', { type: 'task_complete' }));
-  const w = createCodexWatcher(cfg, store, () => {}, { polling: true, livenessMs: 100000 });
+  const w = createCodexWatcher(cfg, store, () => {}, { livenessMs: 100000 });
   closers.push(() => w.stop());
   await w.start(); await w.backfilled();
   expect(store.getAgent(`codex:${uuid}`)?.status).toBe('idle');
@@ -358,7 +358,7 @@ test('Codex: ctx resumed (chưa thấy task_*) → running nếu file ghi trong 
   for (const u of [fresh, stale]) {
     fs.writeFileSync(codexFile(u), codexRec(t0, 'session_meta', { id: u }) + codexRec(t0 + 1, 'event_msg', { type: 'task_started' }) + codexRec(t0 + 2, 'event_msg', { type: 'task_complete' }));
   }
-  const w1 = createCodexWatcher(cfg, store, () => {}, { polling: true, livenessMs: 100000 });
+  const w1 = createCodexWatcher(cfg, store, () => {}, { livenessMs: 100000 });
   await w1.start(); await w1.backfilled();
   await w1.stop();
   expect(store.getAgent(`codex:${fresh}`)?.status).toBe('idle');
@@ -366,9 +366,69 @@ test('Codex: ctx resumed (chưa thấy task_*) → running nếu file ghi trong 
   for (const u of [fresh, stale]) fs.appendFileSync(codexFile(u), codexRec(Date.now() - 1000, 'response_item', { type: 'function_call', name: 'shell_command', arguments: '{}', call_id: 'c-' + u }));
   const old = new Date(Date.now() - 5 * 60_000);
   fs.utimesSync(codexFile(stale), old, old);
-  const w2 = createCodexWatcher(cfg, store, () => {}, { polling: true, livenessMs: 100000 });
+  const w2 = createCodexWatcher(cfg, store, () => {}, { livenessMs: 100000 });
   closers.push(() => w2.stop());
   await w2.start(); await w2.backfilled();
   expect(store.getAgent(`codex:${fresh}`)?.status).toBe('running');
   expect(store.getAgent(`codex:${stale}`)?.status).toBe('idle');
+});
+
+test('đọc lỗi → thử lại theo backoff, không cần sự kiện fs mới', async () => {
+  vi.spyOn(console, 'warn').mockImplementation(() => {});
+  fs.writeFileSync(mainFile(), fxClaude('main.jsonl'));
+  const orig = store.getOffset.bind(store);
+  let fails = 2;
+  vi.spyOn(store, 'getOffset').mockImplementation((f) => {
+    if (fails > 0) { fails--; throw new Error('EBUSY: resource busy or locked'); }
+    return orig(f);
+  });
+  const w = createClaudeWatcher(cfg, store, () => {}, { livenessMs: 100000, retryMs: [30, 60, 90] });
+  closers.push(() => w.stop());
+  await w.start(); await w.backfilled();
+  expect(store.getAgent('claude:sess-main')).toBeUndefined();
+  await waitFor(() => store.getAgent('claude:sess-main') !== undefined && store.listCalls('claude:sess-main').length > 0);
+});
+
+test('đọc lỗi mãi → chỉ thử lại tối đa 3 lần', async () => {
+  vi.spyOn(console, 'warn').mockImplementation(() => {});
+  fs.writeFileSync(mainFile(), fxClaude('main.jsonl'));
+  const orig = store.getOffset.bind(store);
+  let reads = 0;
+  vi.spyOn(store, 'getOffset').mockImplementation((f) => {
+    if (f === mainFile()) { reads++; throw new Error('EBUSY'); }
+    return orig(f);
+  });
+  const w = createClaudeWatcher(cfg, store, () => {}, { livenessMs: 100000, retryMs: [10, 10, 10] });
+  closers.push(() => w.stop());
+  await w.start(); await w.backfilled();
+  await new Promise((r) => setTimeout(r, 300));
+  expect(reads).toBe(4); // lần đầu + 3 lần thử lại
+});
+
+test('lưới an toàn: mỗi tick liveness, file của agent hoạt động trong 10 phút có size > offset đã lưu thì được đọc lại', async () => {
+  const now = Date.now();
+  const rec = (i: number) => JSON.stringify({ type: 'user', timestamp: new Date(now - 5000 + i).toISOString(), sessionId: 'sess-main', cwd: 'D:/x', message: { role: 'user', content: 'm' + i } }) + '\n';
+  fs.writeFileSync(mainFile(), rec(1) + rec(2) + rec(3));
+  const w = createClaudeWatcher(cfg, store, () => {}, { livenessMs: 80 });
+  closers.push(() => w.stop());
+  await w.start(); await w.backfilled();
+  const size = fs.statSync(mainFile()).size;
+  expect(store.getOffset(mainFile())).toEqual({ offset: size, lines: 3 });
+  // giả lập sự kiện fs bị rơi: offset đã lưu tụt lại phía sau nội dung file
+  store.setOffset(mainFile(), Buffer.byteLength(rec(1)), 1);
+  await waitFor(() => store.getOffset(mainFile())?.offset === size);
+  expect(store.getOffset(mainFile())?.lines).toBe(3);
+});
+
+test('file mới tạo ngay sau start luôn được đọc (10 lần, mỗi lần thư mục mới)', async () => {
+  // Hồi quy: chế độ polling dựa vào mtime của thư mục, NTFS không luôn đổi mtime khi tạo file → mất file mới.
+  for (let i = 0; i < 10; i++) {
+    const dir = path.join(cfg.claudeDir, 'projects', `p${i}`);
+    fs.mkdirSync(dir, { recursive: true });
+    const w = claudeWatcher();
+    await w.start(); await w.backfilled();
+    fs.writeFileSync(path.join(dir, `sess-n${i}.jsonl`), fxClaude('main.jsonl'));
+    await waitFor(() => store.getAgent(`claude:sess-n${i}`) !== undefined, 5000);
+    await w.stop();
+  }
 });

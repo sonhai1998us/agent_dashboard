@@ -38,7 +38,7 @@ const toolLine = (sid: string, ts: number, id: string) => line({
 });
 
 async function start(): Promise<number> {
-  srv = await startServer({ cfg, withNext: false, watcher: { polling: true, livenessMs: 200 } });
+  srv = await startServer({ cfg, withNext: false, watcher: { livenessMs: 200 } });
   return Number(new URL(srv.url).port);
 }
 

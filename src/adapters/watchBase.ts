@@ -14,8 +14,13 @@ export interface Watcher {
 }
 
 export interface WatcherOptions {
-  /** Use polling instead of native fs events (tests). */
+  /**
+   * Use polling instead of native fs events. Note: on NTFS a directory's mtime is not reliably
+   * bumped when a file is created in it, so polling can miss brand-new files; prefer native events.
+   */
   polling?: boolean;
+  /** Delays before re-reading a file whose read failed (default 1s, 2s, 5s: max 3 retries). */
+  retryMs?: number[];
   /** Liveness check period in ms (default 5000). */
   livenessMs?: number;
   /** Max bytes read per chunk (default 2MB). */
@@ -47,7 +52,16 @@ export interface TailCore {
   ensureWatching(): Promise<void>;
   /** Resolves when the running backfill (if any) has finished. */
   backfilled(): Promise<void>;
+  /**
+   * Safety net for dropped fs events: re-stats every known file whose agent `isActive` and
+   * re-reads it when its size differs from the saved offset.
+   */
+  rescan(isActive: (agentId: string) => boolean): void;
 }
+
+const DEFAULT_RETRY_MS = [1000, 2000, 5000];
+/** Liveness ticks re-check the files of agents with an event this recent. */
+export const RESCAN_ACTIVE_MS = 10 * 60_000;
 
 function walk(dir: string, out: string[]): void {
   let entries: fs.Dirent[];
@@ -67,6 +81,9 @@ export function createTailCore<Ctx>(spec: TailWatcherSpec<Ctx>): TailCore {
   const ctxs = new Map<string, Ctx>();
   const queues = new Map<string, Promise<void>>();
   const warned = new Set<string>();
+  const retryMs = spec.options?.retryMs ?? DEFAULT_RETRY_MS;
+  const failures = new Map<string, number>(); // file -> consecutive failed reads
+  const retryTimers = new Map<string, NodeJS.Timeout>();
   let fsw: ReturnType<typeof chokidar.watch> | null = null;
   let stopped = false;
 
@@ -75,6 +92,17 @@ export function createTailCore<Ctx>(spec: TailWatcherSpec<Ctx>): TailCore {
     warned.add(file);
     console.warn(`[acctv] cannot read ${file}${where ? ' (' + where + ')' : ''}: ${err instanceof Error ? err.message : String(err)}`);
   };
+
+  function scheduleRetry(file: string): void {
+    const n = failures.get(file) ?? 0;
+    failures.set(file, n + 1);
+    if (n >= retryMs.length || retryTimers.has(file) || stopped) return; // gave up: the next fs event retries
+    const t = setTimeout(() => {
+      retryTimers.delete(file);
+      void enqueue(file);
+    }, retryMs[n]);
+    retryTimers.set(file, t);
+  }
 
   async function readFile(file: string): Promise<void> {
     if (stopped) return;
@@ -110,8 +138,10 @@ export function createTailCore<Ctx>(spec: TailWatcherSpec<Ctx>): TailCore {
         if (out.length) spec.onEvents(out);
       }
       spec.afterRead?.(file, ctx);
+      failures.delete(file);
     } catch (err) {
       warnOnce(file, err);
+      scheduleRetry(file);
     }
   }
 
@@ -205,12 +235,26 @@ export function createTailCore<Ctx>(spec: TailWatcherSpec<Ctx>): TailCore {
       await attaching;
       await backfilling;
     },
+    rescan(isActive) {
+      if (stopped) return;
+      for (const [file, ctx] of ctxs) {
+        if (queues.has(file) || retryTimers.has(file)) continue; // a read is already pending
+        const id = spec.agentId?.(ctx);
+        if (!id || !isActive(id)) continue;
+        let size: number;
+        try { size = fs.statSync(file).size; } catch { continue; }
+        const saved = spec.store.getOffset(file);
+        if (!saved || size !== saved.offset) void enqueue(file);
+      }
+    },
     async start() {
       stopped = false;
       await ensureWatching();
     },
     async stop() {
       stopped = true;
+      for (const t of retryTimers.values()) clearTimeout(t);
+      retryTimers.clear();
       await attaching;
       const w = fsw;
       fsw = null;

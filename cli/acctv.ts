@@ -170,15 +170,21 @@ async function cmdWatch(api: Api, p: Parsed, io: CliIo): Promise<number> {
   const loaded = new Set<string>();
   let disconnected = false;
 
+  /** Gộp call theo id; một call chỉ đi từ mở → đã kết thúc, nên bản đã kết thúc luôn thắng. */
+  const mergeCalls = (id: string, incoming: CallRecord[]): void => {
+    const byId = new Map<string, CallRecord>((calls.get(id) ?? []).map((c) => [c.id, c]));
+    for (const c of incoming) {
+      const cur = byId.get(c.id);
+      if (!cur || cur.endedAt === null) byId.set(c.id, c);
+    }
+    calls.set(id, [...byId.values()].sort((a, b) => b.startedAt - a.startedAt).slice(0, 200));
+  };
+
   const loadCalls = async (id: string): Promise<void> => {
     if (loaded.has(id)) return;
     loaded.add(id);
     try {
-      const fetched = await api.calls(id, 30);
-      const have = calls.get(id) ?? [];
-      const ids = new Set(have.map((c) => c.id));
-      const merged = [...have, ...fetched.filter((c) => !ids.has(c.id))].sort((a, b) => b.startedAt - a.startedAt);
-      calls.set(id, merged);
+      mergeCalls(id, await api.calls(id, 30));
     } catch { loaded.delete(id); }
   };
 
@@ -217,11 +223,7 @@ async function cmdWatch(api: Api, p: Parsed, io: CliIo): Promise<number> {
       agents.set(e.agent.id, e.agent);
       void loadCalls(e.agent.id).then(schedule);
     } else if (e.type === 'call') {
-      const list = calls.get(e.call.agentId) ?? [];
-      const i = list.findIndex((c) => c.id === e.call.id);
-      if (i >= 0) list[i] = e.call; else list.unshift(e.call);
-      list.sort((a, b) => b.startedAt - a.startedAt);
-      calls.set(e.call.agentId, list.slice(0, 200));
+      mergeCalls(e.call.agentId, [e.call]);
     } else if (e.type === 'alert') {
       alerts.set(e.alert.id, e.alert);
     }
@@ -251,6 +253,8 @@ async function cmdWatch(api: Api, p: Parsed, io: CliIo): Promise<number> {
       resolve(0);
     };
 
+    // Chạy sau MỖI lần socket mở (kể cả lần đầu): sự kiện phát ra trước khi socket mở
+    // (giữa lần tải đầu và lúc nối xong) không bao giờ tới, nên phải tải lại rồi gộp.
     const resync = async (): Promise<void> => {
       try {
         const s = await api.snapshot();
@@ -258,7 +262,6 @@ async function cmdWatch(api: Api, p: Parsed, io: CliIo): Promise<number> {
         alerts.clear();
         for (const a of s.alerts) alerts.set(a.id, a);
         loaded.clear();
-        calls.clear();
         await Promise.all(subtreeIds().map(loadCalls));
       } catch { /* ws sẽ tự báo lỗi nếu server vẫn chết */ }
     };
@@ -271,10 +274,8 @@ async function cmdWatch(api: Api, p: Parsed, io: CliIo): Promise<number> {
       sock.on('open', () => {
         opened = true;
         delay = 1000;
-        if (disconnected) {
-          disconnected = false;
-          void resync().then(schedule);
-        }
+        disconnected = false;
+        void resync().then(schedule);
       });
       sock.on('message', (data) => {
         try {

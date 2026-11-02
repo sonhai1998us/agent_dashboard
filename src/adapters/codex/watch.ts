@@ -4,7 +4,7 @@ import type { Config } from '@/src/core/config';
 import type { AgentStatus, HubEvent } from '@/src/core/model';
 import type { Store } from '@/src/core/store';
 import { codexCtxForPath, parseCodexLine, type CodexFileCtx } from './parse';
-import { createTailCore, type Watcher, type WatcherOptions } from '../watchBase';
+import { createTailCore, RESCAN_ACTIVE_MS, type Watcher, type WatcherOptions } from '../watchBase';
 
 /** Resumed ctx with unknown turn state: running only if the file was written this recently. */
 const ACTIVE_MS = 120_000;
@@ -44,6 +44,13 @@ export function createCodexWatcher(
 
   function liveness(): void {
     void core.ensureWatching();
+    try {
+      const since = Date.now() - RESCAN_ACTIVE_MS;
+      const active = new Set(store.listAgents({ since }).map((a) => a.id));
+      core.rescan((id) => active.has(id));
+    } catch (err) {
+      console.warn(`[acctv] rescan failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
     try {
       const now = Date.now();
       const out: HubEvent[] = [];

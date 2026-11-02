@@ -4,7 +4,7 @@ import type { Config } from '@/src/core/config';
 import type { AgentStatus, HubEvent } from '@/src/core/model';
 import type { Store } from '@/src/core/store';
 import { claudeCtxForPath, parseClaudeLine, type ClaudeFileCtx } from './parse';
-import { createTailCore, type Watcher, type WatcherOptions } from '../watchBase';
+import { createTailCore, RESCAN_ACTIVE_MS, type Watcher, type WatcherOptions } from '../watchBase';
 
 function readMeta(file: string): { agentType?: string; description?: string } | undefined {
   if (!/[\\/]subagents[\\/]/.test(file)) return undefined;
@@ -47,6 +47,13 @@ export function createClaudeWatcher(
 
   function liveness(): void {
     void core.ensureWatching();
+    try {
+      const since = Date.now() - RESCAN_ACTIVE_MS;
+      const active = new Set(store.listAgents({ since }).map((a) => a.id));
+      core.rescan((id) => active.has(id));
+    } catch (err) {
+      console.warn(`[acctv] rescan failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
     try {
       const dir = path.join(cfg.claudeDir, 'sessions');
       let names: string[] = [];
