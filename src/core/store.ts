@@ -108,6 +108,11 @@ export class Store {
     return rows.map(toCall);
   }
 
+  recentCalls(since: number): CallRecord[] {
+    const rows = this.db.prepare('SELECT * FROM calls WHERE started_at >= ? ORDER BY started_at DESC, rowid DESC').all(since) as Row[];
+    return rows.map(toCall);
+  }
+
   openCalls(agentId: string): CallRecord[] {
     const rows = this.db.prepare(
       'SELECT * FROM calls WHERE agent_id = ? AND ended_at IS NULL ORDER BY started_at DESC, rowid DESC',

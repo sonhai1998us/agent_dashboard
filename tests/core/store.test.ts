@@ -149,3 +149,14 @@ test('PRAGMA synchronous = NORMAL (1)', () => {
   const s = new Store(':memory:');
   expect((s as any).db.prepare('PRAGMA synchronous').get()).toEqual({ synchronous: 1 });
 });
+
+test('recentCalls: mọi agent, startedAt >= since', () => {
+  const s = new Store(':memory:'); s.applyEvent(agentEv);
+  s.applyEvent({ ...agentEv, agent: { ...agentEv.agent, id: 'claude:s2' } } as any);
+  s.applyEvent(callStart({ id: 'a', startedAt: 100 }));
+  s.applyEvent(callStart({ id: 'b', startedAt: 200 }));
+  s.applyEvent(callStart({ id: 'c', agentId: 'claude:s2', startedAt: 300 }));
+  s.applyEvent(callStart({ id: 'd', kind: 'llm', name: 'm', startedAt: 400 }));
+  expect(s.recentCalls(200).map(c => c.id).sort()).toEqual(['b', 'c', 'd']);
+  expect(s.recentCalls(1000)).toEqual([]);
+});

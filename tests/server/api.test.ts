@@ -1,0 +1,127 @@
+import { afterEach, beforeEach, expect, test } from 'vitest';
+import fs from 'node:fs';
+import http from 'node:http';
+import os from 'node:os';
+import path from 'node:path';
+import { WebSocket } from 'ws';
+import { loadConfig, type Config } from '@/src/core/config';
+import { startServer } from '@/src/server/http';
+
+let tmp: string;
+let cfg: Config;
+let srv: { url: string; close(): Promise<void> } | undefined;
+
+beforeEach(() => {
+  tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'acctv-api-'));
+  cfg = { ...loadConfig({
+    ACCTV_HOME: path.join(tmp, 'home'),
+    ACCTV_CLAUDE_DIR: path.join(tmp, 'claude'),
+    ACCTV_CODEX_DIR: path.join(tmp, 'codex'),
+  }), port: 0 };
+  fs.mkdirSync(cfg.home, { recursive: true });
+  fs.mkdirSync(path.join(cfg.claudeDir, 'projects', 'proj'), { recursive: true });
+  fs.mkdirSync(path.join(cfg.claudeDir, 'sessions'), { recursive: true });
+  fs.mkdirSync(path.join(cfg.codexDir, 'sessions'), { recursive: true });
+});
+
+afterEach(async () => {
+  await srv?.close();
+  srv = undefined;
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+const transcript = () => path.join(cfg.claudeDir, 'projects', 'proj', 'sess-api.jsonl');
+const line = (o: unknown) => JSON.stringify(o) + '\n';
+const userLine = (ts: number) => line({ type: 'user', timestamp: new Date(ts).toISOString(), sessionId: 'sess-api', cwd: 'D:\Work\demo', isSidechain: false, message: { role: 'user', content: 'hi' } });
+const toolLine = (ts: number, id: string) => line({
+  type: 'assistant', timestamp: new Date(ts).toISOString(), sessionId: 'sess-api', cwd: 'D:\Work\demo', isSidechain: false,
+  message: { id: 'msg_' + id, model: 'claude-test', usage: { input_tokens: 1, output_tokens: 2 }, content: [{ type: 'tool_use', id, name: 'Bash', input: { command: 'ls ' + id } }] },
+});
+
+async function start() {
+  srv = await startServer({ cfg, withNext: false, watcher: { polling: true, livenessMs: 200 } });
+  return srv;
+}
+
+async function waitFor<T>(fn: () => Promise<T | undefined | false> | T | undefined | false, ms = 8000): Promise<T> {
+  const t0 = Date.now();
+  for (;;) {
+    const v = await fn();
+    if (v) return v as T;
+    if (Date.now() - t0 > ms) throw new Error('waitFor timeout');
+    await new Promise((r) => setTimeout(r, 50));
+  }
+}
+
+function rawGet(url: string, host?: string): Promise<{ status: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    const u = new URL(url);
+    const req = http.request({ host: u.hostname, port: u.port, path: u.pathname + u.search, headers: host ? { host } : {} }, (res) => {
+      let b = '';
+      res.on('data', (d) => (b += d));
+      res.on('end', () => resolve({ status: res.statusCode!, body: b }));
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+test('GET /api/snapshot trả agent sau khi ghi fixture Claude', async () => {
+  const now = Date.now();
+  fs.writeFileSync(transcript(), userLine(now - 5000) + toolLine(now - 4000, 'toolu_1'));
+  const s = await start();
+  const snap = await waitFor(async () => {
+    const r = await fetch(s.url + '/api/snapshot');
+    const j = await r.json();
+    return j.agents.length > 0 ? j : undefined;
+  });
+  expect(snap.agents[0].id).toBe('claude:sess-api');
+  expect(Array.isArray(snap.alerts)).toBe(true);
+  expect(snap.metrics).toHaveProperty('okRate1h');
+  expect(snap.agentMetrics['claude:sess-api']).toBeTruthy();
+  expect(typeof snap.generatedAt).toBe('number');
+
+  const id = encodeURIComponent('claude:sess-api');
+  const calls = await (await fetch(`${s.url}/api/agents/${id}/calls?limit=10`)).json();
+  expect(calls.some((c: any) => c.id === 'toolu_1')).toBe(true);
+  expect((await fetch(`${s.url}/api/agents/${id}/calls?limit=abc`)).status).toBe(400);
+  expect((await fetch(`${s.url}/api/agents/${id}/calls?limit=5000`)).status).toBe(400);
+  expect((await fetch(`${s.url}/api/agents/${id}/calls?since=x`)).status).toBe(400);
+  expect((await fetch(`${s.url}/api/agents/${encodeURIComponent('claude:nope')}/calls`)).status).toBe(404);
+});
+
+test('WS nhận {type:"call"} khi có dòng tool_use mới', async () => {
+  const now = Date.now();
+  fs.writeFileSync(transcript(), userLine(now - 5000));
+  const s = await start();
+  await waitFor(async () => (await (await fetch(s.url + '/api/snapshot')).json()).agents.length > 0);
+  const ws = new WebSocket(s.url.replace('http', 'ws') + '/ws');
+  const got: any[] = [];
+  ws.on('message', (d) => got.push(JSON.parse(String(d))));
+  await new Promise((r, j) => { ws.on('open', r); ws.on('error', j); });
+  fs.appendFileSync(transcript(), toolLine(Date.now(), 'toolu_ws'));
+  try {
+    await waitFor(() => got.find((e) => e.type === 'call' && e.call.id === 'toolu_ws'));
+  } finally {
+    ws.close();
+  }
+});
+
+test('Host lạ → 403 (HTTP và WS upgrade)', async () => {
+  const s = await start();
+  expect((await rawGet(s.url + '/api/snapshot', 'evil.example.com')).status).toBe(403);
+  expect((await rawGet(s.url + '/api/snapshot', 'evil.example.com:' + new URL(s.url).port)).status).toBe(403);
+  expect((await rawGet(s.url + '/api/snapshot', 'localhost:' + new URL(s.url).port)).status).toBe(200);
+  const ws = new WebSocket(s.url.replace('http', 'ws') + '/ws', { headers: { host: 'evil.example.com' } });
+  await new Promise<void>((resolve, reject) => {
+    ws.on('open', () => reject(new Error('should not open')));
+    ws.on('error', () => resolve());
+    ws.on('unexpected-response', () => resolve());
+  });
+});
+
+test('server chỉ listen 127.0.0.1', async () => {
+  const s = await start();
+  expect(new URL(s.url).hostname).toBe('127.0.0.1');
+  expect(s.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+});

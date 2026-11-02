@@ -30,7 +30,7 @@ export const DEFAULT_THRESHOLDS: Thresholds = {
   errorBurst: 5,
 };
 
-export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
+export function loadConfig(env: Record<string, string | undefined> = process.env): Config {
   const userHome = os.homedir();
   const cfg: Config = {
     home: env.ACCTV_HOME ?? path.join(userHome, '.acctv'),
