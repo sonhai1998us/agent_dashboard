@@ -60,6 +60,7 @@ export class DetectEngine {
         const open = this.store.openCalls(a.id);
         this.reconcile(a.id, 'stuck', detectStuck(a, open, now, t));
         this.reconcile(a.id, 'long_tool', detectLongTool(a, open, now, t));
+        this.onCall(a.id); // loop / error_burst: status may have changed after the calls were ingested
       } else {
         this.reconcile(a.id, 'stuck', null);
         this.reconcile(a.id, 'long_tool', null);

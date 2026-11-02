@@ -54,7 +54,7 @@ Có thể `npm link` để dùng lệnh `acctv` trực tiếp (`acctv serve|ls|w
 }
 ```
 
-- `backfillHours` (24): chỉ nạp các file log có mtime trong khoảng này khi khởi động.
+- `backfillHours` (24): chỉ nạp các file log có mtime trong khoảng này khi khởi động; đây cũng là cửa sổ thời gian của `/api/snapshot` (agent hoạt động gần nhất trong khoảng đó).
 - Kẹt (`stuckMs`) 120 giây; tool chạy lâu (`longToolMs`) 300 giây.
 - Lặp: trong `loopWindow` = 20 call gần nhất, cảnh báo từ `loopWarn` = 3 lần, nghiêm trọng từ `loopCritical` = 10 lần.
 - Lỗi liên tiếp (`errorBurst`): 5.
@@ -71,5 +71,4 @@ Có thể `npm link` để dùng lệnh `acctv` trực tiếp (`acctv serve|ls|w
 - Codex chỉ theo dõi (watch-only), chưa chạy được agent từ dashboard.
 - Chưa có ticket hay Controller (Phần 2).
 - Phát hiện subagent kết thúc dựa vào `SubagentHandback` / `end_turn`.
-- API `/api/snapshot` và giao diện chỉ liệt kê agent có hoạt động trong 24 giờ gần nhất; tăng `backfillHours` không làm agent cũ hơn xuất hiện ở đó.
 - Lần tải đầu tiên của Next dev có thể cần tải lại trang.

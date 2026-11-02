@@ -58,3 +58,18 @@ test('engine không bao giờ dừng agent (chỉ cảnh báo)', () => {
   expect(s.activeAlerts().map((a) => a.kind).sort()).toEqual(['error_burst', 'loop', 'stuck']);
   expect((e as any).stop ?? (e as any).kill).toBeUndefined();
 });
+
+test('engine: agent nạp lúc ended rồi chuyển running → tick kế tiếp báo loop', () => {
+  const { s, ev, e } = setup();
+  s.setAgentStatus(ID, 'ended');
+  for (let k = 0; k < 3; k++) end(s, start(s, 'Bash', 'npm test', 2000 + k * 10), 2005 + k * 10);
+  e.tick(3000);
+  expect(s.activeAlerts()).toEqual([]);
+  s.setAgentStatus(ID, 'running');
+  s.applyEvent({ type: 'activity', agentId: ID, at: 3100 });
+  e.tick(3200);
+  expect(s.activeAlerts()).toContainEqual(expect.objectContaining({ kind: 'loop', active: true }));
+  const n = ev.length;
+  e.tick(3300);
+  expect(ev.filter((x) => x.type === 'alert' && x.alert.kind === 'loop').length).toBe(ev.slice(0, n).filter((x) => x.type === 'alert' && x.alert.kind === 'loop').length);
+});

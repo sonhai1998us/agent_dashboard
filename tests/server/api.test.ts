@@ -172,3 +172,19 @@ test('WS: Origin lạ bị từ chối; không Origin / cùng Origin được nh
   expect(await open({ Origin: s.url })).toBe(true);
   expect(await open({ Origin: 'http://localhost:' + new URL(s.url).port })).toBe(true);
 });
+
+test('snapshot dùng cửa sổ backfillHours: agent 48h tuổi hiện khi 72h, ẩn khi 24h', async () => {
+  const old = Date.now() - 48 * 3600_000;
+  for (const [hours, visible] of [[72, true], [24, false]] as const) {
+    fs.writeFileSync(transcript(), userLine(old) + toolLine(old + 1000, 'toolu_old'));
+    cfg.backfillHours = hours;
+    const s = await start();
+    await waitFor(async () => (await (await fetch(`${s.url}/api/agents/${encodeURIComponent('claude:sess-api')}/calls`)).status) === 200);
+    const snap = await (await fetch(s.url + '/api/snapshot')).json();
+    expect(snap.agents.some((a: any) => a.id === 'claude:sess-api')).toBe(visible);
+    await s.close();
+    srv = undefined;
+    fs.rmSync(cfg.home, { recursive: true, force: true });
+    fs.mkdirSync(cfg.home, { recursive: true });
+  }
+});

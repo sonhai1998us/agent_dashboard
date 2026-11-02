@@ -10,7 +10,6 @@ import { createCore, type Core } from './core';
 
 type Handler = (req: http.IncomingMessage, res: http.ServerResponse) => boolean;
 
-const DAY_MS = 24 * 3600_000;
 const HOUR_MS = 3600_000;
 const METRICS_MS = 5000;
 
@@ -44,7 +43,7 @@ function parseIntParam(v: string | null, def: number, min: number, max: number):
 
 function liveMetrics(core: Core, now: number) {
   return globalMetrics(
-    core.store.listAgents({ since: now - DAY_MS }),
+    core.store.listAgents({ since: now - core.cfg.backfillHours * HOUR_MS }),
     core.store.recentCalls(now - HOUR_MS),
     core.store.activeAlerts(),
     now,
@@ -63,7 +62,7 @@ export function attachApi(server: http.Server, core: Core): Handler {
     try {
       if (url.pathname === '/api/snapshot') {
         const now = Date.now();
-        const agents = core.store.listAgents({ since: now - DAY_MS });
+        const agents = core.store.listAgents({ since: now - core.cfg.backfillHours * HOUR_MS });
         const agentM: Record<string, AgentMetrics> = {};
         for (const a of agents) agentM[a.id] = agentMetrics(a, core.store.listCalls(a.id, { limit: 2000 }), now);
         sendJson(res, 200, {
