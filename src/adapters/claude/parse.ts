@@ -12,6 +12,8 @@ export interface ClaudeFileCtx {
   resumed: boolean;
   /** Subagent only: undefined until the first status is emitted; true after end_turn, false while running. */
   ended?: boolean;
+  /** Subagent only: tool_use id of the SubagentHandback call that finished it; its tool_result does not count as a resume. */
+  handbackId?: string;
 }
 
 const norm = (p: string) => p.replace(/\\/g, '/');
@@ -148,9 +150,20 @@ export function parseClaudeLine(line: string, ctx: ClaudeFileCtx): NormalizedEve
   }
 
   if (ctx.parentId && (rec.type === 'assistant' || rec.type === 'user')) {
-    if (rec.type === 'assistant' && rec.message?.stop_reason === 'end_turn') {
-      ctx.ended = true;
-      out.push({ type: 'agent', agent: { ...base, status: 'ended' } });
+    const content = rec.message?.content;
+    const handback = rec.type === 'assistant' && Array.isArray(content)
+      ? content.find((b: any) => b && b.type === 'tool_use' && b.name === 'SubagentHandback')
+      : undefined;
+    const isHandbackResult = rec.type === 'user' && ctx.handbackId !== undefined && Array.isArray(content) && content.length > 0
+      && content.every((b: any) => b && b.type === 'tool_result' && b.tool_use_id === ctx.handbackId);
+    if (handback || (rec.type === 'assistant' && rec.message?.stop_reason === 'end_turn')) {
+      if (handback && typeof handback.id === 'string') ctx.handbackId = handback.id;
+      if (ctx.ended !== true) {
+        ctx.ended = true;
+        out.push({ type: 'agent', agent: { ...base, status: 'ended' } });
+      }
+    } else if (isHandbackResult) {
+      // result of the handback call: the subagent stays finished
     } else if (ctx.ended !== false) {
       ctx.ended = false;
       out.push({ type: 'agent', agent: { ...base, status: 'running' } });

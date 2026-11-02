@@ -156,6 +156,18 @@ describe('subagent status from transcript', () => {
     expect(statuses(claudeCtxForPath(subPath, CD), [asst('end_turn')])).toEqual(['ended']); // first record is the final end_turn
   });
 
+  test('SubagentHandback → ended; tool_result của handback không lật lại running; resume sau đó → running', () => {
+    const handback = (id: string) => rec('assistant', { message: { id: 'h', stop_reason: 'tool_use', content: [{ type: 'tool_use', id, name: 'SubagentHandback', input: { message: 'done' } }] } });
+    const result = (id: string) => rec('user', { message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: 'ok' }] } });
+    const otherTool = rec('assistant', { message: { id: 'o', stop_reason: 'tool_use', content: [{ type: 'tool_use', id: 't1', name: 'Read', input: {} }] } });
+    const ctx = claudeCtxForPath(subPath, CD);
+    expect(statuses(ctx, [rec('user'), otherTool, result('t1'), handback('hb1'), result('hb1')])).toEqual(['running', 'ended']);
+    expect(statuses(ctx, [rec('user', { message: { role: 'user', content: 'tiếp tục' } })])).toEqual(['running']);
+    expect(statuses(ctx, [handback('hb2')])).toEqual(['ended']);
+    expect(statuses(ctx, [result('hb2'), result('hb2')])).toEqual([]);
+    expect(statuses(claudeCtxForPath(subPath, CD), [handback('hb3'), result('hb3')])).toEqual(['ended']);
+  });
+
   test('phiên chính không phát status từ transcript', () => {
     const ctx = claudeCtxForPath(mainPath, CD);
     expect(statuses(ctx, [rec('assistant', { message: { id: 'x', stop_reason: 'end_turn', content: [] } })])).toEqual([]);

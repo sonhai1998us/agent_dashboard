@@ -274,6 +274,21 @@ test('Claude subagent kết thúc bằng end_turn → ended dù pid cha còn s�
   expect(store.getAgent('claude:sess-main:working')?.status).toBe('running');
 });
 
+const handbackRec = (id: string) => recLine({ type: 'assistant', message: { id: 'm' + Math.random(), role: 'assistant', stop_reason: 'tool_use', content: [{ type: 'tool_use', id, name: 'SubagentHandback', input: { message: 'done' } }] } });
+const toolResultRec = (id: string) => recLine({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: 'ok' }] } });
+
+test('Claude subagent kết thúc bằng SubagentHandback → ended dù pid cha còn sống; resume sau handback → running', async () => {
+  fs.writeFileSync(mainFile(), userRec());
+  fs.mkdirSync(subDir(), { recursive: true });
+  fs.writeFileSync(path.join(subDir(), 'agent-handed.jsonl'), userRec() + asstRec('tool_use') + handbackRec('hb1') + toolResultRec('hb1'));
+  fs.writeFileSync(path.join(subDir(), 'agent-again.jsonl'), userRec() + handbackRec('hb2') + toolResultRec('hb2') + userRec());
+  sessionFile(process.pid, 'busy');
+  const w = claudeWatcher();
+  await w.start();
+  expect(store.getAgent('claude:sess-main:handed')?.status).toBe('ended');
+  expect(store.getAgent('claude:sess-main:again')?.status).toBe('running');
+});
+
 test('Claude: cha chết → các subagent chưa ended bị hạ xuống ended', async () => {
   fs.writeFileSync(mainFile(), userRec());
   fs.mkdirSync(subDir(), { recursive: true });
