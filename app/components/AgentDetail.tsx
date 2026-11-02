@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { CallRecord } from '@/src/core/model';
-import { useLive } from '../lib/liveStore';
+import { getState, selectAgentMetrics, useLive } from '../lib/liveStore';
 import { fmtClock, fmtDuration, fmtTokens } from '../lib/format';
 import { alertPill, callRowState, toolCalls, topRepeatedError } from '../lib/detail';
 import styles from './AgentDetail.module.css';
@@ -16,7 +16,7 @@ export default function AgentDetail() {
   const selected = useLive((s) => s.selectedAgentId);
   const agent = useLive((s) => (s.selectedAgentId ? s.agents[s.selectedAgentId] : undefined));
   const rawCalls = useLive((s) => (s.selectedAgentId ? s.calls[s.selectedAgentId] : undefined)) ?? EMPTY_CALLS;
-  const metrics = useLive((s) => (s.selectedAgentId ? s.agentMetrics[s.selectedAgentId] : undefined));
+  const loadedGen = useLive((s) => (s.selectedAgentId ? s.callsLoadedGen[s.selectedAgentId] : undefined));
   const alertsMap = useLive((s) => s.alerts);
   const selectedCallId = useLive((s) => s.selectedCallId);
   const callNonce = useLive((s) => s.selectedCallNonce);
@@ -26,6 +26,13 @@ export default function AgentDetail() {
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
   }, []);
+
+  // metrics tính ở client từ calls (WS cập nhật liên tục), tối đa 1 lần/giây theo ticker;
+  // tính lại ngay khi đổi agent hoặc khi calls vừa tải xong
+  const metrics = useMemo(
+    () => (selected ? selectAgentMetrics(getState(), selected, now) : undefined),
+    [selected, now, loadedGen],
+  );
 
   const calls = useMemo(() => toolCalls(rawCalls), [rawCalls]);
   const repeated = useMemo(() => topRepeatedError(calls), [calls]);

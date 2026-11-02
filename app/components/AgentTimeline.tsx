@@ -38,6 +38,7 @@ export default function AgentTimeline() {
   const callsMap = useLive((s) => s.calls);
   const alertsMap = useLive((s) => s.alerts);
   const selected = useLive((s) => s.selectedAgentId);
+  const callsGen = useLive((s) => s.callsGen);
   const [winMin, setWinMin] = useState<number>(DEFAULT_WINDOW_MIN);
   const [focusIdx, setFocusIdx] = useState(0);
   const [width, setWidth] = useState(0);
@@ -55,8 +56,8 @@ export default function AgentTimeline() {
   const nodes = useMemo(() => (root ? flattenTree(root, Object.values(frame.agents)) : []), [root, frame.agents]);
   const idsKey = nodes.map((n) => n.agent.id).join('|');
 
-  // tải call cho mọi agent trong cây
-  useEffect(() => { for (const n of nodes) ensureCalls(n.agent.id); }, [idsKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  // tải call cho mọi agent trong cây; nối lại WS (callsGen tăng) thì tải lại
+  useEffect(() => { for (const n of nodes) ensureCalls(n.agent.id); }, [idsKey, callsGen]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // vẽ lại tối đa 1 lần/giây: ticker 1s chụp dữ liệu mới nhất; đổi cửa sổ/phiên thì chụp ngay
   const refresh = useCallback(() => {

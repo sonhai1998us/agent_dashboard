@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import type { AgentInfo, Alert, CallRecord } from '@/src/core/model';
-import { initialState, reduce, type LiveState } from '@/app/lib/liveStore';
+import { initialState, reduce, selectAgentMetrics, staleCallAgents, type LiveState } from '@/app/lib/liveStore';
 
 const call = (id: string, startedAt: number, o: Partial<CallRecord> = {}): CallRecord => ({
   id, agentId: 'a', kind: 'tool', name: 'Bash', inputHash: 'h', inputPreview: '', startedAt, endedAt: null,
@@ -115,5 +115,46 @@ describe('reduce: selectCall', () => {
   });
   test('reduce: initialState có selectedCallId null', () => {
     expect(initialState().selectedCallId).toBeNull();
+  });
+});
+
+describe('metrics theo agent tính ở client', () => {
+  const snapM = { calls: 7, errors: 0, okRate: 1, p50: 1, p95: 1, tokensIn: 0, tokensOut: 0, durationMs: 1 };
+  const snapshot = (agentMetrics = {}) => ({
+    type: 'snapshot' as const, generatedAt: 1, agents: [agent('a', { startedAt: 0, lastEventAt: 100 })], alerts: [],
+    metrics: { running: 1, alerts: 0, okRate1h: null, p50_1h: null }, agentMetrics,
+  });
+  test('chưa tải calls → dùng giá trị snapshot; agent xuất hiện sau snapshot → undefined', () => {
+    const s = reduce(initialState(), snapshot({ a: snapM }));
+    expect(selectAgentMetrics(s, 'a', 1000)).toEqual(snapM);
+    const s2 = reduce(s, { type: 'agent', agent: agent('moi') });
+    expect(selectAgentMetrics(s2, 'moi', 1000)).toBeUndefined();
+  });
+  test('sau khi tải calls, một sự kiện call làm metrics của agent đó thay đổi', () => {
+    let s = reduce(initialState(), snapshot({ a: snapM }));
+    s = reduce(s, { type: 'calls', agentId: 'a', calls: [call('c1', 10, { endedAt: 20, ok: true })] });
+    const before = selectAgentMetrics(s, 'a', 1000)!;
+    expect(before.calls).toBe(1);
+    expect(before.errors).toBe(0);
+    s = reduce(s, { type: 'call', call: call('c2', 30, { endedAt: 50, ok: false }) });
+    const after = selectAgentMetrics(s, 'a', 1000)!;
+    expect(after.calls).toBe(2);
+    expect(after.errors).toBe(1);
+    expect(after.okRate).toBe(0.5);
+  });
+});
+
+describe('nối lại: tải lại calls', () => {
+  test('resync tăng thế hệ; mọi agent đã có calls thành cũ cho tới khi tải lại', () => {
+    let s = reduce(initialState(), { type: 'calls', agentId: 'a', calls: [call('c1', 10)] });
+    s = reduce(s, { type: 'call', call: call('x1', 10, { agentId: 'b' }) });
+    expect(staleCallAgents(s)).toEqual(['b']);
+    s = reduce(s, { type: 'resync' });
+    expect(s.callsGen).toBe(1);
+    expect(staleCallAgents(s).sort()).toEqual(['a', 'b']);
+    s = reduce(s, { type: 'calls', agentId: 'a', calls: [call('c2', 20)], gen: 1 });
+    expect(staleCallAgents(s)).toEqual(['b']);
+    s = reduce(s, { type: 'calls', agentId: 'b', calls: [], gen: 0 }); // phản hồi trễ của thế hệ cũ
+    expect(staleCallAgents(s)).toEqual(['b']);
   });
 });

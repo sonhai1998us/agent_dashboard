@@ -1,7 +1,7 @@
 'use client';
 import { useSyncExternalStore } from 'react';
 import type { AgentInfo, Alert, CallRecord, HubEvent } from '@/src/core/model';
-import type { AgentMetrics, GlobalMetrics } from '@/src/core/metrics';
+import { agentMetrics, type AgentMetrics, type GlobalMetrics } from '@/src/core/metrics';
 
 export type ConnState = 'connecting' | 'live' | 'disconnected';
 export interface LiveState {
@@ -14,6 +14,10 @@ export interface LiveState {
   selectedCallNonce: number;
   /** local time (ms) of the last applied alert event per alert id; used to resolve snapshot/WS races */
   alertEventAt: Record<string, number>;
+  /** tăng mỗi lần nối lại WS: calls tải ở thế hệ cũ có thể đã lỡ sự kiện nên phải tải lại */
+  callsGen: number;
+  /** thế hệ của lần tải calls (REST) gần nhất cho từng agent; chưa có = chưa tải */
+  callsLoadedGen: Record<string, number>;
 }
 export interface SnapshotAction {
   type: 'snapshot'; generatedAt: number; agents: AgentInfo[]; alerts: Alert[];
@@ -25,7 +29,8 @@ export type LiveAction =
   | { type: 'metrics'; metrics: GlobalMetrics; at: number }
   | { type: 'conn'; conn: ConnState }
   | SnapshotAction
-  | { type: 'calls'; agentId: string; calls: CallRecord[] }
+  | { type: 'calls'; agentId: string; calls: CallRecord[]; gen?: number }
+  | { type: 'resync' }
   | { type: 'select'; id: string | null }
   | { type: 'selectCall'; agentId: string; callId: string };
 
@@ -33,6 +38,7 @@ export function initialState(): LiveState {
   return {
     conn: 'connecting', lastUpdateAt: null, agents: {}, alerts: {}, metrics: null,
     agentMetrics: {}, calls: {}, selectedAgentId: null, selectedCallId: null, selectedCallNonce: 0, alertEventAt: {},
+    callsGen: 0, callsLoadedGen: {},
   };
 }
 
@@ -71,11 +77,31 @@ export function reduce(s: LiveState, e: LiveAction): LiveState {
       const selectedAgentId = s.selectedAgentId && agents[s.selectedAgentId] ? s.selectedAgentId : null;
       return { ...s, agents, alerts, selectedAgentId, selectedCallId: selectedAgentId ? s.selectedCallId : null, metrics: e.metrics, agentMetrics: e.agentMetrics, lastUpdateAt: e.generatedAt };
     }
-    case 'calls': return { ...s, calls: { ...s.calls, [e.agentId]: mergeCalls(s.calls[e.agentId], e.calls) } };
+    case 'calls': return {
+      ...s,
+      calls: { ...s.calls, [e.agentId]: mergeCalls(s.calls[e.agentId], e.calls) },
+      callsLoadedGen: { ...s.callsLoadedGen, [e.agentId]: e.gen ?? s.callsGen },
+    };
+    case 'resync': return { ...s, callsGen: s.callsGen + 1 };
     case 'select': return { ...s, selectedAgentId: e.id, selectedCallId: e.id === s.selectedAgentId ? s.selectedCallId : null };
     case 'selectCall': return { ...s, selectedAgentId: e.agentId, selectedCallId: e.callId, selectedCallNonce: s.selectedCallNonce + 1 };
     default: return s;
   }
+}
+
+/** Agent có calls trong state nhưng chưa được tải lại ở thế hệ hiện tại. */
+export function staleCallAgents(s: LiveState): string[] {
+  return Object.keys(s.calls).filter((id) => s.callsLoadedGen[id] !== s.callsGen);
+}
+
+/**
+ * Metrics của một agent, tính ở client từ calls đang có (cập nhật theo WS); chỉ dùng giá trị
+ * của snapshot khi calls của agent chưa được tải.
+ */
+export function selectAgentMetrics(s: LiveState, id: string, now: number): AgentMetrics | undefined {
+  const agent = s.agents[id];
+  if (!agent || s.callsLoadedGen[id] === undefined) return s.agentMetrics[id];
+  return agentMetrics(agent, s.calls[id] ?? [], now);
 }
 
 // ---- thin runtime (untested: browser only) ----
@@ -103,9 +129,12 @@ function connect(attempt: number): void {
   const ws = new WebSocket(`${proto}://${location.host}/ws`);
   ws.onopen = () => {
     dispatch({ type: 'conn', conn: 'live' });
+    // sự kiện lúc mất kết nối không bao giờ tới: tải lại snapshot và calls của mọi agent đã có calls
+    dispatch({ type: 'resync' });
     loadedCalls.clear();
     loadSnapshot().catch(() => {});
-    if (state.selectedAgentId) void loadCalls(state.selectedAgentId);
+    for (const id of staleCallAgents(state)) void loadCalls(id);
+    if (state.selectedAgentId) ensureCalls(state.selectedAgentId);
   };
   ws.onmessage = (m) => {
     try { dispatch(JSON.parse(String(m.data))); } catch { /* ignore malformed or unexpected messages */ }
@@ -129,13 +158,21 @@ function start(): void {
   connect(0);
 }
 
+const CALLS_LIMIT = 2000; // bằng giới hạn của server (và MAX_CALLS)
+
 async function loadCalls(id: string): Promise<void> {
   loadedCalls.add(id);
+  const gen = state.callsGen;
   try {
-    const r = await fetch(`/api/agents/${encodeURIComponent(id)}/calls?limit=500`, { cache: 'no-store' });
+    const r = await fetch(`/api/agents/${encodeURIComponent(id)}/calls?limit=${CALLS_LIMIT}`, { cache: 'no-store' });
     if (!r.ok) throw new Error(String(r.status));
-    dispatch({ type: 'calls', agentId: id, calls: await r.json() });
+    dispatch({ type: 'calls', agentId: id, calls: await r.json(), gen });
   } catch { loadedCalls.delete(id); }
+}
+
+/** State hiện tại, đọc ngoài render (vd. ticker 1 giây của panel chi tiết). */
+export function getState(): LiveState {
+  return state;
 }
 
 export function selectAgent(id: string): void {
