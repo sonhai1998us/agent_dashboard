@@ -188,3 +188,33 @@ test('snapshot dùng cửa sổ backfillHours: agent 48h tuổi hiện khi 72h, 
     fs.mkdirSync(cfg.home, { recursive: true });
   }
 });
+
+test('server trả /api/snapshot ngay khi backfill lớn còn đang chạy; log tiến độ backfill', async () => {
+  const logs: string[] = [];
+  const origLog = console.log;
+  console.log = (...a: unknown[]) => { logs.push(a.map(String).join(' ')); };
+  try {
+    const N = 400;
+    const now = Date.now();
+    for (let i = 0; i < N; i++) {
+      const sid = `bulk-${String(i).padStart(4, '0')}`;
+      const body = Array.from({ length: 40 }, (_, k) => line({ type: 'user', timestamp: new Date(now - 60_000 + k).toISOString(), sessionId: sid, cwd: 'D:\Work\bulk', message: { role: 'user', content: 'x'.repeat(200) } })).join('');
+      fs.writeFileSync(path.join(cfg.claudeDir, 'projects', 'proj', `${sid}.jsonl`), body);
+    }
+    const s = await start();
+    let done = false;
+    const backfilled = (s as unknown as { backfilled: Promise<void> }).backfilled;
+    void backfilled.then(() => { done = true; });
+    const r = await fetch(s.url + '/api/snapshot');
+    expect(r.status).toBe(200);
+    const early = await r.json();
+    expect(done).toBe(false);
+    expect(early.agents.length).toBeLessThan(N);
+    await backfilled;
+    const late = await (await fetch(s.url + '/api/snapshot')).json();
+    expect(late.agents.length).toBe(N);
+    expect(logs.some((l) => l.startsWith('[acctv] backfill:') && l.includes(`${N}/${N}`))).toBe(true);
+  } finally {
+    console.log = origLog;
+  }
+}, 60000);

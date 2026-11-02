@@ -104,17 +104,49 @@ export interface StartOptions {
   watcher?: WatcherOptions;
 }
 
-export async function startServer(opts: StartOptions = {}): Promise<{ url: string; close(): Promise<void> }> {
+export interface RunningServer {
+  url: string;
+  /** Resolves when the background backfill of existing logs has finished. */
+  backfilled: Promise<void>;
+  close(): Promise<void>;
+}
+
+export async function startServer(opts: StartOptions = {}): Promise<RunningServer> {
   const cfg = opts.cfg ?? loadConfig();
-  const core = await createCore(cfg, opts.watcher);
   const server = http.createServer();
   const wss = new WebSocketServer({ noServer: true });
   const clients = new Set<WebSocket>();
   let metricsTimer: NodeJS.Timeout | undefined;
   let nextApp: { close(): Promise<void> } | undefined;
+  let core: Core | undefined;
+
+  // Requests that arrive while the core / Next are still being set up wait for this.
+  let markReady!: (ok: boolean) => void;
+  const ready = new Promise<boolean>((r) => { markReady = r; });
+  let onRequest: (req: http.IncomingMessage, res: http.ServerResponse) => void = () => {};
+  let onUpgrade: (req: http.IncomingMessage, socket: Duplex, head: Buffer) => void = (_r, socket) => socket.destroy();
+  server.on('request', (req, res) => {
+    void ready.then((ok) => {
+      if (ok) onRequest(req, res);
+      else sendJson(res, 503, { error: 'server is shutting down' });
+    });
+  });
+  server.on('upgrade', (req, socket, head) => {
+    socket.on('error', () => { /* client vanished */ });
+    void ready.then((ok) => (ok ? onUpgrade(req, socket, head) : socket.destroy()));
+  });
+
+  // Bind the port before touching the DB: a second instance must fail here, never wipe the live DB.
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(cfg.port, cfg.host, () => { server.off('error', reject); resolve(); });
+  });
+  const port = () => (server.address() as { port: number }).port;
 
   try {
-    const api = attachApi(server, core);
+    core = await createCore(cfg, opts.watcher);
+    const c = core;
+    const api = attachApi(server, c);
     let nextHandler: ((req: http.IncomingMessage, res: http.ServerResponse) => Promise<void>) | undefined;
     let nextUpgrade: ((req: http.IncomingMessage, socket: Duplex, head: Buffer) => Promise<void>) | undefined;
 
@@ -122,16 +154,14 @@ export async function startServer(opts: StartOptions = {}): Promise<{ url: strin
       const dev = opts.dev ?? process.env.NODE_ENV !== 'production';
       const { default: next } = await import('next');
       const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-      const app = next({ dev, dir: projectRoot, hostname: cfg.host, port: cfg.port });
+      const app = next({ dev, dir: projectRoot, hostname: cfg.host, port: port() });
       await app.prepare();
       nextApp = app;
       nextHandler = app.getRequestHandler();
       nextUpgrade = app.getUpgradeHandler();
     }
 
-    const port = () => (server.address() as { port: number }).port;
-
-    server.on('request', (req, res) => {
+    onRequest = (req, res) => {
       if (api(req, res)) return;
       if (!hostAllowed(req.headers.host, port())) { sendJson(res, 403, { error: 'forbidden host' }); return; }
       if (!nextHandler) { sendJson(res, 404, { error: 'not found' }); return; }
@@ -140,10 +170,9 @@ export async function startServer(opts: StartOptions = {}): Promise<{ url: strin
         if (!res.headersSent) sendJson(res, 500, { error: 'internal error' });
         else res.end();
       });
-    });
+    };
 
-    server.on('upgrade', (req, socket, head) => {
-      socket.on('error', () => { /* client vanished */ });
+    onUpgrade = (req, socket, head) => {
       if (!hostAllowed(req.headers.host, port())) { rejectUpgrade(socket, 403, 'Forbidden'); return; }
       if (!originAllowed(req.headers.origin, port())) { rejectUpgrade(socket, 403, 'Forbidden'); return; }
       const parsed = safeUrl(req.url);
@@ -159,28 +188,25 @@ export async function startServer(opts: StartOptions = {}): Promise<{ url: strin
       } else {
         rejectUpgrade(socket, 404, 'Not Found');
       }
-    });
+    };
 
     const broadcast = (payload: unknown): void => {
       const s = JSON.stringify(payload);
       for (const ws of clients) if (ws.readyState === ws.OPEN) ws.send(s);
     };
-    const unsub = core.hub.subscribe((e) => broadcast(e));
+    const unsub = c.hub.subscribe((e) => broadcast(e));
     metricsTimer = setInterval(() => {
       try {
         const at = Date.now();
-        broadcast({ type: 'metrics', metrics: liveMetrics(core, at), at });
+        broadcast({ type: 'metrics', metrics: liveMetrics(c, at), at });
       } catch { /* store may be closing */ }
     }, METRICS_MS);
-
-    await new Promise<void>((resolve, reject) => {
-      server.once('error', reject);
-      server.listen(cfg.port, cfg.host, () => { server.off('error', reject); resolve(); });
-    });
+    markReady(true);
 
     let closed = false;
     return {
       url: `http://${cfg.host}:${port()}`,
+      backfilled: c.backfilled(),
       async close() {
         if (closed) return;
         closed = true;
@@ -191,14 +217,17 @@ export async function startServer(opts: StartOptions = {}): Promise<{ url: strin
         server.closeAllConnections();
         await new Promise<void>((r) => server.close(() => r()));
         await nextApp?.close().catch(() => {});
-        await core.stop();
+        await c.stop();
       },
     };
   } catch (err) {
+    markReady(false);
     clearInterval(metricsTimer);
     wss.close();
+    server.closeAllConnections();
+    await new Promise<void>((r) => server.close(() => r()));
     await nextApp?.close().catch(() => {});
-    await core.stop();
+    await core?.stop();
     throw err;
   }
 }

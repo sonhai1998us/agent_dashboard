@@ -154,3 +154,33 @@ test('watch vẽ cây, thấy call mới xuất hiện và thoát mã 0 khi nh�
   ac.abort();
   expect(await p).toBe(0);
 }, 60000);
+
+test('serve khi cổng bận → exit 1 và không đụng tới DB (không tạo, không xoá dữ liệu)', async () => {
+  const http = await import('node:http');
+  const busy = http.createServer();
+  await new Promise<void>((r) => busy.listen(0, '127.0.0.1', () => r()));
+  const port = (busy.address() as { port: number }).port;
+  const { Store } = await import('@/src/core/store');
+  const dbFile = path.join(cfg.home, 'acctv.db');
+  const s = new Store(dbFile);
+  s.applyEvent({ type: 'agent', agent: { id: 'claude:giu-lai', source: 'claude', sessionId: 'giu-lai', label: 'x', startedAt: 1, lastEventAt: 1 } });
+  s.setMeta('ingestVersion', '0'); // phiên bản cũ: createCore sẽ xoá sạch nếu được gọi
+  s.close();
+  const saved = { home: process.env.ACCTV_HOME, claude: process.env.ACCTV_CLAUDE_DIR, codex: process.env.ACCTV_CODEX_DIR };
+  process.env.ACCTV_HOME = cfg.home; process.env.ACCTV_CLAUDE_DIR = cfg.claudeDir; process.env.ACCTV_CODEX_DIR = cfg.codexDir;
+  try {
+    const { io, state } = makeIo();
+    const code = await main(['serve', '--dev', '--port', String(port)], io);
+    expect(code).toBe(1);
+    expect(state.err).toContain(`Cổng ${port} đang bận`);
+  } finally {
+    for (const [k, v] of [['ACCTV_HOME', saved.home], ['ACCTV_CLAUDE_DIR', saved.claude], ['ACCTV_CODEX_DIR', saved.codex]] as const) {
+      if (v === undefined) delete process.env[k]; else process.env[k] = v;
+    }
+    await new Promise<void>((r) => busy.close(() => r()));
+  }
+  const after = new Store(dbFile);
+  expect(after.getAgent('claude:giu-lai')).toBeTruthy();
+  expect(after.getMeta('ingestVersion')).toBe('0');
+  after.close();
+}, 60000);

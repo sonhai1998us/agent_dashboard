@@ -29,7 +29,9 @@ function pidAlive(pid: number): boolean {
 export function createClaudeWatcher(
   cfg: Config, store: Store, onEvents: (evs: HubEvent[]) => void, options: WatcherOptions = {},
 ): Watcher {
+  let backfillDone: Promise<void> = Promise.resolve();
   const core = createTailCore<ClaudeFileCtx>({
+    name: 'claude',
     root: path.join(cfg.claudeDir, 'projects'),
     match: (f) => f.toLowerCase().endsWith('.jsonl'),
     makeCtx: (f, resumed) => claudeCtxForPath(f, cfg.claudeDir, readMeta(f), { resumed }),
@@ -90,7 +92,10 @@ export function createClaudeWatcher(
       await core.start();
       liveness();
       timer = setInterval(liveness, options.livenessMs ?? 5000);
+      // statuses for agents found by the background backfill are set as soon as it ends
+      backfillDone = core.backfilled().then(() => { if (timer) liveness(); });
     },
+    backfilled: () => backfillDone,
     async stop() {
       if (timer) clearInterval(timer);
       timer = null;

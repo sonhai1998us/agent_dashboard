@@ -15,6 +15,8 @@ export interface Core {
   store: Store;
   hub: Hub;
   engine: DetectEngine;
+  /** Resolves when every watcher has finished its background backfill. */
+  backfilled(): Promise<void>;
   stop(): Promise<void>;
 }
 
@@ -49,7 +51,7 @@ export async function createCore(cfg: Config, watcherOptions: WatcherOptions = {
   }, TICK_MS);
 
   try {
-    for (const w of watchers) await w.start();
+    for (const w of watchers) await w.start(); // attaches the fs watchers; backfill continues in the background
   } catch (err) {
     clearInterval(tick);
     await Promise.allSettled(watchers.map((w) => w.stop()));
@@ -60,6 +62,9 @@ export async function createCore(cfg: Config, watcherOptions: WatcherOptions = {
   let stopped = false;
   return {
     cfg, store, hub, engine,
+    async backfilled() {
+      await Promise.all(watchers.map((w) => w.backfilled()));
+    },
     async stop() {
       if (stopped) return;
       stopped = true;

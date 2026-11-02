@@ -13,7 +13,9 @@ export function createCodexWatcher(
   cfg: Config, store: Store, onEvents: (evs: HubEvent[]) => void, options: WatcherOptions = {},
 ): Watcher {
   const ctxByFile = new Map<string, CodexFileCtx>();
+  let backfillDone: Promise<void> = Promise.resolve();
   const core = createTailCore<CodexFileCtx>({
+    name: 'codex',
     root: path.join(cfg.codexDir, 'sessions'),
     match: (f) => /\.jsonl(\.zst)?$/i.test(f),
     makeCtx: (f, resumed) => codexCtxForPath(f, { resumed }),
@@ -54,7 +56,10 @@ export function createCodexWatcher(
       await core.start();
       liveness();
       timer = setInterval(liveness, options.livenessMs ?? 5000);
+      // statuses for agents found by the background backfill are set as soon as it ends
+      backfillDone = core.backfilled().then(() => { if (timer) liveness(); });
     },
+    backfilled: () => backfillDone,
     async stop() {
       if (timer) clearInterval(timer);
       timer = null;

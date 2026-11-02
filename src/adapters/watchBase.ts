@@ -6,8 +6,11 @@ import type { Store } from '@/src/core/store';
 import { tailChunks, CHUNK_BYTES } from './tail';
 
 export interface Watcher {
+  /** Resolves once the fs watcher is attached; the backfill keeps running in the background. */
   start(): Promise<void>;
   stop(): Promise<void>;
+  /** Resolves when the current backfill (and the status pass after it) has finished. */
+  backfilled(): Promise<void>;
 }
 
 export interface WatcherOptions {
@@ -20,6 +23,8 @@ export interface WatcherOptions {
 }
 
 export interface TailWatcherSpec<Ctx> {
+  /** Short source name used in log lines. */
+  name?: string;
   root: string;
   match(file: string): boolean;
   makeCtx(file: string, resumed: boolean): Ctx;
@@ -38,8 +43,10 @@ export interface TailCore {
   start(): Promise<void>;
   stop(): Promise<void>;
   enqueue(file: string): Promise<void>;
-  /** Starts watching the root (and backfills it) once it exists. Idempotent. */
+  /** Starts watching the root once it exists (backfill runs in the background). Idempotent. */
   ensureWatching(): Promise<void>;
+  /** Resolves when the running backfill (if any) has finished. */
+  backfilled(): Promise<void>;
 }
 
 function walk(dir: string, out: string[]): void {
@@ -118,6 +125,9 @@ export function createTailCore<Ctx>(spec: TailWatcherSpec<Ctx>): TailCore {
     return next;
   }
 
+  let backfilling: Promise<void> = Promise.resolve();
+  const BACKFILL_LOG_MS = 2000;
+
   async function backfill(): Promise<void> {
     const all: string[] = [];
     walk(spec.root, all);
@@ -133,7 +143,22 @@ export function createTailCore<Ctx>(spec: TailWatcherSpec<Ctx>): TailCore {
       }
     }
     recent.sort((a, b) => a.m - b.m);
-    for (const { f } of recent) await enqueue(f);
+    const total = recent.length;
+    if (total === 0) return;
+    const tag = spec.name ? ` (${spec.name})` : '';
+    console.log(`[acctv] backfill: 0/${total} files${tag}`);
+    let lastLog = Date.now();
+    let n = 0;
+    for (const { f } of recent) {
+      if (stopped) return;
+      await enqueue(f);
+      n++;
+      if (n < total && Date.now() - lastLog >= BACKFILL_LOG_MS) {
+        lastLog = Date.now();
+        console.log(`[acctv] backfill: ${n}/${total} files${tag}`);
+      }
+    }
+    console.log(`[acctv] backfill: ${n}/${total} files${tag}`);
   }
 
   let attaching: Promise<void> | null = null;
@@ -157,7 +182,11 @@ export function createTailCore<Ctx>(spec: TailWatcherSpec<Ctx>): TailCore {
       w.once('ready', () => resolve());
     });
     if (stopped) return;
-    await backfill(); // files that predate the watcher (ignoreInitial skips them)
+    // files that predate the watcher (ignoreInitial skips them); runs in the background so the
+    // server can answer while a large backlog is read
+    backfilling = backfill().catch((err) => {
+      console.warn(`[acctv] backfill of ${spec.root} failed: ${err instanceof Error ? err.message : String(err)}`);
+    });
   }
 
   function ensureWatching(): Promise<void> {
@@ -172,6 +201,10 @@ export function createTailCore<Ctx>(spec: TailWatcherSpec<Ctx>): TailCore {
   return {
     enqueue,
     ensureWatching,
+    async backfilled() {
+      await attaching;
+      await backfilling;
+    },
     async start() {
       stopped = false;
       await ensureWatching();
@@ -182,6 +215,7 @@ export function createTailCore<Ctx>(spec: TailWatcherSpec<Ctx>): TailCore {
       const w = fsw;
       fsw = null;
       if (w) await w.close();
+      await backfilling;
       await Promise.allSettled([...queues.values()]);
     },
   };
