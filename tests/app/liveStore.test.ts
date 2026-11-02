@@ -72,3 +72,24 @@ describe('reduce: độ bền', () => {
     expect(Object.keys(s.alerts).sort()).toEqual(['old', 'x']);
   });
 });
+
+describe('reduce: snapshot với agent vắng mặt', () => {
+  const snap = (generatedAt: number) => ({
+    type: 'snapshot' as const, generatedAt, agents: [], alerts: [],
+    metrics: { running: 0, alerts: 0, okRate1h: null, p50_1h: null }, agentMetrics: {},
+  });
+  test('reduce: agent vắng trong snapshot và cũ hơn generatedAt bị bỏ, kèm bỏ chọn', () => {
+    let s = reduce(initialState(), { type: 'agent', agent: agent('a', { lastEventAt: 100 }) });
+    s = reduce(s, { type: 'select', id: 'a' });
+    s = reduce(s, snap(150));
+    expect(s.agents).toEqual({});
+    expect(s.selectedAgentId).toBeNull();
+  });
+  test('reduce: agent vắng trong snapshot nhưng mới hơn generatedAt được giữ', () => {
+    let s = reduce(initialState(), { type: 'agent', agent: agent('a', { lastEventAt: 200 }) });
+    s = reduce(s, { type: 'select', id: 'a' });
+    s = reduce(s, snap(150));
+    expect(Object.keys(s.agents)).toEqual(['a']);
+    expect(s.selectedAgentId).toBe('a');
+  });
+});

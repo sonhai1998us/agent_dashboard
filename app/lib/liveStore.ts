@@ -56,14 +56,15 @@ export function reduce(s: LiveState, e: LiveAction): LiveState {
       const agents: Record<string, AgentInfo> = Object.fromEntries(e.agents.map((a) => [a.id, a]));
       for (const [id, cur] of Object.entries(s.agents)) {
         const snap = agents[id];
-        if (!snap || cur.lastEventAt > snap.lastEventAt) agents[id] = cur;
+        if (snap ? cur.lastEventAt > snap.lastEventAt : cur.lastEventAt >= e.generatedAt) agents[id] = cur;
       }
       const alerts: Record<string, Alert> = Object.fromEntries(e.alerts.filter((a) => a.active).map((a) => [a.id, a]));
       for (const [id, at] of Object.entries(s.alertEventAt)) {
         if (at <= e.generatedAt) continue;
         if (s.alerts[id]) alerts[id] = s.alerts[id]; else delete alerts[id];
       }
-      return { ...s, agents, alerts, metrics: e.metrics, agentMetrics: e.agentMetrics, lastUpdateAt: e.generatedAt };
+      const selectedAgentId = s.selectedAgentId && agents[s.selectedAgentId] ? s.selectedAgentId : null;
+      return { ...s, agents, alerts, selectedAgentId, metrics: e.metrics, agentMetrics: e.agentMetrics, lastUpdateAt: e.generatedAt };
     }
     case 'calls': return { ...s, calls: { ...s.calls, [e.agentId]: mergeCalls(s.calls[e.agentId], e.calls) } };
     case 'select': return { ...s, selectedAgentId: e.id };
