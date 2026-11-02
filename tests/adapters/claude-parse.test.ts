@@ -184,3 +184,15 @@ describe('subagent status from transcript', () => {
     expect(statuses(ctx, [rec('assistant', { message: { id: 'x', stop_reason: 'end_turn', content: [] } })])).toEqual([]);
   });
 });
+
+describe('model từ assistant', () => {
+  test('message <synthetic> không ghi đè agent.model', () => {
+    const ctx = claudeCtxForPath(mainPath, CD);
+    const mk = (model: string) => JSON.stringify({ type: 'assistant', timestamp: '2026-11-02T10:00:00.000Z', message: { id: 'm-' + model, model, content: [] } });
+    const models = [mk('claude-real'), mk('<synthetic>')]
+      .flatMap((l) => parseClaudeLine(l, ctx))
+      .filter((e) => e.type === 'agent' && (e.agent as any).model !== undefined)
+      .map((e) => (e as any).agent.model);
+    expect(models).toEqual(['claude-real']);
+  });
+});

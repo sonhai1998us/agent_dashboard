@@ -160,3 +160,9 @@ test('recentCalls: mọi agent, startedAt >= since', () => {
   expect(s.recentCalls(200).map(c => c.id).sort()).toEqual(['b', 'c', 'd']);
   expect(s.recentCalls(1000)).toEqual([]);
 });
+
+test('calls có index theo started_at (recentCalls không quét toàn bảng)', () => {
+  const s = new Store(':memory:');
+  const plan = (s as any).db.prepare('EXPLAIN QUERY PLAN SELECT * FROM calls WHERE started_at >= ? ORDER BY started_at DESC, rowid DESC').all(0) as { detail: string }[];
+  expect(plan.map((p) => p.detail).join(' | ')).toMatch(/USING INDEX idx_calls_started/);
+});

@@ -97,7 +97,8 @@ export function parseClaudeLine(line: string, ctx: ClaudeFileCtx): NormalizedEve
   if (rec.type === 'assistant') {
     const msg = rec.message ?? {};
     const info: any = {};
-    if (typeof msg.model === 'string') info.model = msg.model;
+    // `<synthetic>` marks client-generated messages (errors, interrupts): not a real model
+    if (typeof msg.model === 'string' && msg.model !== '<synthetic>') info.model = msg.model;
     if (typeof rec.effort === 'string') info.effort = rec.effort;
     if (Object.keys(info).length) out.push({ type: 'agent', agent: { ...base, ...info } });
 

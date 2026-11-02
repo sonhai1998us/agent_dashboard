@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS calls (
   tokens_in INTEGER, tokens_out INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_calls_agent_started ON calls(agent_id, started_at);
+CREATE INDEX IF NOT EXISTS idx_calls_started ON calls(started_at);
 CREATE TABLE IF NOT EXISTS alerts (
   id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, kind TEXT NOT NULL, level TEXT NOT NULL,
   message TEXT NOT NULL, since INTEGER NOT NULL, active INTEGER NOT NULL
