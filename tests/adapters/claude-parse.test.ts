@@ -150,9 +150,10 @@ describe('subagent status from transcript', () => {
   test('end_turn → ended một lần; user/assistant sau đó → running một lần', () => {
     const ctx = claudeCtxForPath(subPath, CD);
     const asst = (stop: string) => rec('assistant', { message: { id: 'x', stop_reason: stop, content: [] } });
-    expect(statuses(ctx, [rec('user'), asst('tool_use'), asst('end_turn')])).toEqual(['ended']);
+    expect(statuses(ctx, [rec('user'), asst('tool_use'), asst('end_turn')])).toEqual(['running', 'ended']);
     expect(statuses(ctx, [rec('user'), asst('end_turn')])).toEqual(['running', 'ended']);
     expect(statuses(ctx, [rec('user'), rec('user')])).toEqual(['running']);
+    expect(statuses(claudeCtxForPath(subPath, CD), [asst('end_turn')])).toEqual(['ended']); // first record is the final end_turn
   });
 
   test('phiên chính không phát status từ transcript', () => {

@@ -265,13 +265,13 @@ test('Claude subagent kết thúc bằng end_turn → ended dù pid cha còn s�
   fs.mkdirSync(subDir(), { recursive: true });
   fs.writeFileSync(path.join(subDir(), 'agent-done.jsonl'), userRec() + asstRec('end_turn'));
   fs.writeFileSync(path.join(subDir(), 'agent-resumed.jsonl'), userRec() + asstRec('end_turn') + userRec());
-  fs.writeFileSync(path.join(subDir(), 'agent-working.jsonl'), userRec() + asstRec('tool_use'));
+  fs.writeFileSync(path.join(subDir(), 'agent-working.jsonl'), userRec() + asstRec('tool_use')); // tool_use, no end_turn
   sessionFile(process.pid, 'busy');
   const w = claudeWatcher();
   await w.start();
   expect(store.getAgent('claude:sess-main:done')?.status).toBe('ended');
   expect(store.getAgent('claude:sess-main:resumed')?.status).toBe('running');
-  expect(store.getAgent('claude:sess-main:working')?.status).not.toBe('ended');
+  expect(store.getAgent('claude:sess-main:working')?.status).toBe('running');
 });
 
 test('Claude: cha chết → các subagent chưa ended bị hạ xuống ended', async () => {

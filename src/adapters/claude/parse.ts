@@ -10,7 +10,7 @@ export interface ClaudeFileCtx {
   label: string | null;
   lastTs: number | null;
   resumed: boolean;
-  /** Subagent only: true after an end_turn assistant record (until it is resumed). */
+  /** Subagent only: undefined until the first status is emitted; true after end_turn, false while running. */
   ended?: boolean;
 }
 
@@ -151,7 +151,7 @@ export function parseClaudeLine(line: string, ctx: ClaudeFileCtx): NormalizedEve
     if (rec.type === 'assistant' && rec.message?.stop_reason === 'end_turn') {
       ctx.ended = true;
       out.push({ type: 'agent', agent: { ...base, status: 'ended' } });
-    } else if (ctx.ended) {
+    } else if (ctx.ended !== false) {
       ctx.ended = false;
       out.push({ type: 'agent', agent: { ...base, status: 'running' } });
     }
