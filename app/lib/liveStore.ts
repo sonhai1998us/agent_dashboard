@@ -8,6 +8,8 @@ export interface LiveState {
   conn: ConnState; lastUpdateAt: number | null; agents: Record<string, AgentInfo>;
   alerts: Record<string, Alert>; metrics: GlobalMetrics | null; agentMetrics: Record<string, AgentMetrics>;
   calls: Record<string, CallRecord[]>; selectedAgentId: string | null;
+  /** call được chọn từ timeline; cột phải cuộn tới nó */
+  selectedCallId: string | null;
   /** local time (ms) of the last applied alert event per alert id; used to resolve snapshot/WS races */
   alertEventAt: Record<string, number>;
 }
@@ -22,12 +24,13 @@ export type LiveAction =
   | { type: 'conn'; conn: ConnState }
   | SnapshotAction
   | { type: 'calls'; agentId: string; calls: CallRecord[] }
-  | { type: 'select'; id: string | null };
+  | { type: 'select'; id: string | null }
+  | { type: 'selectCall'; agentId: string; callId: string };
 
 export function initialState(): LiveState {
   return {
     conn: 'connecting', lastUpdateAt: null, agents: {}, alerts: {}, metrics: null,
-    agentMetrics: {}, calls: {}, selectedAgentId: null, alertEventAt: {},
+    agentMetrics: {}, calls: {}, selectedAgentId: null, selectedCallId: null, alertEventAt: {},
   };
 }
 
@@ -64,10 +67,11 @@ export function reduce(s: LiveState, e: LiveAction): LiveState {
         if (s.alerts[id]) alerts[id] = s.alerts[id]; else delete alerts[id];
       }
       const selectedAgentId = s.selectedAgentId && agents[s.selectedAgentId] ? s.selectedAgentId : null;
-      return { ...s, agents, alerts, selectedAgentId, metrics: e.metrics, agentMetrics: e.agentMetrics, lastUpdateAt: e.generatedAt };
+      return { ...s, agents, alerts, selectedAgentId, selectedCallId: selectedAgentId ? s.selectedCallId : null, metrics: e.metrics, agentMetrics: e.agentMetrics, lastUpdateAt: e.generatedAt };
     }
     case 'calls': return { ...s, calls: { ...s.calls, [e.agentId]: mergeCalls(s.calls[e.agentId], e.calls) } };
-    case 'select': return { ...s, selectedAgentId: e.id };
+    case 'select': return { ...s, selectedAgentId: e.id, selectedCallId: e.id === s.selectedAgentId ? s.selectedCallId : null };
+    case 'selectCall': return { ...s, selectedAgentId: e.agentId, selectedCallId: e.callId };
     default: return s;
   }
 }
@@ -135,6 +139,15 @@ async function loadCalls(id: string): Promise<void> {
 export function selectAgent(id: string): void {
   dispatch({ type: 'select', id });
   if (!loadedCalls.has(id)) void loadCalls(id);
+}
+
+export function ensureCalls(id: string): void {
+  if (!loadedCalls.has(id)) void loadCalls(id);
+}
+
+export function selectCall(agentId: string, callId: string): void {
+  dispatch({ type: 'selectCall', agentId, callId });
+  ensureCalls(agentId);
 }
 
 function subscribe(l: () => void): () => void {

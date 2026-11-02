@@ -13,7 +13,7 @@ function projectName(cwd: string | null): string {
   return parts[parts.length - 1] ?? cwd;
 }
 
-function statusOf(a: AgentInfo, alerts: Alert[]): { tone: Tone; icon: string; text: string } {
+export function statusOf(a: AgentInfo, alerts: Alert[]): { tone: Tone; icon: string; text: string } {
   const mine = alerts.filter((x) => x.agentId === a.id || x.agentId.startsWith(`${a.id}:`));
   if (mine.some((x) => x.level === 'critical')) return { tone: 'crit', icon: '■', text: 'nghiêm trọng' };
   if (mine.length > 0) return { tone: 'warn', icon: '▲', text: 'cảnh báo' };

@@ -93,3 +93,21 @@ describe('reduce: snapshot với agent vắng mặt', () => {
     expect(s.selectedAgentId).toBe('a');
   });
 });
+
+describe('reduce: selectCall', () => {
+  test('reduce: selectCall lưu agent và call được chọn', () => {
+    const s = reduce(initialState(), { type: 'selectCall', agentId: 'a', callId: 'c1' });
+    expect(s.selectedAgentId).toBe('a');
+    expect(s.selectedCallId).toBe('c1');
+  });
+  test('reduce: đổi sang agent khác thì selectedCallId reset, chọn lại cùng agent thì giữ', () => {
+    let s = reduce(initialState(), { type: 'selectCall', agentId: 'a', callId: 'c1' });
+    s = reduce(s, { type: 'select', id: 'a' });
+    expect(s.selectedCallId).toBe('c1');
+    s = reduce(s, { type: 'select', id: 'b' });
+    expect(s.selectedCallId).toBeNull();
+  });
+  test('reduce: initialState có selectedCallId null', () => {
+    expect(initialState().selectedCallId).toBeNull();
+  });
+});
