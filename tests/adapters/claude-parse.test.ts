@@ -141,3 +141,22 @@ describe('claude parser', () => {
     expect(llm.call.agentId).toBe('claude:sess-main:ab12');
   });
 });
+
+describe('subagent status from transcript', () => {
+  const rec = (type: string, extra: object = {}) => JSON.stringify({ type, timestamp: '2026-11-02T10:00:00.000Z', sessionId: 'sess-main', ...extra });
+  const statuses = (ctx: ReturnType<typeof claudeCtxForPath>, lines: string[]) =>
+    lines.flatMap((l) => parseClaudeLine(l, ctx)).filter((e) => e.type === 'agent' && (e.agent as any).status).map((e) => (e as any).agent.status);
+
+  test('end_turn → ended một lần; user/assistant sau đó → running một lần', () => {
+    const ctx = claudeCtxForPath(subPath, CD);
+    const asst = (stop: string) => rec('assistant', { message: { id: 'x', stop_reason: stop, content: [] } });
+    expect(statuses(ctx, [rec('user'), asst('tool_use'), asst('end_turn')])).toEqual(['ended']);
+    expect(statuses(ctx, [rec('user'), asst('end_turn')])).toEqual(['running', 'ended']);
+    expect(statuses(ctx, [rec('user'), rec('user')])).toEqual(['running']);
+  });
+
+  test('phiên chính không phát status từ transcript', () => {
+    const ctx = claudeCtxForPath(mainPath, CD);
+    expect(statuses(ctx, [rec('assistant', { message: { id: 'x', stop_reason: 'end_turn', content: [] } })])).toEqual([]);
+  });
+});

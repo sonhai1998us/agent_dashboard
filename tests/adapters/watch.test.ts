@@ -106,7 +106,7 @@ test('khởi động lại watcher với cùng DB → không nhân đôi call', 
 
 test('sessions/<pid>.json với pid = process.pid → agent running; pid chết → ended', async () => {
   fs.writeFileSync(mainFile(), fxClaude('main.jsonl'));
-  fs.writeFileSync(path.join(cfg.claudeDir, 'sessions', `${process.pid}.json`), JSON.stringify({ pid: process.pid, sessionId: 'sess-main', cwd: 'x', status: 'idle', updatedAt: Date.now() }));
+  fs.writeFileSync(path.join(cfg.claudeDir, 'sessions', `${process.pid}.json`), JSON.stringify({ pid: process.pid, sessionId: 'sess-main', cwd: 'x', status: 'busy', updatedAt: Date.now() }));
   const w = claudeWatcher();
   await w.start();
   expect(store.getAgent('claude:sess-main')?.status).toBe('running');
@@ -241,19 +241,51 @@ test('Codex: file không ghi quá 30 phút → ended', async () => {
   expect(store.getAgent('codex:019e5947-01fe-7393-b890-65ac89a98961')?.status).toBe('ended');
 });
 
-test('Claude: subagent chỉ running nếu lastEventAt trong 10 phút gần nhất', async () => {
-  const line = (ageMs: number) => JSON.stringify({ type: 'user', timestamp: new Date(Date.now() - ageMs).toISOString(), sessionId: 'sess-main', cwd: 'D:/x', message: { role: 'user', content: 'hi' } }) + '\n';
-  fs.writeFileSync(mainFile(), line(1000));
-  const subDir = path.join(cfg.claudeDir, 'projects', 'proj', 'sess-main', 'subagents');
-  fs.mkdirSync(subDir, { recursive: true });
-  fs.writeFileSync(path.join(subDir, 'agent-fresh.jsonl'), line(60_000));
-  fs.writeFileSync(path.join(subDir, 'agent-stale.jsonl'), line(20 * 60_000));
-  fs.writeFileSync(path.join(cfg.claudeDir, 'sessions', `${process.pid}.json`), JSON.stringify({ pid: process.pid, sessionId: 'sess-main' }));
+const recLine = (o: object) => JSON.stringify({ timestamp: new Date().toISOString(), sessionId: 'sess-main', cwd: 'D:/x', ...o }) + '\n';
+const userRec = () => recLine({ type: 'user', message: { role: 'user', content: 'hi' } });
+const asstRec = (stop: string) => recLine({ type: 'assistant', message: { id: 'm' + Math.random(), role: 'assistant', stop_reason: stop, content: [{ type: 'text', text: 'ok' }] } });
+const sessionFile = (pid: number, status: string) => fs.writeFileSync(path.join(cfg.claudeDir, 'sessions', `${process.pid}.json`), JSON.stringify({ pid, sessionId: 'sess-main', status }));
+const subDir = () => path.join(cfg.claudeDir, 'projects', 'proj', 'sess-main', 'subagents');
+
+test('Claude main: pid sống + busy → running, idle → idle', async () => {
+  fs.writeFileSync(mainFile(), userRec());
+  sessionFile(process.pid, 'idle');
   const w = claudeWatcher();
   await w.start();
+  expect(store.getAgent('claude:sess-main')?.status).toBe('idle');
+  await w.stop();
+  sessionFile(process.pid, 'busy');
+  const w2 = claudeWatcher();
+  await w2.start();
   expect(store.getAgent('claude:sess-main')?.status).toBe('running');
-  expect(store.getAgent('claude:sess-main:fresh')?.status).toBe('running');
-  expect(store.getAgent('claude:sess-main:stale')?.status).toBe('ended');
+});
+
+test('Claude subagent kết thúc bằng end_turn → ended dù pid cha còn sống; bị resume sau end_turn → running', async () => {
+  fs.writeFileSync(mainFile(), userRec());
+  fs.mkdirSync(subDir(), { recursive: true });
+  fs.writeFileSync(path.join(subDir(), 'agent-done.jsonl'), userRec() + asstRec('end_turn'));
+  fs.writeFileSync(path.join(subDir(), 'agent-resumed.jsonl'), userRec() + asstRec('end_turn') + userRec());
+  fs.writeFileSync(path.join(subDir(), 'agent-working.jsonl'), userRec() + asstRec('tool_use'));
+  sessionFile(process.pid, 'busy');
+  const w = claudeWatcher();
+  await w.start();
+  expect(store.getAgent('claude:sess-main:done')?.status).toBe('ended');
+  expect(store.getAgent('claude:sess-main:resumed')?.status).toBe('running');
+  expect(store.getAgent('claude:sess-main:working')?.status).not.toBe('ended');
+});
+
+test('Claude: cha chết → các subagent chưa ended bị hạ xuống ended', async () => {
+  fs.writeFileSync(mainFile(), userRec());
+  fs.mkdirSync(subDir(), { recursive: true });
+  fs.writeFileSync(path.join(subDir(), 'agent-resumed.jsonl'), userRec() + asstRec('end_turn') + userRec());
+  sessionFile(process.pid, 'busy');
+  const w = createClaudeWatcher(cfg, store, () => {}, { polling: true, livenessMs: 100 });
+  closers.push(() => w.stop());
+  await w.start();
+  expect(store.getAgent('claude:sess-main:resumed')?.status).toBe('running');
+  sessionFile(2 ** 22 + 12345, 'busy');
+  await waitFor(() => store.getAgent('claude:sess-main:resumed')?.status === 'ended');
+  expect(store.getAgent('claude:sess-main')?.status).toBe('ended');
 });
 
 test('stop() dọn timer và handle của watcher', async () => {

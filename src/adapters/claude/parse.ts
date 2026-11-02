@@ -10,6 +10,8 @@ export interface ClaudeFileCtx {
   label: string | null;
   lastTs: number | null;
   resumed: boolean;
+  /** Subagent only: true after an end_turn assistant record (until it is resumed). */
+  ended?: boolean;
 }
 
 const norm = (p: string) => p.replace(/\\/g, '/');
@@ -142,6 +144,16 @@ export function parseClaudeLine(line: string, ctx: ClaudeFileCtx): NormalizedEve
           produced = true;
         }
       }
+    }
+  }
+
+  if (ctx.parentId && (rec.type === 'assistant' || rec.type === 'user')) {
+    if (rec.type === 'assistant' && rec.message?.stop_reason === 'end_turn') {
+      ctx.ended = true;
+      out.push({ type: 'agent', agent: { ...base, status: 'ended' } });
+    } else if (ctx.ended) {
+      ctx.ended = false;
+      out.push({ type: 'agent', agent: { ...base, status: 'running' } });
     }
   }
 
