@@ -1,5 +1,5 @@
 'use client';
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import type { AgentInfo, Alert, CallRecord } from '@/src/core/model';
 import { ensureCalls, selectAgent, selectCall, useLive } from '../lib/liveStore';
 import { flattenTree } from '../lib/tree';
@@ -12,7 +12,7 @@ const LANE_H = 30;
 const BAR_H = 14;
 const EMPTY_CALLS: CallRecord[] = [];
 
-interface Frame { now: number; calls: Record<string, CallRecord[]>; alerts: Alert[]; }
+interface Frame { now: number; agents: Record<string, AgentInfo>; calls: Record<string, CallRecord[]>; alerts: Alert[]; }
 interface Tip { x: number; y: number; text: string; }
 
 function folder(cwd: string | null): string {
@@ -42,15 +42,17 @@ export default function AgentTimeline() {
   const [focusIdx, setFocusIdx] = useState(0);
   const [width, setWidth] = useState(0);
   const [tip, setTip] = useState<Tip | null>(null);
-  const [frame, setFrame] = useState<Frame>({ now: Date.now(), calls: {}, alerts: [] });
+  const [frame, setFrame] = useState<Frame>({ now: Date.now(), agents: {}, calls: {}, alerts: [] });
   const wrapRef = useRef<HTMLElement>(null);
   const trackRef = useRef<HTMLDivElement>(null);
   const treeRef = useRef<HTMLDivElement>(null);
-  const live = useRef({ callsMap, alertsMap });
-  live.current = { callsMap, alertsMap };
+  const live = useRef({ agents, callsMap, alertsMap });
+  live.current = { agents, callsMap, alertsMap };
+  const hasAgents = Object.keys(agents).length > 0;
 
-  const root = useMemo(() => (selected ? rootOf(selected, agents) : null), [selected, agents]);
-  const nodes = useMemo(() => (root ? flattenTree(root, Object.values(agents)) : []), [root, agents]);
+  // cây và lane chỉ dẫn xuất từ frame (cập nhật tối đa 1 lần/giây), không theo từng event WS
+  const root = useMemo(() => (selected ? rootOf(selected, frame.agents) : null), [selected, frame.agents]);
+  const nodes = useMemo(() => (root ? flattenTree(root, Object.values(frame.agents)) : []), [root, frame.agents]);
   const idsKey = nodes.map((n) => n.agent.id).join('|');
 
   // tải call cho mọi agent trong cây
@@ -58,9 +60,9 @@ export default function AgentTimeline() {
 
   // vẽ lại tối đa 1 lần/giây: ticker 1s chụp dữ liệu mới nhất; đổi cửa sổ/phiên thì chụp ngay
   const refresh = useCallback(() => {
-    setFrame({ now: Date.now(), calls: live.current.callsMap, alerts: Object.values(live.current.alertsMap) });
+    setFrame({ now: Date.now(), agents: live.current.agents, calls: live.current.callsMap, alerts: Object.values(live.current.alertsMap) });
   }, []);
-  useEffect(() => { refresh(); }, [refresh, winMin, root?.id]);
+  useEffect(() => { refresh(); }, [refresh, winMin, selected, hasAgents]);
   useEffect(() => {
     const t = setInterval(refresh, 1000);
     return () => clearInterval(t);
@@ -127,13 +129,14 @@ export default function AgentTimeline() {
     } else if (e.key === 'Escape') setTip(null);
   };
 
-  const showTip = (text: string, el: Element, mouse?: { x: number; y: number }) => {
+  const showTip = useCallback((text: string, el: Element, mouse?: { x: number; y: number }) => {
     const wrap = wrapRef.current?.getBoundingClientRect();
     if (!wrap) return;
     if (mouse) { setTip({ x: mouse.x - wrap.left, y: mouse.y - wrap.top, text }); return; }
     const r = el.getBoundingClientRect();
     setTip({ x: r.left + r.width / 2 - wrap.left, y: r.top - wrap.top, text });
-  };
+  }, []);
+  const hideTip = useCallback(() => setTip(null), []);
 
   return (
     <section className={styles.box} aria-label="Cây agent và timeline" ref={wrapRef}>
@@ -167,7 +170,7 @@ export default function AgentTimeline() {
           return (
             <div
               key={a.id} role="treeitem" aria-level={n.depth + 1} aria-selected={isSel}
-              aria-label={`${a.label}, ${st.text}`}
+              aria-label={`${a.label}, ${st.text}`} title={a.label}
               data-id={a.id} data-idx={i} tabIndex={i === focusIdx ? 0 : -1}
               className={`${styles.lane} ${isSel ? styles.sel : ''}`}
               onClick={() => selectAgent(a.id)}
@@ -175,7 +178,7 @@ export default function AgentTimeline() {
             >
               <div className={styles.who}>
                 <span className={styles.glyph} aria-hidden="true">{treeGlyph(n.depth, n.isLast)}</span>
-                <span className={styles.pill} data-tone={st.tone}><span aria-hidden="true">{st.icon}</span> {a.label}</span>
+                <span className={styles.pill} data-tone={st.tone}><span aria-hidden="true">{st.icon}</span> <span className={styles.plabel}>{a.label}</span></span>
                 <span className={`${styles.model} mono`}>{[a.model, a.effort].filter(Boolean).join(' · ') || '—'}</span>
                 {mine.length > 0 && (
                   <span className={`${styles.alert} mono`}>
@@ -186,8 +189,8 @@ export default function AgentTimeline() {
               <div className={styles.track} ref={i === 0 ? trackRef : undefined}>
                 {width > 0 && (
                   <Lane
-                    width={width} bars={lane.bars} zones={lane.loopZones} onTip={showTip} onHide={() => setTip(null)}
-                    onPick={(callId) => selectCall(a.id, callId)}
+                    width={width} bars={lane.bars} zones={lane.loopZones} agentId={a.id} onTip={showTip} onHide={hideTip}
+                    onPick={selectCall}
                   />
                 )}
               </div>
@@ -210,21 +213,24 @@ export default function AgentTimeline() {
   );
 }
 
-function Lane({ width, bars, zones, onTip, onHide, onPick }: {
-  width: number; bars: Bar[]; zones: LoopZone[];
+const Lane = memo(function Lane({ agentId, width, bars, zones, onTip, onHide, onPick }: {
+  agentId: string; width: number; bars: Bar[]; zones: LoopZone[];
   onTip: (text: string, el: Element, mouse?: { x: number; y: number }) => void;
-  onHide: () => void; onPick: (callId: string) => void;
+  onHide: () => void; onPick: (agentId: string, callId: string) => void;
 }) {
   const y = (LANE_H - BAR_H) / 2;
   return (
     <svg width={width} height={LANE_H} viewBox={`0 0 ${width} ${LANE_H}`} className={styles.svg} role="presentation">
       <defs>
         <pattern id="loop-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-          <rect width="6" height="6" fill="#FBBF24" fillOpacity="0.12" />
-          <rect width="2.5" height="6" fill="#FBBF24" fillOpacity="0.4" />
+          <rect width="6" height="6" style={{ fill: 'var(--warn)' }} fillOpacity="0.12" />
+          <rect width="2.5" height="6" style={{ fill: 'var(--warn)' }} fillOpacity="0.4" />
         </pattern>
       </defs>
       {zones.map((z, i) => <rect key={i} x={z.x} y={2} width={z.w} height={LANE_H - 4} fill="url(#loop-hatch)" />)}
+      {bars.filter((b) => b.state === 'error').map((b) => (
+        <path key={`n${b.callId}`} className={styles.notch} d={`M${b.x} ${y - 4}h${Math.min(b.w, 8)}v3h-${Math.min(b.w, 8)}z`} />
+      ))}
       {bars.map((b) => (
         <rect
           key={b.callId} data-bar={b.callId} className={styles.bar} data-state={b.state}
@@ -235,10 +241,10 @@ function Lane({ width, bars, zones, onTip, onHide, onPick }: {
           onMouseLeave={onHide}
           onFocus={(e) => onTip(b.title, e.currentTarget)}
           onBlur={onHide}
-          onClick={(e) => { e.stopPropagation(); onPick(b.callId); }}
+          onClick={(e) => { e.stopPropagation(); onPick(agentId, b.callId); }}
         />
       ))}
       <line x1={width - 0.5} x2={width - 0.5} y1={0} y2={LANE_H} className={styles.now} />
     </svg>
   );
-}
+});

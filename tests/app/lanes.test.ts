@@ -71,3 +71,12 @@ describe('layoutLane', () => {
     expect(r.bars[0].title).toContain('a.ts');
   });
 });
+
+describe('layoutLane: trạng thái trong title', () => {
+  test('title có chữ trạng thái, không chỉ dựa vào màu', () => {
+    const e = layoutLane([call('c', MIN, { ok: false })], agent(), win, 500, []);
+    expect(e.bars[0].title.startsWith('lỗi')).toBe(true);
+    const o = layoutLane([call('c', MIN)], agent(), win, 500, []);
+    expect(o.bars[0].title.startsWith('ok')).toBe(true);
+  });
+});

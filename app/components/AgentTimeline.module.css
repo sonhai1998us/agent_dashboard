@@ -12,20 +12,22 @@
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
 .axis, .lane { display: grid; grid-template-columns: 260px minmax(0, 1fr); align-items: center; }
-.axis { font-size: 10px; color: var(--wait); }
+.axis { font-size: 10px; color: var(--muted); }
 .ticks { display: flex; justify-content: space-between; }
 .tree { margin-top: 2px; }
-.lane { min-height: 30px; border-bottom: 1px solid #1E293B; cursor: pointer; }
-.lane:hover { background: rgba(22, 32, 58, .6); }
-.sel { background: var(--sel); outline: 1px solid #B45309; outline-offset: -1px; }
+.lane { min-height: 30px; border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent); cursor: pointer; }
+.lane:hover { background: color-mix(in srgb, var(--sel) 60%, transparent); }
+.sel { background: var(--sel); outline: 1px solid color-mix(in srgb, var(--warn) 60%, transparent); outline-offset: -1px; }
 .lane:focus-visible { outline: 2px solid var(--run); }
 .who { display: flex; gap: 6px; align-items: center; white-space: nowrap; overflow: hidden; padding-right: 8px; min-width: 0; }
 .glyph { color: var(--wait); font-family: var(--font-fira-code), ui-monospace, monospace; white-space: pre; }
-.pill { display: inline-flex; align-items: center; gap: 4px; padding: 1px 7px; border-radius: 999px; font-size: 11px; border: 1px solid var(--wait); color: var(--muted); min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.pill { display: inline-flex; align-items: center; gap: 4px; padding: 1px 7px; border-radius: 999px; font-size: 11px; border: 1px solid var(--wait); color: var(--muted); min-width: 0; flex: 0 1 auto; overflow: hidden; }
 .pill[data-tone='run'] { border-color: var(--run); color: var(--run); }
 .pill[data-tone='warn'] { border-color: var(--warn); color: var(--warn); }
 .pill[data-tone='crit'] { border-color: var(--err); color: var(--err); }
-.model { color: var(--muted); font-size: 10px; flex: none; }
+.model { color: var(--muted); font-size: 10px; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.plabel { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.notch { fill: var(--err); stroke: var(--fg); stroke-width: 1; }
 .alert { color: var(--warn); font-size: 10px; flex: none; }
 .track { position: relative; height: 30px; min-width: 0; }
 .svg { display: block; }
@@ -37,7 +39,7 @@
 .bar:hover { stroke: var(--fg); stroke-width: 1; }
 .bar:focus { outline: none; stroke: var(--fg); stroke-width: 2; }
 .now { stroke: var(--fg); stroke-opacity: .5; stroke-width: 1; }
-.tip { position: absolute; z-index: 5; transform: translate(-50%, calc(-100% - 8px)); max-width: 420px; pointer-events: none; background: #0B1222; border: 1px solid var(--border); border-radius: 4px; padding: 3px 7px; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tip { position: absolute; z-index: 5; transform: translate(-50%, calc(-100% - 8px)); max-width: 420px; pointer-events: none; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 3px 7px; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 8px; font-size: 10px; color: var(--muted); }
 .legend span { display: inline-flex; align-items: center; gap: 4px; }
 .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; }
@@ -45,7 +47,7 @@
 .sw[data-s='error'] { background: var(--err); }
 .sw[data-s='running'] { background: var(--run); }
 .sw[data-s='unknown'] { background: var(--wait); }
-.sw[data-s='loop'] { background: repeating-linear-gradient(45deg, rgba(251, 191, 36, .5) 0 2px, rgba(251, 191, 36, .12) 2px 4px); }
+.sw[data-s='loop'] { background: repeating-linear-gradient(45deg, color-mix(in srgb, var(--warn) 50%, transparent) 0 2px, color-mix(in srgb, var(--warn) 12%, transparent) 2px 4px); }
 .nowSw { display: inline-block; width: 1px; height: 10px; background: var(--fg); opacity: .5; }
 
 @media (max-width: 1023px) {

@@ -8,6 +8,7 @@ export interface LoopZone { x: number; w: number; }
 export const WINDOWS_MIN = [1, 5, 15, 60] as const;
 export const DEFAULT_WINDOW_MIN = 5;
 const MIN_W = 2;
+const STATE_TEXT: Record<BarState, string> = { ok: 'ok', error: 'lỗi', running: 'đang chạy', unknown: 'không rõ' };
 const LOOP_SPAN = 20; // số call tool gần nhất dùng để tìm khoá lặp
 
 function stateOf(c: CallRecord, agent: AgentInfo): BarState {
@@ -34,7 +35,7 @@ export function layoutLane(
     const dur = c.endedAt === null ? 'đang chạy' : fmtDuration(c.endedAt - c.startedAt);
     bars.push({
       callId: c.id, x, w: Math.min(w, Math.max(MIN_W, width - x)), state: stateOf(c, agent),
-      title: `${c.name}${c.inputPreview ? ` · ${c.inputPreview}` : ''} · ${dur}`,
+      title: `${STATE_TEXT[stateOf(c, agent)]} · ${c.name}${c.inputPreview ? ` · ${c.inputPreview}` : ''} · ${dur}`,
     });
   }
 
