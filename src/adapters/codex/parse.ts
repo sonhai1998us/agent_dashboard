@@ -43,6 +43,7 @@ export function parseCodexLine(line: string, ctx: CodexFileCtx): NormalizedEvent
     return ctx.agentId ? [{ type: 'parse_error', agentId: ctx.agentId }] : [];
   }
   const payload: any = rec.payload && typeof rec.payload === 'object' ? rec.payload : {};
+  const hadCwd = !!ctx.cwd;
 
   if (rec.type === 'session_meta') {
     if (typeof payload.id === 'string') ctx.agentId = `codex:${payload.id}`;
@@ -88,8 +89,14 @@ export function parseCodexLine(line: string, ctx: CodexFileCtx): NormalizedEvent
     if (ctx.model) agent.model = ctx.model;
     Object.assign(agent, info);
     out.push({ type: 'agent', agent });
-  } else if (Object.keys(info).length) {
-    out.push({ type: 'agent', agent: { ...base, ...info } });
+  } else {
+    if (!hadCwd && ctx.cwd && prevTs !== null) {
+      // introduced without a cwd: project/label come from the first record that has one
+      info.cwd = ctx.cwd;
+      const label = ctx.resumed ? '' : lastSegment(ctx.cwd);
+      if (label) info.label = label;
+    }
+    if (Object.keys(info).length) out.push({ type: 'agent', agent: { ...base, ...info } });
   }
 
   const at = ts ?? ctx.lastTs ?? Date.now();

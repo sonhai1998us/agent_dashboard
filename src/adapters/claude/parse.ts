@@ -10,6 +10,8 @@ export interface ClaudeFileCtx {
   label: string | null;
   lastTs: number | null;
   resumed: boolean;
+  /** First cwd seen in this file (records without one do not reset it). */
+  cwd?: string | null;
   /** Subagent only: undefined until the first status is emitted; true after end_turn, false while running. */
   ended?: boolean;
 }
@@ -78,17 +80,25 @@ export function parseClaudeLine(line: string, ctx: ClaudeFileCtx): NormalizedEve
     out.push({ type: 'agent', agent: { ...base, label: title } });
   }
 
+  const newCwd = !ctx.cwd && typeof rec.cwd === 'string' && rec.cwd !== '';
+  if (newCwd) ctx.cwd = rec.cwd;
+  /** cwd + the default cwd-derived label (fresh files only, never over an explicit label). */
+  const cwdFields = (): { cwd?: string; label?: string } => {
+    if (!ctx.cwd) return {};
+    const cwdBase = path.win32.basename(norm(ctx.cwd));
+    return !ctx.label && !ctx.resumed && cwdBase ? { cwd: ctx.cwd, label: cwdBase } : { cwd: ctx.cwd };
+  };
+
   // First timestamped record introduces the agent
   if (ts !== null && prevTs === null) {
-    const cwd = typeof rec.cwd === 'string' ? rec.cwd : null;
-    const cwdBase = cwd ? path.win32.basename(norm(cwd)) : '';
-    const label = ctx.label ?? (ctx.resumed ? null : cwdBase || null);
-    const agent: any = { ...base, parentId: ctx.parentId };
+    const agent: any = { ...base, parentId: ctx.parentId, ...cwdFields() };
+    if (ctx.label) agent.label = ctx.label;
     if (!ctx.resumed) agent.startedAt = ts;
-    if (cwd) agent.cwd = cwd;
-    if (label) agent.label = label;
     if (ctx.role) agent.role = ctx.role;
     out.push({ type: 'agent', agent });
+  } else if (newCwd && prevTs !== null) {
+    // the agent was introduced by a record without cwd: project/label come from the first record that has one
+    out.push({ type: 'agent', agent: { ...base, ...cwdFields() } });
   }
 
   const at = ts ?? ctx.lastTs ?? Date.now();

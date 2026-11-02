@@ -196,3 +196,33 @@ describe('model từ assistant', () => {
     expect(models).toEqual(['claude-real']);
   });
 });
+
+describe('cwd đến muộn', () => {
+  const at = (s: number) => `2026-11-02T10:00:${String(s).padStart(2, '0')}.000Z`;
+  test('record có timestamp đầu tiên thiếu cwd → cwd và label lấy từ record đầu tiên có cwd', () => {
+    const ctx = claudeCtxForPath(mainPath, CD);
+    const ev = [
+      JSON.stringify({ type: 'summary', timestamp: at(0) }),
+      JSON.stringify({ type: 'user', timestamp: at(1), cwd: 'D:\\Work\\muon-app', message: { role: 'user', content: 'hi' } }),
+      JSON.stringify({ type: 'user', timestamp: at(2), cwd: 'D:\\Work\\khac', message: { role: 'user', content: 'hi' } }),
+    ].flatMap((l) => parseClaudeLine(l, ctx));
+    const withCwd = ev.filter((e) => e.type === 'agent' && (e.agent as any).cwd !== undefined).map((e) => (e as any).agent);
+    expect(withCwd).toHaveLength(1);
+    expect(withCwd[0]).toMatchObject({ cwd: 'D:\\Work\\muon-app', label: 'muon-app' });
+  });
+  test('cwd đến muộn không ghi đè label tường minh, và resumed thì không đặt label', () => {
+    const ctx = claudeCtxForPath(mainPath, CD);
+    parseClaudeLine(JSON.stringify({ type: 'custom-title', customTitle: 'Tieu de' }), ctx);
+    parseClaudeLine(JSON.stringify({ type: 'summary', timestamp: at(0) }), ctx);
+    const a = parseClaudeLine(JSON.stringify({ type: 'user', timestamp: at(1), cwd: 'D:\\Work\\x', message: { content: 'hi' } }), ctx)
+      .find((e) => e.type === 'agent') as any;
+    expect(a.agent.cwd).toBe('D:\\Work\\x');
+    expect(a.agent).not.toHaveProperty('label');
+    const r = claudeCtxForPath(mainPath, CD, undefined, { resumed: true });
+    parseClaudeLine(JSON.stringify({ type: 'summary', timestamp: at(0) }), r);
+    const b = parseClaudeLine(JSON.stringify({ type: 'user', timestamp: at(1), cwd: 'D:\\Work\\y', message: { content: 'hi' } }), r)
+      .find((e) => e.type === 'agent') as any;
+    expect(b.agent.cwd).toBe('D:\\Work\\y');
+    expect(b.agent).not.toHaveProperty('label');
+  });
+});

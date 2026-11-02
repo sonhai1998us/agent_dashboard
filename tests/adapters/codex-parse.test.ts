@@ -120,3 +120,17 @@ describe('codex parser', () => {
     expect((ev.find((e) => e.type === 'call_end') as any).ok).toBe(false);
   });
 });
+
+describe('codex: cwd đến muộn', () => {
+  test('session_meta không có cwd → cwd và label lấy từ turn_context đầu tiên có cwd', () => {
+    const ctx = freshCtx();
+    const ev = [
+      JSON.stringify({ timestamp: '2026-05-24T09:18:10.000Z', type: 'session_meta', payload: { id: UUID } }),
+      JSON.stringify({ timestamp: '2026-05-24T09:18:11.000Z', type: 'turn_context', payload: { cwd: 'C:\\Work\\muon', effort: 'high' } }),
+      JSON.stringify({ timestamp: '2026-05-24T09:18:12.000Z', type: 'turn_context', payload: { cwd: 'C:\\Work\\muon' } }),
+    ].flatMap((l) => parseCodexLine(l, ctx));
+    const labelled = ev.filter((e) => e.type === 'agent' && (e.agent as any).label !== undefined).map((e) => (e as any).agent);
+    expect(labelled).toHaveLength(1);
+    expect(labelled[0]).toMatchObject({ cwd: 'C:\\Work\\muon', label: 'muon' });
+  });
+});

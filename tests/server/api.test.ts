@@ -198,7 +198,7 @@ test('server trả /api/snapshot ngay khi backfill lớn còn đang chạy; log 
     const now = Date.now();
     for (let i = 0; i < N; i++) {
       const sid = `bulk-${String(i).padStart(4, '0')}`;
-      const body = Array.from({ length: 40 }, (_, k) => line({ type: 'user', timestamp: new Date(now - 60_000 + k).toISOString(), sessionId: sid, cwd: 'D:\Work\bulk', message: { role: 'user', content: 'x'.repeat(200) } })).join('');
+      const body = Array.from({ length: 40 }, (_, k) => line({ type: 'user', timestamp: new Date(now - 60_000 + k).toISOString(), sessionId: sid, cwd: 'D:/Work/bulk', message: { role: 'user', content: 'x'.repeat(200) } })).join('');
       fs.writeFileSync(path.join(cfg.claudeDir, 'projects', 'proj', `${sid}.jsonl`), body);
     }
     const s = await start();
