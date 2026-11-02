@@ -1,0 +1,58 @@
+export type Source = 'claude' | 'codex';
+export type AgentStatus = 'running' | 'idle' | 'ended';
+
+export interface AgentInfo {
+  id: string; // 'claude:<sessionId>' | 'claude:<sessionId>:<agentId>' | 'codex:<threadId>'
+  source: Source;
+  sessionId: string;
+  parentId: string | null;
+  label: string;
+  role: string | null;
+  model: string | null;
+  effort: string | null;
+  cwd: string | null;
+  pid: number | null;
+  startedAt: number; // epoch ms
+  lastEventAt: number; // epoch ms
+  status: AgentStatus;
+  parseErrors: number;
+}
+
+export interface CallRecord {
+  id: string;
+  agentId: string;
+  kind: 'tool' | 'llm';
+  name: string;
+  inputHash: string;
+  inputPreview: string; // <= 200 chars
+  startedAt: number;
+  endedAt: number | null;
+  ok: boolean | null;
+  errorPreview: string | null;
+  tokensIn: number | null;
+  tokensOut: number | null;
+}
+
+export type AlertKind = 'stuck' | 'long_tool' | 'loop' | 'error_burst';
+
+export interface Alert {
+  id: string;
+  agentId: string;
+  kind: AlertKind;
+  level: 'warn' | 'critical';
+  message: string;
+  since: number;
+  active: boolean;
+}
+
+export type NormalizedEvent =
+  | { type: 'agent'; agent: Partial<AgentInfo> & Pick<AgentInfo, 'id' | 'source' | 'sessionId'> }
+  | { type: 'call_start'; call: Omit<CallRecord, 'endedAt' | 'ok' | 'errorPreview'> }
+  | { type: 'call_end'; agentId: string; callId: string; endedAt: number; ok: boolean; errorPreview: string | null }
+  | { type: 'activity'; agentId: string; at: number }
+  | { type: 'parse_error'; agentId: string };
+
+export type HubEvent =
+  | { type: 'agent'; agent: AgentInfo }
+  | { type: 'call'; call: CallRecord }
+  | { type: 'alert'; alert: Alert };
