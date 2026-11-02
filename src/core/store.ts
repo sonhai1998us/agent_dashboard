@@ -26,6 +26,9 @@ CREATE TABLE IF NOT EXISTS alerts (
 CREATE TABLE IF NOT EXISTS offsets (
   file TEXT PRIMARY KEY, offset INTEGER NOT NULL, lines INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS meta (
+  key TEXT PRIMARY KEY, value TEXT NOT NULL
+);
 `;
 
 const PREVIEW_MAX = 200;
@@ -140,6 +143,22 @@ export class Store {
 
   activeAlerts(): Alert[] {
     return (this.db.prepare('SELECT * FROM alerts WHERE active = 1 ORDER BY since ASC').all() as Row[]).map(toAlert);
+  }
+
+  getMeta(key: string): string | undefined {
+    const r = this.db.prepare('SELECT value FROM meta WHERE key = ?').get(key) as Row | undefined;
+    return r ? r.value : undefined;
+  }
+
+  setMeta(key: string, value: string): void {
+    this.db.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(key, value);
+  }
+
+  /** Drops all ingested data (agents, calls, alerts, offsets) so logs are re-parsed from scratch. */
+  clearIngested(): void {
+    this.transaction(() => {
+      for (const t of ['agents', 'calls', 'alerts', 'offsets']) this.db.exec(`DELETE FROM ${t}`);
+    });
   }
 
   getOffset(file: string): { offset: number; lines: number } | undefined {

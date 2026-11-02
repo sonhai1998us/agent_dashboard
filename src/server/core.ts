@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Config } from '@/src/core/config';
 import { Store } from '@/src/core/store';
+import { INGEST_VERSION } from '@/src/core/version';
 import { Hub } from '@/src/core/hub';
 import { DetectEngine } from '@/src/detect/engine';
 import { createClaudeWatcher } from '@/src/adapters/claude/watch';
@@ -22,6 +23,10 @@ export const TICK_MS = 5000;
 export async function createCore(cfg: Config, watcherOptions: WatcherOptions = {}): Promise<Core> {
   fs.mkdirSync(cfg.home, { recursive: true });
   const store = new Store(path.join(cfg.home, 'acctv.db'));
+  if (store.getMeta('ingestVersion') !== String(INGEST_VERSION)) {
+    store.clearIngested();
+    store.setMeta('ingestVersion', String(INGEST_VERSION));
+  }
   const hub = new Hub();
   const engine = new DetectEngine(store, cfg, (e) => hub.publish(e));
 
