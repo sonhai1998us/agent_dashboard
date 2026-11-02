@@ -136,3 +136,11 @@ test('orphan call_end tự tạo agent thì phát sự kiện agent', () => {
   const out = s.applyEvent({ type: 'call_end', agentId: 'claude:new', callId: 'zz', endedAt: 4000, ok: true, errorPreview: null });
   expect(out).toEqual([expect.objectContaining({ type: 'agent', agent: expect.objectContaining({ id: 'claude:new', lastEventAt: 4000 }) })]);
 });
+
+test('transaction: commit gộp ghi, lỗi thì rollback', () => {
+  const s = new Store(':memory:');
+  s.transaction(() => { s.setOffset('a', 1, 1); s.setOffset('b', 2, 2); });
+  expect(s.getOffset('b')).toEqual({ offset: 2, lines: 2 });
+  expect(() => s.transaction(() => { s.setOffset('c', 3, 3); throw new Error('boom'); })).toThrow('boom');
+  expect(s.getOffset('c')).toBeUndefined();
+});

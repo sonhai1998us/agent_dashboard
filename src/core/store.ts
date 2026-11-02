@@ -69,7 +69,20 @@ export class Store {
   constructor(dbPath: string) {
     this.db = new DatabaseSync(dbPath);
     this.db.exec('PRAGMA journal_mode = WAL;');
+    this.db.exec('PRAGMA synchronous = NORMAL;');
     this.db.exec(SCHEMA);
+  }
+
+  transaction<T>(fn: () => T): T {
+    this.db.exec('BEGIN');
+    try {
+      const r = fn();
+      this.db.exec('COMMIT');
+      return r;
+    } catch (e) {
+      try { this.db.exec('ROLLBACK'); } catch { /* already rolled back */ }
+      throw e;
+    }
   }
 
   close(): void {
