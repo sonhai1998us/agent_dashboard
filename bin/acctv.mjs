@@ -26,4 +26,7 @@ const code = await main(process.argv.slice(2), {
   width: process.stdout.columns || 100,
   signal: ac.signal,
 });
-process.exit(code);
+// Let pending stdout/stderr writes flush (pipes are async on POSIX) instead of exiting mid-write.
+process.exitCode = code;
+// Safety net: if a lingering handle keeps the loop alive after `serve`/`watch` stopped, still exit.
+setTimeout(() => process.exit(code), 3000).unref();

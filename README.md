@@ -4,7 +4,7 @@ Dashboard cục bộ để theo dõi các agent Claude Code và Codex đang ch�
 
 ## Yêu cầu
 
-- Node.js >= 22.13 (dùng `node:sqlite`)
+- Node.js >= 22.15 (dùng `node:sqlite` và `zlib.zstdDecompressSync`)
 - Đã kiểm thử trên Windows 11
 
 ## Cài đặt và chạy

@@ -7,7 +7,7 @@
     "acctv": "bin/acctv.mjs"
   },
   "engines": {
-    "node": ">=22.13"
+    "node": ">=22.15"
   },
   "scripts": {
     "test": "vitest run",
