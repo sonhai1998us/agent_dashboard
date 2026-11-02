@@ -6,6 +6,8 @@ export interface CodexFileCtx {
   lastTs: number | null;
   turnOpen: boolean;
   resumed: boolean;
+  /** True once a task_started/task_complete/turn_aborted was seen (a resumed ctx starts unknown). */
+  turnKnown?: boolean;
   // Optional state learned while parsing (not needed to construct a ctx).
   model?: string | null;
   parentId?: string | null;
@@ -103,8 +105,8 @@ export function parseCodexLine(line: string, ctx: CodexFileCtx): NormalizedEvent
   let produced = false;
 
   if (rec.type === 'event_msg') {
-    if (ptype === 'task_started') ctx.turnOpen = true;
-    else if (ptype === 'task_complete' || ptype === 'turn_aborted') ctx.turnOpen = false;
+    if (ptype === 'task_started') { ctx.turnOpen = true; ctx.turnKnown = true; }
+    else if (ptype === 'task_complete' || ptype === 'turn_aborted') { ctx.turnOpen = false; ctx.turnKnown = true; }
   } else if (rec.type === 'response_item' && typeof payload.call_id === 'string') {
     if (ptype === 'function_call' || ptype === 'custom_tool_call') {
       const name = String(payload.name ?? 'tool');

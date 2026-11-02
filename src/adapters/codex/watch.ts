@@ -1,13 +1,26 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Config } from '@/src/core/config';
-import type { HubEvent } from '@/src/core/model';
+import type { AgentStatus, HubEvent } from '@/src/core/model';
 import type { Store } from '@/src/core/store';
 import { codexCtxForPath, parseCodexLine, type CodexFileCtx } from './parse';
 import { createTailCore, type Watcher, type WatcherOptions } from '../watchBase';
 
+/** Resumed ctx with unknown turn state: running only if the file was written this recently. */
 const ACTIVE_MS = 120_000;
 const ENDED_MS = 30 * 60_000;
+
+/**
+ * Codex liveness: an open turn stays `running` however long a command takes (so stuck/long_tool can
+ * fire); a closed turn is `idle`; no write for 30 min is `ended`. A ctx resumed mid-file does not know
+ * whether a turn is open until the next task_* event, so it falls back to the file's recency.
+ */
+export function codexStatus(ctx: Pick<CodexFileCtx, 'turnOpen' | 'resumed' | 'turnKnown'>, ageMs: number): AgentStatus {
+  if (ageMs >= ENDED_MS) return 'ended';
+  const known = !ctx.resumed || ctx.turnKnown === true;
+  if (known) return ctx.turnOpen ? 'running' : 'idle';
+  return ageMs <= ACTIVE_MS ? 'running' : 'idle';
+}
 
 export function createCodexWatcher(
   cfg: Config, store: Store, onEvents: (evs: HubEvent[]) => void, options: WatcherOptions = {},
@@ -38,8 +51,7 @@ export function createCodexWatcher(
         if (!ctx.agentId) continue;
         let mtime: number;
         try { mtime = fs.statSync(file).mtimeMs; } catch { continue; }
-        const age = now - mtime;
-        const status = age > ENDED_MS ? 'ended' : age <= ACTIVE_MS && ctx.turnOpen ? 'running' : 'idle';
+        const status = codexStatus(ctx, now - mtime);
         const a = store.getAgent(ctx.agentId);
         if (!a || a.status === status) continue;
         const updated = store.setAgentStatus(ctx.agentId, status);
