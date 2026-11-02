@@ -5,7 +5,7 @@ import { renderList, renderWatch } from '@/cli/render';
 const ANSI = /\x1b\[/;
 
 const agent = (o: Partial<AgentInfo> & Pick<AgentInfo, 'id'>): AgentInfo => ({
-  source: 'claude', sessionId: 'abcdef1234567890', parentId: null, parentToolUseId: null, label: 'demo', role: null, model: null, effort: null,
+  source: 'claude', sessionId: 'abcdef1234567890', parentId: null, parentToolUseId: null, requestShape: null, label: 'demo', role: null, model: null, effort: null,
   cwd: null, pid: null, startedAt: 1_000, lastEventAt: 2_000, status: 'running', parseErrors: 0, ...o,
 });
 const alert = (o: Partial<Alert> & Pick<Alert, 'agentId'>): Alert => ({

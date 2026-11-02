@@ -3,7 +3,7 @@ import { percentile, agentMetrics, globalMetrics } from '@/src/core/metrics';
 import type { AgentInfo, Alert, CallRecord } from '@/src/core/model';
 
 const agent = (o: Partial<AgentInfo> = {}): AgentInfo => ({
-  id: 'claude:s1', source: 'claude', sessionId: 's1', parentId: null, parentToolUseId: null, label: 'a', role: null,
+  id: 'claude:s1', source: 'claude', sessionId: 's1', parentId: null, parentToolUseId: null, requestShape: null, label: 'a', role: null,
   model: null, effort: null, cwd: null, pid: null, startedAt: 1000, lastEventAt: 5000,
   status: 'running', parseErrors: 0, ...o,
 });

@@ -15,7 +15,10 @@ const NO_WAIT: Set<string> = new Set();
 /** Ids of this agent's calls that spawned a subagent which has not ended yet (the parent is waiting on it). */
 export function waitingCallIds(agentId: string, agents: Iterable<AgentInfo>): Set<string> {
   const out = new Set<string>();
-  for (const a of agents) if (a.parentId === agentId && a.parentToolUseId && a.status !== 'ended') out.add(a.parentToolUseId);
+  for (const a of agents) {
+    // a background subagent does not block its parent's call (it ends at launch)
+    if (a.parentId === agentId && a.parentToolUseId && a.status !== 'ended' && a.requestShape !== 'background') out.add(a.parentToolUseId);
+  }
   return out;
 }
 

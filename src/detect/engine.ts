@@ -55,7 +55,7 @@ export class DetectEngine {
     // calls (Agent/Task) whose foreground subagent is still live: the parent is waiting, not slow
     const waiting = new Set<string>();
     for (const a of agents) {
-      if (a.parentId && a.parentToolUseId && a.status !== 'ended') waiting.add(`${a.parentId}\u0000${a.parentToolUseId}`);
+      if (a.parentId && a.parentToolUseId && a.status !== 'ended' && a.requestShape !== 'background') waiting.add(`${a.parentId}\u0000${a.parentToolUseId}`);
     }
     for (const a of agents) {
       if (a.status === 'ended') {

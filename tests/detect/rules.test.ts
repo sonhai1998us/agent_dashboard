@@ -4,7 +4,7 @@ import { DEFAULT_THRESHOLDS as T } from '@/src/core/config';
 import type { AgentInfo, CallRecord } from '@/src/core/model';
 
 const agent = (o: Partial<AgentInfo> = {}): AgentInfo => ({
-  id: 'claude:s1', source: 'claude', sessionId: 's1', parentId: null, parentToolUseId: null, label: 'demo', role: null, model: null,
+  id: 'claude:s1', source: 'claude', sessionId: 's1', parentId: null, parentToolUseId: null, requestShape: null, label: 'demo', role: null, model: null,
   effort: null, cwd: null, pid: null, startedAt: 0, lastEventAt: 1000, status: 'running', parseErrors: 0, ...o,
 });
 let n = 0;

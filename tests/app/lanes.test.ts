@@ -8,7 +8,7 @@ const call = (id: string, startedAt: number, o: Partial<CallRecord> = {}): CallR
   ok: true, errorPreview: null, tokensIn: null, tokensOut: null, ...o,
 });
 const agent = (o: Partial<AgentInfo> = {}): AgentInfo => ({
-  id: 'a', source: 'claude', sessionId: 'a', parentId: null, parentToolUseId: null, label: 'a', role: null, model: null, effort: null,
+  id: 'a', source: 'claude', sessionId: 'a', parentId: null, parentToolUseId: null, requestShape: null, label: 'a', role: null, model: null, effort: null,
   cwd: null, pid: null, startedAt: 0, lastEventAt: 0, status: 'running', parseErrors: 0, ...o,
 });
 const loopAlert = (o: Partial<Alert> = {}): Alert => ({ id: 'a:loop', agentId: 'a', kind: 'loop', level: 'warn', message: 'x', since: 0, active: true, ...o });
@@ -97,7 +97,9 @@ describe('layoutLane: chờ subagent', () => {
       agent({ id: 'k2', parentId: 'a', parentToolUseId: 't2', status: 'ended' }),
       agent({ id: 'k3', parentId: 'b', parentToolUseId: 't3', status: 'running' }),
       agent({ id: 'k4', parentId: 'a', parentToolUseId: null, status: 'idle' }),
+      agent({ id: 'k5', parentId: 'a', parentToolUseId: 't5', status: 'running', requestShape: 'background' }),
+      agent({ id: 'k6', parentId: 'a', parentToolUseId: 't6', status: 'running', requestShape: 'foreground' }),
     ];
-    expect([...waitingCallIds('a', kids)]).toEqual(['t1']);
+    expect([...waitingCallIds('a', kids)]).toEqual(['t1', 't6']);
   });
 });

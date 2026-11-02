@@ -4,7 +4,7 @@ import { buildRoots, flattenTree } from '@/app/lib/tree';
 
 function ag(id: string, o: Partial<AgentInfo> = {}): AgentInfo {
   return {
-    id, source: 'claude', sessionId: id, parentId: null, parentToolUseId: null, label: id, role: null, model: null, effort: null,
+    id, source: 'claude', sessionId: id, parentId: null, parentToolUseId: null, requestShape: null, label: id, role: null, model: null, effort: null,
     cwd: null, pid: null, startedAt: 0, lastEventAt: 0, status: 'idle', parseErrors: 0, ...o,
   };
 }

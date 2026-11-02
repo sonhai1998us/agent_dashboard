@@ -8,6 +8,11 @@ export interface AgentInfo {
   parentId: string | null;
   /** Subagent only: id of the parent's tool call (Agent/Task) that spawned it. */
   parentToolUseId: string | null;
+  /**
+   * Subagent only (meta.json `requestShape`): a foreground subagent blocks the parent's spawning call;
+   * a background one is launched async (the parent's call ends at once). null = unknown.
+   */
+  requestShape: 'background' | 'foreground' | null;
   label: string;
   role: string | null;
   model: string | null;

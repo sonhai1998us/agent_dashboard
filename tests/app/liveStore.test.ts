@@ -7,7 +7,7 @@ const call = (id: string, startedAt: number, o: Partial<CallRecord> = {}): CallR
   ok: null, errorPreview: null, tokensIn: null, tokensOut: null, ...o,
 });
 const agent = (id: string, o: Partial<AgentInfo> = {}): AgentInfo => ({
-  id, source: 'claude', sessionId: id, parentId: null, parentToolUseId: null, label: id, role: null, model: null, effort: null,
+  id, source: 'claude', sessionId: id, parentId: null, parentToolUseId: null, requestShape: null, label: id, role: null, model: null, effort: null,
   cwd: null, pid: null, startedAt: 0, lastEventAt: 0, status: 'running', parseErrors: 0, ...o,
 });
 const alert = (o: Partial<Alert> = {}): Alert => ({ id: 'al1', agentId: 'a', kind: 'stuck', level: 'warn', message: 'm', since: 1, active: true, ...o });

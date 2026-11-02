@@ -86,3 +86,12 @@ test('engine: call Agent của cha đang chờ subagent chưa ended → không b
   e.tick(1000 + 601_000);
   expect(s.activeAlerts()).toContainEqual(expect.objectContaining({ agentId: ID, kind: 'long_tool' }));
 });
+
+test('engine: subagent background không che long_tool của call cha', () => {
+  const { s, e } = setup();
+  start(s, 'Agent', 'nền', 1000);
+  const callId = s.openCalls(ID)[0].id;
+  s.applyEvent({ type: 'agent', agent: { id: `${ID}:bg`, source: 'claude', sessionId: 's1', parentId: ID, parentToolUseId: callId, requestShape: 'background', status: 'running', startedAt: 1100, lastEventAt: 1000 + 600_000 } } as any);
+  e.tick(1000 + 600_000);
+  expect(s.activeAlerts()).toContainEqual(expect.objectContaining({ agentId: ID, kind: 'long_tool' }));
+});

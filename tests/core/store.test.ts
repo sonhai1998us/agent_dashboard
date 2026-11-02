@@ -223,3 +223,14 @@ test('DB cũ chưa có cột parent_tool_use_id được bổ sung khi mở', as
   s.close();
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test('subagent background: call của cha đóng (khởi chạy async) không làm con ended', () => {
+  const s = new Store(':memory:'); s.applyEvent(agentEv);
+  s.applyEvent(callStart({ id: 'toolu_B', name: 'Agent', startedAt: 2000 }));
+  s.applyEvent({ type: 'agent', agent: { id: 'claude:s1:bg', source: 'claude', sessionId: 's1', parentId: 'claude:s1', parentToolUseId: 'toolu_B', requestShape: 'background', status: 'running', startedAt: 2100, lastEventAt: 2100 } } as any);
+  expect(s.getAgent('claude:s1:bg')?.requestShape).toBe('background');
+  s.applyEvent({ type: 'call_end', agentId: 'claude:s1', callId: 'toolu_B', endedAt: 2200, ok: true, errorPreview: null });
+  expect(s.getAgent('claude:s1:bg')?.status).toBe('running');
+  s.applyEvent({ type: 'agent', agent: { id: 'claude:s1:bg', source: 'claude', sessionId: 's1', status: 'running', lastEventAt: 2150 } } as any);
+  expect(s.getAgent('claude:s1:bg')?.status).toBe('running');
+});
