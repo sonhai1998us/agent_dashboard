@@ -3,6 +3,13 @@ import { register } from 'tsx/esm/api';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
 
+// node:sqlite in Node 22 prints an ExperimentalWarning on every start; hide only that one.
+process.removeAllListeners('warning');
+process.on('warning', (w) => {
+  if (w.name === 'ExperimentalWarning' && /SQLite/i.test(w.message)) return;
+  console.error(`(node:${process.pid}) ${w.name}: ${w.message}`);
+});
+
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 register({ tsconfig: path.join(root, 'tsconfig.json') });
 

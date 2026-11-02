@@ -47,7 +47,7 @@ async function waitFor<T>(fn: () => T | undefined | false, ms = 8000): Promise<T
   for (;;) {
     const v = fn();
     if (v) return v as T;
-    if (Date.now() - t0 > ms) throw new Error('waitFor timeout');
+    if (Date.now() - t0 > ms) throw new Error('never converged: waitFor condition');
     await new Promise((r) => setTimeout(r, 50));
   }
 }
@@ -63,16 +63,20 @@ function makeIo(signal?: AbortSignal) {
 }
 
 /** Chạy lệnh lặp lại cho tới khi `ok(state)` đúng (server cần thời gian đọc file). */
-async function runUntil(argv: string[], ok: (s: { out: string; err: string }) => boolean) {
+async function runUntil(argv: string[], ok: (s: { out: string; err: string }) => boolean, what = argv.join(' '), ms = 12000) {
   const { io, state } = makeIo();
-  let code = -1;
-  for (let i = 0; i < 100; i++) {
+  const t0 = Date.now();
+  for (;;) {
     state.out = ''; state.err = '';
-    code = await main(argv, io);
-    if (ok(state)) break;
+    const code = await main(argv, io);
+    if (ok(state)) return { code, ...state };
+    if (Date.now() - t0 > ms) throw new Error(`never converged: ${what}
+--- out ---
+${state.out}
+--- err ---
+${state.err}`);
     await new Promise((r) => setTimeout(r, 100));
   }
-  return { code, ...state };
 }
 
 test('ls khi server không chạy → exit 1 với thông báo hướng dẫn', async () => {
@@ -88,12 +92,14 @@ test('ls --running liệt kê agent đang chạy từ server', async () => {
   fs.writeFileSync(transcript('sess-cli-1111'), userLine('sess-cli-1111', now - 1000) + toolLine('sess-cli-1111', now, 'tu1'));
   fs.writeFileSync(path.join(cfg.claudeDir, 'sessions', `${process.pid}.json`), JSON.stringify({ pid: process.pid, sessionId: 'sess-cli-1111', status: 'busy' }));
   fs.writeFileSync(transcript('old-ended-9999'), userLine('old-ended-9999', now - 2000));
-  const r = await runUntil(['ls', '--running', '--port', String(port)], (s) => s.out.includes('sess-cli'));
+  const past = new Date(now - 3 * 3600_000);
+  fs.utimesSync(transcript('old-ended-9999'), past, past);
+  // Chờ cả hai phiên hiện ra ở `ls` (không --running) rồi mới khẳng định về --running.
+  const all = await runUntil(['ls', '--port', String(port)], (x) => x.out.includes('sess-cli') && x.out.includes('old-ende'), 'ls thấy cả sess-cli và old-ende');
+  expect(all.code).toBe(0);
+  const r = await runUntil(['ls', '--running', '--port', String(port)], (x) => x.out.includes('sess-cli'), 'ls --running thấy sess-cli');
   expect(r.code).toBe(0);
-  expect(r.out).toContain('sess-cli');
   expect(r.out).not.toContain('old-ende');
-  const all = await runUntil(['ls', '--port', String(port)], (x) => x.out.includes('old-ende'));
-  expect(all.out).toContain('old-ende');
 }, 20000);
 
 test('logs với prefix trùng nhiều agent → liệt kê và exit 1', async () => {
@@ -112,11 +118,16 @@ test('logs in call của agent, mới nhất ở cuối và tôn trọng -n', as
   const now = Date.now();
   fs.writeFileSync(transcript('log-cccc'), userLine('log-cccc', now - 5000)
     + toolLine('log-cccc', now - 3000, 'first') + toolLine('log-cccc', now - 2000, 'second') + toolLine('log-cccc', now - 1000, 'third'));
-  const r = await runUntil(['logs', 'log-c', '-n', '4', '--port', String(port)], (s) => s.out.includes('third'));
+  // -n đếm mọi call (mỗi lượt assistant sinh 1 call llm + 1 call tool) → 2 dòng cuối = llm3 + tool3.
+  const r = await runUntil(['logs', 'log-c', '-n', '2', '--port', String(port)], (s) => s.out.includes('third'));
   expect(r.code).toBe(0);
+  expect(r.out.trim().split(/\r?\n/)).toHaveLength(2);
   expect(r.out).not.toContain('first');
-  expect(r.out.indexOf('second')).toBeGreaterThan(-1);
-  expect(r.out.indexOf('third')).toBeGreaterThan(r.out.indexOf('second'));
+  expect(r.out).not.toContain('second');
+  const r4 = await runUntil(['logs', 'log-c', '-n', '4', '--port', String(port)], (s) => s.out.includes('third'));
+  expect(r4.out.trim().split(/\r?\n/)).toHaveLength(4);
+  expect(r4.out).not.toContain('first');
+  expect(r4.out.indexOf('third')).toBeGreaterThan(r4.out.indexOf('second'));
 }, 20000);
 
 test('logs với prefix không khớp agent nào → exit 1', async () => {
@@ -135,9 +146,9 @@ test('watch vẽ cây, thấy call mới xuất hiện và thoát mã 0 khi nh�
   const ac = new AbortController();
   const { io, state } = makeIo(ac.signal);
   const p = main(['watch', 'wat-d', '--port', String(port)], io);
-  await waitFor(() => state.out.includes('ls old1'));
+  await waitFor(() => state.out.includes('ls old1'), 12000);
   fs.appendFileSync(transcript('wat-dddd'), toolLine('wat-dddd', Date.now(), 'newcall'));
-  await waitFor(() => state.out.includes('ls newcall'));
+  await waitFor(() => state.out.includes('ls newcall'), 12000);
   ac.abort();
   expect(await p).toBe(0);
 }, 20000);

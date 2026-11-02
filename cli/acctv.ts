@@ -191,9 +191,10 @@ async function cmdWatch(api: Api, p: Parsed, io: CliIo): Promise<number> {
   };
 
   let lastDraw = 0;
+  let stopped = false;
   let timer: NodeJS.Timeout | undefined;
   const schedule = (): void => {
-    if (timer) return;
+    if (timer || stopped) return;
     const wait = Math.max(0, lastDraw + REDRAW_MS - Date.now());
     timer = setTimeout(() => {
       timer = undefined;
@@ -243,6 +244,7 @@ async function cmdWatch(api: Api, p: Parsed, io: CliIo): Promise<number> {
     const finish = (): void => {
       if (done) return;
       done = true;
+      stopped = true;
       clearTimeout(timer);
       clearTimeout(retry);
       try { ws?.terminate(); } catch { /* đã đóng */ }
