@@ -125,3 +125,50 @@ test('server chỉ listen 127.0.0.1', async () => {
   expect(new URL(s.url).hostname).toBe('127.0.0.1');
   expect(s.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
 });
+
+function rawRequest(url: string, p: string): Promise<{ status?: number; closed: boolean }> {
+  return new Promise((resolve) => {
+    const u = new URL(url);
+    const req = http.request({ host: u.hostname, port: u.port, path: p, method: 'GET' }, (res) => {
+      res.resume();
+      resolve({ status: res.statusCode, closed: false });
+    });
+    req.on('error', () => resolve({ closed: true }));
+    req.end();
+  });
+}
+
+test('URL malformed (//, //a:b) không làm sập server', async () => {
+  const s = await start();
+  for (const p of ['//', '//a:b']) {
+    const r = await rawRequest(s.url, p);
+    expect(r.closed || r.status === 400).toBe(true);
+  }
+  // upgrade with malformed path
+  const u = new URL(s.url);
+  const result = await new Promise<string>((resolve) => {
+    const req = http.request({ host: u.hostname, port: u.port, path: '//a:b', headers: { Connection: 'Upgrade', Upgrade: 'websocket', 'Sec-WebSocket-Version': '13', 'Sec-WebSocket-Key': 'dGhlIHNhbXBsZSBub25jZQ==' } });
+    req.on('upgrade', (_r, sock) => { sock.destroy(); resolve('upgraded'); });
+    req.on('response', (res) => { res.resume(); resolve('status ' + res.statusCode); });
+    req.on('error', () => resolve('closed'));
+    req.end();
+  });
+  expect(result).not.toBe('upgraded');
+  expect((await fetch(s.url + '/api/snapshot')).status).toBe(200);
+});
+
+test('WS: Origin lạ bị từ chối; không Origin / cùng Origin được nhận', async () => {
+  const s = await start();
+  const wsUrl = s.url.replace('http', 'ws') + '/ws';
+  const open = (headers?: Record<string, string>) => new Promise<boolean>((resolve) => {
+    const ws = new WebSocket(wsUrl, { headers });
+    ws.on('open', () => { ws.close(); resolve(true); });
+    ws.on('error', () => resolve(false));
+    ws.on('unexpected-response', () => resolve(false));
+  });
+  expect(await open({ Origin: 'http://evil.example.com' })).toBe(false);
+  expect(await open({ Origin: 'http://127.0.0.1:1' })).toBe(false);
+  expect(await open()).toBe(true);
+  expect(await open({ Origin: s.url })).toBe(true);
+  expect(await open({ Origin: 'http://localhost:' + new URL(s.url).port })).toBe(true);
+});

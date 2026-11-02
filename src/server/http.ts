@@ -23,6 +23,18 @@ export function hostAllowed(host: string | undefined, port: number): boolean {
   return host === `127.0.0.1:${port}` || host === `localhost:${port}`;
 }
 
+function safeUrl(raw: string | undefined): URL | null {
+  try {
+    return new URL(raw ?? '/', 'http://x');
+  } catch {
+    return null;
+  }
+}
+
+export function originAllowed(origin: string | undefined, port: number): boolean {
+  return origin === undefined || origin === `http://127.0.0.1:${port}` || origin === `http://localhost:${port}`;
+}
+
 function parseIntParam(v: string | null, def: number, min: number, max: number): number | null {
   if (v === null) return def;
   if (!/^\d+$/.test(v)) return null;
@@ -41,10 +53,11 @@ function liveMetrics(core: Core, now: number) {
 
 export function attachApi(server: http.Server, core: Core): Handler {
   return (req, res) => {
-    const url = new URL(req.url ?? '/', 'http://x');
-    if (url.pathname !== '/api' && !url.pathname.startsWith('/api/')) return false;
     const port = (server.address() as { port: number } | null)?.port ?? 0;
     if (!hostAllowed(req.headers.host, port)) { sendJson(res, 403, { error: 'forbidden host' }); return true; }
+    const url = safeUrl(req.url);
+    if (!url) { sendJson(res, 400, { error: 'bad request url' }); return true; }
+    if (url.pathname !== '/api' && !url.pathname.startsWith('/api/')) return false;
     if (req.method !== 'GET') { sendJson(res, 405, { error: 'method not allowed' }); return true; }
 
     try {
@@ -133,8 +146,10 @@ export async function startServer(opts: StartOptions = {}): Promise<{ url: strin
     server.on('upgrade', (req, socket, head) => {
       socket.on('error', () => { /* client vanished */ });
       if (!hostAllowed(req.headers.host, port())) { rejectUpgrade(socket, 403, 'Forbidden'); return; }
-      const pathname = new URL(req.url ?? '/', 'http://x').pathname;
-      if (pathname === '/ws') {
+      if (!originAllowed(req.headers.origin, port())) { rejectUpgrade(socket, 403, 'Forbidden'); return; }
+      const parsed = safeUrl(req.url);
+      if (!parsed) { socket.destroy(); return; }
+      if (parsed.pathname === '/ws') {
         wss.handleUpgrade(req, socket, head, (ws) => {
           clients.add(ws);
           ws.on('close', () => clients.delete(ws));
