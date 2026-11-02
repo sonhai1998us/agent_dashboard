@@ -33,7 +33,7 @@ export function callRowState(c: CallRecord, agent: Pick<AgentInfo, 'status'> | u
 
 /** Văn bản pill cảnh báo; stuck/long_tool tính trực tiếp từ since vì message không được phát lại mỗi tick */
 export function alertPill(a: Alert, now: number): string {
-  const live = fmtDuration(now - a.since);
+  const live = fmtDuration(Math.max(0, now - a.since));
   if (a.kind === 'stuck') return `treo ${live}`;
   if (a.kind === 'long_tool') return `tool lâu ${live}`;
   return a.message;

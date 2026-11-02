@@ -107,6 +107,12 @@ describe('reduce: selectCall', () => {
     s = reduce(s, { type: 'select', id: 'b' });
     expect(s.selectedCallId).toBeNull();
   });
+  test('reduce: chọn lại cùng một call vẫn tăng selectedCallNonce', () => {
+    const a = reduce(initialState(), { type: 'selectCall', agentId: 'a', callId: 'c1' });
+    const b = reduce(a, { type: 'selectCall', agentId: 'a', callId: 'c1' });
+    expect(b.selectedCallId).toBe('c1');
+    expect(b.selectedCallNonce).toBe(a.selectedCallNonce + 1);
+  });
   test('reduce: initialState có selectedCallId null', () => {
     expect(initialState().selectedCallId).toBeNull();
   });

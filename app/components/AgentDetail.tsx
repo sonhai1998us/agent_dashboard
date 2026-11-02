@@ -19,6 +19,7 @@ export default function AgentDetail() {
   const metrics = useLive((s) => (s.selectedAgentId ? s.agentMetrics[s.selectedAgentId] : undefined));
   const alertsMap = useLive((s) => s.alerts);
   const selectedCallId = useLive((s) => s.selectedCallId);
+  const callNonce = useLive((s) => s.selectedCallNonce);
 
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -36,7 +37,7 @@ export default function AgentDetail() {
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const [activeId, setActiveId] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const handledCall = useRef<string | null>(null);
+  const handledNonce = useRef(0);
 
   const virt = useVirtualizer({
     count: calls.length,
@@ -47,18 +48,18 @@ export default function AgentDetail() {
   });
 
   // đổi agent: đóng mọi dòng mở rộng
-  useEffect(() => { setExpanded(new Set()); setActiveId(null); handledCall.current = null; }, [selected]);
+  useEffect(() => { setExpanded(new Set()); setActiveId(null); }, [selected]);
 
   // bấm một thanh trên timeline: cuộn tới call, mở rộng và tô sáng
   useEffect(() => {
-    if (!selectedCallId || handledCall.current === selectedCallId) return;
+    if (!selectedCallId || handledNonce.current === callNonce) return;
     const idx = calls.findIndex((c) => c.id === selectedCallId);
     if (idx < 0) return;
-    handledCall.current = selectedCallId;
+    handledNonce.current = callNonce;
     setExpanded((p) => new Set(p).add(selectedCallId));
     setActiveId(selectedCallId);
     virt.scrollToIndex(idx, { align: 'center' });
-  }, [selectedCallId, calls, virt]);
+  }, [selectedCallId, callNonce, calls, virt]);
 
   if (!agent || !selected) {
     return (

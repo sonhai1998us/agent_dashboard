@@ -10,6 +10,8 @@ export interface LiveState {
   calls: Record<string, CallRecord[]>; selectedAgentId: string | null;
   /** call được chọn từ timeline; cột phải cuộn tới nó */
   selectedCallId: string | null;
+  /** tăng mỗi lần chọn call (kể cả cùng id) để cột phải cuộn lại */
+  selectedCallNonce: number;
   /** local time (ms) of the last applied alert event per alert id; used to resolve snapshot/WS races */
   alertEventAt: Record<string, number>;
 }
@@ -30,7 +32,7 @@ export type LiveAction =
 export function initialState(): LiveState {
   return {
     conn: 'connecting', lastUpdateAt: null, agents: {}, alerts: {}, metrics: null,
-    agentMetrics: {}, calls: {}, selectedAgentId: null, selectedCallId: null, alertEventAt: {},
+    agentMetrics: {}, calls: {}, selectedAgentId: null, selectedCallId: null, selectedCallNonce: 0, alertEventAt: {},
   };
 }
 
@@ -71,7 +73,7 @@ export function reduce(s: LiveState, e: LiveAction): LiveState {
     }
     case 'calls': return { ...s, calls: { ...s.calls, [e.agentId]: mergeCalls(s.calls[e.agentId], e.calls) } };
     case 'select': return { ...s, selectedAgentId: e.id, selectedCallId: e.id === s.selectedAgentId ? s.selectedCallId : null };
-    case 'selectCall': return { ...s, selectedAgentId: e.agentId, selectedCallId: e.callId };
+    case 'selectCall': return { ...s, selectedAgentId: e.agentId, selectedCallId: e.callId, selectedCallNonce: s.selectedCallNonce + 1 };
     default: return s;
   }
 }
