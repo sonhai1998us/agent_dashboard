@@ -89,6 +89,15 @@ export default function AgentTimeline() {
     [nodes, frame, win, width],
   );
 
+  const showTip = useCallback((text: string, el: Element, mouse?: { x: number; y: number }) => {
+    const wrap = wrapRef.current?.getBoundingClientRect();
+    if (!wrap) return;
+    if (mouse) { setTip({ x: mouse.x - wrap.left, y: mouse.y - wrap.top, text }); return; }
+    const r = el.getBoundingClientRect();
+    setTip({ x: r.left + r.width / 2 - wrap.left, y: r.top - wrap.top, text });
+  }, []);
+  const hideTip = useCallback(() => setTip(null), []);
+
   if (!root) {
     return (
       <section className={styles.box} aria-label="Cây agent và timeline">
@@ -129,14 +138,6 @@ export default function AgentTimeline() {
     } else if (e.key === 'Escape') setTip(null);
   };
 
-  const showTip = useCallback((text: string, el: Element, mouse?: { x: number; y: number }) => {
-    const wrap = wrapRef.current?.getBoundingClientRect();
-    if (!wrap) return;
-    if (mouse) { setTip({ x: mouse.x - wrap.left, y: mouse.y - wrap.top, text }); return; }
-    const r = el.getBoundingClientRect();
-    setTip({ x: r.left + r.width / 2 - wrap.left, y: r.top - wrap.top, text });
-  }, []);
-  const hideTip = useCallback(() => setTip(null), []);
 
   return (
     <section className={styles.box} aria-label="Cây agent và timeline" ref={wrapRef}>
