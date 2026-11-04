@@ -69,7 +69,6 @@ export const DEFAULT_SETTINGS: Settings = {
     String.raw`^\s*(npm|pnpm|yarn|bun)\s+(run\s+)?(test|lint|build|typecheck|check|preview)\b`,
     String.raw`^\s*npx\s+(tsc|vitest|jest|eslint|playwright|prettier\s+--check)\b`,
     String.raw`^\s*git\s+(status|diff|log|show)\b`,
-    String.raw`^\s*(ls|dir|cat|type|pwd)\b`,
   ],
   maxRounds: 3,
   maxParallel: 3,

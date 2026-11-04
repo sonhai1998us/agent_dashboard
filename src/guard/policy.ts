@@ -58,7 +58,8 @@ function relInside(root: string, abs: string): string | null {
 }
 const sameRel = (a: string, b: string) => cmp(a.replace(/\\/g, '/')) === cmp(b.replace(/\\/g, '/'));
 
-const CHAIN = /[;&|<>`\n\r]|\$\(/;
+const CHAIN = /[;&|<>`\n\r]|\$\(|--output/i;
+const hasGit = (rel: string) => rel.split('/').some((seg) => cmp(seg) === '.git');
 
 export function checkTool(p: GuardPolicy, toolName: string, input: unknown, cwd: string): GuardDecision {
   const base = typeof cwd === 'string' && cwd ? cwd : p.root;
@@ -67,6 +68,10 @@ export function checkTool(p: GuardPolicy, toolName: string, input: unknown, cwd:
     case 'Read':
     case 'Glob':
     case 'Grep': {
+      if (toolName === 'Glob') {
+        const pat = strField(input, 'pattern');
+        if (pat && (P.isAbsolute(pat) || /^[\/]/.test(pat) || /^[a-zA-Z]:/.test(pat) || pat.split(/[\/]/).includes('..'))) return deny(`ngoài thư mục làm việc: ${pat}`);
+      }
       const target = resolve(strField(input, 'file_path', 'path') ?? base);
       const ok = [p.root, ...p.readRoots].some((r) => relInside(r, target) !== null);
       return ok ? { allow: true } : deny(`ngoài thư mục làm việc: ${target}`);
@@ -81,6 +86,7 @@ export function checkTool(p: GuardPolicy, toolName: string, input: unknown, cwd:
       const abs = resolve(raw);
       const rel = relInside(p.root, abs);
       if (rel === null) return deny(`ngoài phạm vi: ${abs}`, true);
+      if (rel && hasGit(rel)) return deny(`ngoài phạm vi: ${rel}`, true);
       if (rel && p.allowedFiles.some((g) => sameRel(g, rel) || matchGlob(g, rel))) return { allow: true };
       return deny(`ngoài phạm vi: ${rel || abs}`, true);
     }

@@ -14,7 +14,10 @@ function finish(reason) {
   setTimeout(() => process.exit(0), 500).unref();
 }
 
-setTimeout(() => finish(FAIL), 8000);
+const TIMEOUT = Number(process.env.ACCTV_GUARD_TIMEOUT_MS) || 8000;
+process.on('uncaughtException', () => finish(FAIL));
+process.stdout.on('error', () => process.exit(0));
+setTimeout(() => finish(FAIL), TIMEOUT);
 
 const chunks = [];
 process.stdin.on('data', (c) => chunks.push(c));
@@ -29,7 +32,7 @@ process.stdin.on('end', () => {
         method: 'POST',
         path: `/api/guard?agent=${encodeURIComponent(agentId ?? '')}`,
         headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json', 'content-length': body.length },
-        timeout: 8000,
+        timeout: TIMEOUT,
       },
       (res) => {
         const parts = [];

@@ -90,6 +90,26 @@ describe('checkTool', () => {
     expect(checkTool(qc, 'Bash', { command: 'npm test\nnode evil.js' }, root).allow).toBe(false);
     expect(checkTool(mk('designer'), 'Bash', { command: 'npm test | tee x' }, root).allow).toBe(false);
   });
+  it('qc: --output denied, plain git diff and ls/cat not allowed', () => {
+    const qc = mk('qc');
+    expect(checkTool(qc, 'Bash', { command: 'git diff --output=C:\\x.txt' }, root)).toMatchObject({ allow: false, reason: '[acctv-guard] vai qc chỉ chạy lệnh kiểm tra' });
+    expect(checkTool(qc, 'Bash', { command: 'git diff' }, root).allow).toBe(true);
+    expect(checkTool(qc, 'Bash', { command: 'cat C:\\secret' }, root).allow).toBe(false);
+    expect(checkTool(qc, 'Bash', { command: 'ls ..' }, root).allow).toBe(false);
+  });
+  it('.git paths are never editable, even with ** allowed', () => {
+    const all = { ...dev, allowedFiles: ['**'] };
+    expect(checkTool(all, 'Write', { file_path: '.git/hooks/pre-commit' }, root)).toMatchObject({ allow: false, scope: true, reason: '[acctv-guard] ngoài phạm vi: .git/hooks/pre-commit' });
+    expect(checkTool(all, 'Edit', { file_path: 'sub/.GIT/config' }, root).allow).toBe(false);
+    expect(checkTool(all, 'Edit', { file_path: 'src/a.ts' }, root).allow).toBe(true);
+  });
+  it('Glob pattern must not be absolute or contain ..', () => {
+    const abs = WIN ? 'C:\\Users\\**' : '/home/**';
+    expect(checkTool(dev, 'Glob', { pattern: abs }, root)).toMatchObject({ allow: false, reason: `[acctv-guard] ngoài thư mục làm việc: ${abs}` });
+    expect(checkTool(dev, 'Glob', { pattern: '../**/*.ts' }, root).allow).toBe(false);
+    expect(checkTool(dev, 'Glob', { pattern: 'src/../../x' }, root).allow).toBe(false);
+    expect(checkTool(dev, 'Glob', { pattern: 'src/**/*.ts' }, root).allow).toBe(true);
+  });
   it('read-only roles cannot edit', () => {
     for (const r of ['qc', 'designer', 'controller'] as Role[]) {
       expect(checkTool(mk(r), 'Edit', { file_path: 'README.md' }, root)).toMatchObject({ allow: false, reason: `[acctv-guard] vai ${r} chỉ được đọc` });
