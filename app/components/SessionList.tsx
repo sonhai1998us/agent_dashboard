@@ -18,6 +18,8 @@ export function statusOf(a: AgentInfo, alerts: Alert[]): { tone: Tone; icon: str
   if (mine.some((x) => x.level === 'critical')) return { tone: 'crit', icon: '■', text: 'nghiêm trọng' };
   if (mine.length > 0) return { tone: 'warn', icon: '▲', text: 'cảnh báo' };
   if (a.status === 'running') return { tone: 'run', icon: '●', text: 'đang chạy' };
+  if (a.status === 'queued') return { tone: 'wait', icon: '◌', text: 'xếp hàng' };
+  if (a.status === 'limited') return { tone: 'warn', icon: '⏸', text: 'bị giới hạn' };
   if (a.status === 'ended') return { tone: 'ended', icon: '○', text: 'đã kết thúc' };
   return { tone: 'wait', icon: '○', text: 'rảnh' };
 }

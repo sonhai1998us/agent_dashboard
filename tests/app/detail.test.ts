@@ -62,8 +62,8 @@ describe('alertPill', () => {
 
 describe('nhãn cảnh báo tiếng Việt', () => {
   const al = (kind: Alert['kind'], level: Alert['level'] = 'warn'): Alert => ({ id: 'x', agentId: 'a', kind, level, message: 'm', since: 0, active: true });
-  test('ALERT_LABEL đủ 4 loại', () => {
-    expect(ALERT_LABEL).toEqual({ stuck: 'kẹt', long_tool: 'tool lâu', loop: 'lặp', error_burst: 'lỗi liên tiếp' });
+  test('ALERT_LABEL đủ 5 loại', () => {
+    expect(ALERT_LABEL).toEqual({ stuck: 'kẹt', long_tool: 'tool lâu', loop: 'lặp', error_burst: 'lỗi liên tiếp', guard: 'bị chặn' });
   });
   test('alertTag (timeline): biểu tượng + nhãn tiếng Việt + thời lượng từ since, không còn tên tiếng Anh', () => {
     expect(alertTag(al('stuck'), 125_000)).toBe('▲ kẹt 2m05');

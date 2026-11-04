@@ -2,7 +2,7 @@ import { test, expect } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { loadConfig } from '@/src/core/config';
+import { loadConfig, saveSettings, validateSettings, DEFAULT_SETTINGS, DEFAULT_THRESHOLDS } from '@/src/core/config';
 
 function tmpHome() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'acctv-cfg-'));
@@ -39,4 +39,76 @@ test('config.json hỏng bị bỏ qua', () => {
   const home = tmpHome();
   fs.writeFileSync(path.join(home, 'config.json'), '{nope');
   expect(loadConfig({ ACCTV_HOME: home }).port).toBe(4777);
+});
+
+const cloneDefaults = () => ({ settings: structuredClone(DEFAULT_SETTINGS), thresholds: { ...DEFAULT_THRESHOLDS } });
+const errorsOf = (raw: unknown): string[] => {
+  const r = validateSettings(raw);
+  return r.ok ? [] : r.errors;
+};
+
+test('settings mặc định khi không có config.json', () => {
+  expect(loadConfig({ ACCTV_HOME: tmpHome() }).settings).toEqual(DEFAULT_SETTINGS);
+});
+
+test('config.json merge settings theo từng trường và từng vai', () => {
+  const home = tmpHome();
+  fs.writeFileSync(
+    path.join(home, 'config.json'),
+    JSON.stringify({ settings: { maxParallel: 5, roleDefaults: { dev: { agent: 'claude', model: 'claude-haiku-5-5', effort: 'low' } } } }),
+  );
+  const s = loadConfig({ ACCTV_HOME: home }).settings;
+  expect(s.maxParallel).toBe(5);
+  expect(s.roleDefaults.dev.model).toBe('claude-haiku-5-5');
+  expect(s.roleDefaults.qc).toEqual(DEFAULT_SETTINGS.roleDefaults.qc);
+  expect(s.maxRounds).toBe(3);
+});
+
+test('validateSettings chấp nhận mặc định', () => {
+  expect(validateSettings(cloneDefaults()).ok).toBe(true);
+});
+
+test('validateSettings từ chối giá trị sai, lỗi nêu tên trường', () => {
+  const a = cloneDefaults();
+  a.settings.maxParallel = 0;
+  expect(errorsOf(a).some((e) => e.includes('maxParallel'))).toBe(true);
+
+  const b = cloneDefaults();
+  b.thresholds.stuckMs = -1;
+  expect(errorsOf(b).some((e) => e.includes('stuckMs'))).toBe(true);
+
+  const c = cloneDefaults();
+  c.thresholds.loopWarn = 10;
+  c.thresholds.loopCritical = 10;
+  expect(errorsOf(c).some((e) => e.includes('loopWarn'))).toBe(true);
+
+  const d = cloneDefaults();
+  (d.settings.roleDefaults.dev as { effort: string }).effort = 'turbo';
+  expect(errorsOf(d).some((e) => e.includes('effort'))).toBe(true);
+
+  const e = cloneDefaults();
+  e.settings.denyBash = ['('];
+  expect(errorsOf(e).some((x) => x.includes('denyBash'))).toBe(true);
+
+  const f = cloneDefaults();
+  f.settings.roleDefaults.qc.model = 'gpt-khong-co';
+  expect(errorsOf(f).some((x) => x.includes('model'))).toBe(true);
+
+  expect(errorsOf(null).length).toBeGreaterThan(0);
+});
+
+test('saveSettings ghi atomically, giữ backfillHours, loadConfig đọc lại, mutate cfg', () => {
+  const home = tmpHome();
+  fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({ backfillHours: 7 }));
+  const cfg = loadConfig({ ACCTV_HOME: home });
+  const settings = { ...structuredClone(DEFAULT_SETTINGS), maxParallel: 4 };
+  const thresholds = { ...DEFAULT_THRESHOLDS, stuckMs: 999 };
+  saveSettings(cfg, settings, thresholds);
+  expect(cfg.settings.maxParallel).toBe(4);
+  expect(cfg.thresholds.stuckMs).toBe(999);
+  expect(fs.readdirSync(home).filter((f) => f.endsWith('.tmp'))).toEqual([]);
+  const again = loadConfig({ ACCTV_HOME: home });
+  expect(again.backfillHours).toBe(7);
+  expect(again.settings.maxParallel).toBe(4);
+  expect(again.thresholds.stuckMs).toBe(999);
 });

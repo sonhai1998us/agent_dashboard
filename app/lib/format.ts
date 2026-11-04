@@ -6,6 +6,7 @@ export const ALERT_LABEL: Record<AlertKind, string> = {
   long_tool: 'tool lâu',
   loop: 'lặp',
   error_burst: 'lỗi liên tiếp',
+  guard: 'bị chặn',
 };
 
 const pad = (n: number): string => String(n).padStart(2, '0');

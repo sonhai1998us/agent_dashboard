@@ -13,6 +13,8 @@ const bold = (on: boolean, s: string) => paint(on, '1', s);
 export function statusIcon(a: AgentInfo, color: boolean): string {
   if (a.status === 'running') return green(color, '●');
   if (a.status === 'idle') return '○';
+  if (a.status === 'queued') return '◌';
+  if (a.status === 'limited') return yellow(color, '⏸');
   return dim(color, '○');
 }
 
