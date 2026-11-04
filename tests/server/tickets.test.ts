@@ -173,6 +173,19 @@ test('stop agent 202 rồi 409; guard endpoint quyết định theo phạm vi; t
   expect((await mcp('T-1', 'wrong', 'finish', { status: 'done', report: 'x' })).status).toBe(401);
   expect((await post('/mcp?ticket=T-1', { jsonrpc: '2.0', id: 1, method: 'ping' })).status).toBe(401);
   expect((await call('GET', '/mcp?ticket=T-1', undefined, {})).status).toBe(405);
+  const ctrlAuth = { authorization: `Bearer ${ctrl.spec.mcp!.token}` };
+  const ping = { jsonrpc: '2.0', id: 1, method: 'ping' };
+  expect((await post('/mcp?ticket=T-1', ping, { ...JSON_CT, ...ctrlAuth, origin: 'http://evil.test' })).status).toBe(403);
+  expect((await post('/mcp?ticket=T-1', ping, ctrlAuth)).status).toBe(415);
+  expect((await post('/mcp?ticket=T-1', ping, { ...JSON_CT, ...ctrlAuth })).status).toBe(200);
+  const devAuth = { authorization: `Bearer ${dev.spec.guard.token}` };
+  const read = { tool_name: 'Read', tool_input: { file_path: 'src/a.ts' } };
+  expect((await post('/api/guard?agent=acctv:T-1:dev-1', read, { ...JSON_CT, ...devAuth, origin: 'http://evil.test' })).status).toBe(403);
+  expect((await post('/api/guard?agent=acctv:T-1:dev-1', read, devAuth)).status).toBe(415);
+  // token sai → 401 trước khi đọc body (body quá cỡ không thành 413)
+  const huge = JSON.stringify({ tool_name: 'Write', tool_input: { content: 'x'.repeat(33_000_000) } });
+  expect((await post('/api/guard?agent=acctv:T-1:dev-1', huge, { ...JSON_CT, authorization: 'Bearer wrong' })).status).toBe(401);
+  expect((await guard('acctv:T-1:dev-2', dev.spec.guard.token, read)).status).toBe(401);
   const note = await post('/mcp?ticket=T-1', { jsonrpc: '2.0', method: 'notifications/initialized' }, { ...JSON_CT, authorization: `Bearer ${ctrl.spec.mcp!.token}` });
   expect(note.status).toBe(202);
 
@@ -198,11 +211,26 @@ test('settings: PUT sai → 400 errors; hợp lệ → 200 và GET trả lại; 
   expect((await call('PUT', '/api/settings', cur.json, {})).status).toBe(415);
 
   const next = { settings: { ...cur.json.settings, maxParallel: 5, maxRounds: 4 }, thresholds: { ...cur.json.thresholds, loopWarn: 4 } };
-  const put = await call('PUT', '/api/settings', next);
+  const withJunk = {
+    ...next, junkTop: 1,
+    settings: {
+      ...next.settings, junkSettings: true,
+      roleDefaults: { ...next.settings.roleDefaults, dev: { ...next.settings.roleDefaults.dev, junkRole: 'x' } },
+      allowedModels: { ...next.settings.allowedModels, gemini: ['g'] },
+      prices: { 'claude-sonnet-5-5': { in: 3, out: 15, junkPrice: 1 } },
+    },
+    thresholds: { ...next.thresholds, junkThreshold: 9 },
+  };
+  const expected = { ...next, settings: { ...next.settings, prices: { 'claude-sonnet-5-5': { in: 3, out: 15 } } } };
+  const put = await call('PUT', '/api/settings', withJunk);
   expect(put.status).toBe(200);
+  expect(put.json).toEqual(expected);
   const again = await call('GET', '/api/settings');
-  expect(again.json).toEqual(next);
-  expect(JSON.parse(fs.readFileSync(path.join(cfg.home, 'config.json'), 'utf8')).settings.maxParallel).toBe(5);
+  expect(again.json).toEqual(expected);
+  const saved = JSON.parse(fs.readFileSync(path.join(cfg.home, 'config.json'), 'utf8'));
+  expect(saved.settings.maxParallel).toBe(5);
+  expect({ settings: saved.settings, thresholds: saved.thresholds }).toEqual(expected);
+  expect(saved.junkTop).toBeUndefined();
 
   expect((await call('GET', '/api/capabilities')).json).toEqual({ claude: true, codex: false });
 });
@@ -220,6 +248,18 @@ test('fs/check và fs/git-init', async () => {
   expect(again.status).toBe(409);
   expect(again.json.error).toBe('Thư mục đã là git repo');
   expect((await post('/api/fs/git-init', { dir: path.join(tmp, 'none') })).status).toBe(400);
+  for (const inner of [path.join(cfg.home, 'x'), path.join(cfg.claudeDir, 'projects'), cfg.codexDir]) {
+    fs.mkdirSync(inner, { recursive: true });
+    const r = await post('/api/fs/git-init', { dir: process.platform === 'win32' ? inner.toUpperCase() : inner });
+    expect(r.status).toBe(400);
+    expect(fs.existsSync(path.join(inner, '.git'))).toBe(false);
+  }
+  if (process.platform === 'win32') {
+    for (const bad of ['\\foo', '\\\\server\\share\\x', 'D:rel']) {
+      expect((await call('GET', `/api/fs/check?dir=${encodeURIComponent(bad)}`)).status).toBe(400);
+      expect((await post('/api/fs/git-init', { dir: bad })).status).toBe(400);
+    }
+  }
   const fresh = path.join(tmp, 'mới tinh');
   fs.mkdirSync(fresh);
   const init = await post('/api/fs/git-init', { dir: fresh });

@@ -9,6 +9,8 @@ import { startServer, type RunningServer } from '@/src/server/http';
 import { cliRunners } from '@/src/server/core';
 import { validatePlan } from '@/src/tickets/flow';
 import { g } from '@/tests/helpers/orchestratorEnv';
+import { Store } from '@/src/core/store';
+import { TicketStore } from '@/src/tickets/store';
 
 const fixtures = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'fixtures');
 const fakeClaude = path.join(fixtures, 'fake-claude.mjs');
@@ -133,6 +135,60 @@ test('ticket chạy hết vòng với fake Claude CLI thật: duyệt qua HTTP, 
     expect(snap.agents.filter((a: any) => a.id.startsWith('acctv:T-1:')).length).toBe(2);
   } finally {
     ws.close();
+  }
+}, 60000);
+
+const alive = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+test('close() kill tiến trình agent đang chạy (worker sleep) và đánh dấu interrupted', async () => {
+  const scriptFile = path.join(tmp, 'scenario.json');
+  fs.writeFileSync(scriptFile, JSON.stringify({
+    controller: [
+      { when: 'Kế hoạch đã được duyệt', steps: [
+        { mcp: 'spawn_agent', args: { role: 'dev', task: 'Sửa src/a.ts', files: ['src/a.ts'] } },
+        { mcp: 'wait_agents', args: { ids: ['acctv:{ticket}:dev-1'] } },
+      ] },
+      { steps: [{ mcp: 'propose_plan', args: { plan } }] },
+    ],
+    dev: [{ steps: [{ sleep: 60000 }] }],
+  }));
+  process.env.FAKE_CLAUDE_SCRIPT = scriptFile;
+  srv = await startServer({
+    cfg, withNext: false, watcher: { livenessMs: 200 },
+    runners: cliRunners(cfg, { ACCTV_CLAUDE_CMD: JSON.stringify({ command: process.execPath, prefixArgs: [fakeClaude] }) }),
+  });
+  const s = srv;
+  const get = async (p: string) => (await fetch(s.url + p)).json();
+  const post = (p: string, body: unknown = {}) =>
+    fetch(s.url + p, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  expect((await post('/api/tickets', { title: 'Sửa a', dir: repo })).status).toBe(201);
+  await waitFor(async () => (await get('/api/tickets/T-1')).ticket.status === 'awaiting_approval', 20000, 'awaiting_approval');
+  expect((await post('/api/tickets/T-1/approve')).status).toBe(200);
+  const pid = await waitFor(async () => {
+    const snap = await get('/api/snapshot');
+    const a = snap.agents.find((x: any) => x.id === 'acctv:T-1:dev-1');
+    const m = snap.managed.find((x: any) => x.agentId === 'acctv:T-1:dev-1');
+    return m?.state === 'running' && typeof a?.pid === 'number' ? (a.pid as number) : undefined;
+  }, 20000, 'dev-1 chạy');
+  expect(alive(pid)).toBe(true);
+
+  await s.close();
+  srv = undefined;
+  await waitFor(() => !alive(pid), 10000, 'tiến trình dev-1 chết');
+
+  const store = new Store(path.join(cfg.home, 'acctv.db'));
+  try {
+    expect(new TicketStore(store).getManaged('acctv:T-1:dev-1')).toMatchObject({ state: 'interrupted', stopReason: 'bị gián đoạn: dashboard tắt' });
+    expect(store.getAgent('acctv:T-1:dev-1')!.status).toBe('ended');
+  } finally {
+    store.close();
   }
 }, 60000);
 

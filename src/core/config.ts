@@ -166,7 +166,27 @@ export function validateSettings(
     errors.push('thresholds.loopWarn phải nhỏ hơn loopCritical');
   }
   if (errors.length) return { ok: false, errors };
-  return { ok: true, settings: s as unknown as Settings, thresholds: t as unknown as Thresholds };
+  // dựng object mới từng trường: key lạ ở mọi cấp bị bỏ, không lọt vào config.json
+  const role = (r: Role): RoleSpec => {
+    const o = rd[r] as Record<string, unknown>;
+    return { agent: o.agent as AgentKind, model: o.model as string, effort: o.effort as Effort };
+  };
+  const prices: Settings['prices'] = {};
+  for (const [k, v] of Object.entries(s.prices as Record<string, { in: number; out: number }>)) prices[k] = { in: v.in, out: v.out };
+  const settings: Settings = {
+    roleDefaults: { controller: role('controller'), dev: role('dev'), designer: role('designer'), qc: role('qc') },
+    allowedModels: { claude: [...(am.claude as string[])], codex: [...(am.codex as string[])] },
+    denyBash: [...(s.denyBash as string[])],
+    checkCommands: [...(s.checkCommands as string[])],
+    maxRounds: s.maxRounds as number,
+    maxParallel: s.maxParallel as number,
+    prices,
+    claudePath: s.claudePath as string | null,
+    codexPath: s.codexPath as string | null,
+  };
+  const thresholds = {} as Thresholds;
+  for (const k of Object.keys(DEFAULT_THRESHOLDS) as (keyof Thresholds)[]) thresholds[k] = t[k] as number;
+  return { ok: true, settings, thresholds };
 }
 
 export function saveSettings(cfg: Config, settings: Settings, thresholds: Thresholds): void {

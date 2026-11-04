@@ -52,6 +52,7 @@ const RESUME_PROMPT = 'Tiếp tục công việc đang dở.';
 const LIMIT_EXHAUSTED = 'bị giới hạn: hết lượt thử';
 const CANCELLED = 'ticket bị huỷ';
 const INTERRUPTED = 'bị gián đoạn: dashboard khởi động lại';
+const SHUTDOWN = 'bị gián đoạn: dashboard tắt';
 const LOOP_STOP = 'auto-stop: loop';
 const ESCALATED = 'ticket chuyển sang cần người dùng quyết';
 
@@ -99,6 +100,8 @@ export class Orchestrator {
   private alerted = new Set<string>();
   private removing = new Set<string>();
   private recovered = false;
+  /** Sau shutdown(): handler thoát, hẹn giờ và sink không còn chạm vào store. */
+  private closed = false;
   private now: () => number;
   private newSessionId: () => string;
 
@@ -271,7 +274,40 @@ export class Orchestrator {
     }
   }
 
+  /** Dashboard tắt: huỷ hẹn giờ thử lại, kill mọi tiến trình mình đã spawn, agent đang sống → interrupted. */
+  async shutdown(): Promise<void> {
+    if (this.closed) return this.idle();
+    this.closed = true;
+    this.queue.length = 0;
+    const handles: RunHandle[] = [];
+    for (const st of this.ctrls.values()) {
+      if (st.timer) clearTimeout(st.timer);
+      st.timer = null;
+      st.queue.length = 0;
+      if (st.handle) handles.push(st.handle);
+      st.handle = null;
+    }
+    for (const run of this.workers.values()) {
+      if (run.timer) clearTimeout(run.timer);
+      run.timer = null;
+      handles.push(run.handle);
+    }
+    this.workers.clear();
+    this.guards.clear();
+    this.mcpTokens.clear();
+    const at = this.now();
+    for (const m of this.deps.tickets.listManaged()) {
+      if (!LIVE.includes(m.state)) continue;
+      this.saveManaged(m.agentId, { state: 'interrupted', stopReason: SHUTDOWN, endedAt: at });
+      this.emitAgent({ id: m.agentId, source: m.runner, sessionId: m.sessionId, status: 'ended' });
+      this.log(m.ticketId, `${m.agentId} ${SHUTDOWN}`);
+    }
+    await Promise.allSettled(handles.map((h) => h.kill()));
+    await this.idle();
+  }
+
   onAlert(a: Alert): void {
+    if (this.closed) return;
     // một vòng lặp mới có `since` mới → Controller được tiếp tục vẫn bị tự dừng lại được
     const key = `${a.agentId}:${a.since}`;
     if (a.kind !== 'loop' || a.level !== 'critical' || !a.active || !isManagedId(a.agentId) || this.alerted.has(key)) return;
@@ -297,6 +333,12 @@ export class Orchestrator {
       get_agent_log: async (a) => this.getAgentLog(ticketId, a),
       finish: async (a) => this.finish(ticketId, a),
     };
+  }
+
+  /** Chỉ kiểm token guard của agent (không quyết định, không tác dụng phụ). */
+  checkGuardToken(agentId: string, token: string): boolean {
+    const g = this.guards.get(agentId);
+    return !!g && safeEq(g.token, token);
   }
 
   checkMcpToken(ticketId: string, token: string): boolean {
@@ -447,6 +489,7 @@ export class Orchestrator {
 
   /** Mỗi ticket chỉ một lượt Controller tại một thời điểm; gọi khi đang có lượt thì message xếp hàng. */
   private runControllerTurn(T: string, message: string): void {
+    if (this.closed) return;
     const st = this.ctrl(T);
     if (st.handle || st.timer) st.queue.push(message);
     else this.startControllerTurn(T, message);
@@ -500,7 +543,7 @@ export class Orchestrator {
 
   private async retryController(T: string, message: string): Promise<void> {
     const st = this.ctrl(T);
-    if (!st.timer) return;
+    if (this.closed || !st.timer) return;
     st.timer = null;
     const t = this.mustTicket(T);
     if (ENDED_TICKET.includes(t.status)) return this.endController(T);
@@ -508,6 +551,7 @@ export class Orchestrator {
   }
 
   private startControllerTurn(T: string, message: string): void {
+    if (this.closed) return;
     const t = this.mustTicket(T);
     const st = this.ctrl(T);
     const id = controllerId(T);
@@ -629,7 +673,7 @@ export class Orchestrator {
 
   /** FIFO toàn hệ thống; số worker đang chạy (kể cả limited) < maxParallel. */
   private pump(): void {
-    while (this.queue.length && this.workers.size < this.settings.maxParallel) this.startWorker(this.queue.shift()!);
+    while (!this.closed && this.queue.length && this.workers.size < this.settings.maxParallel) this.startWorker(this.queue.shift()!);
   }
 
   private startWorker(id: string): void {
@@ -686,7 +730,7 @@ export class Orchestrator {
 
   private async retryWorker(id: string): Promise<void> {
     const run = this.workers.get(id);
-    if (!run || !run.timer) return;
+    if (this.closed || !run || !run.timer) return;
     run.timer = null;
     const m = this.deps.tickets.getManaged(id);
     if (!m || isTerminal(m.state)) return this.onWorkerDone(id, run.last!);
@@ -813,14 +857,15 @@ export class Orchestrator {
 
   private onEnd(spec: RunSpec, h: RunHandle, fn: (r: RunResult) => Promise<void>): void {
     h.done.then(
-      (r) => this.track(fn(r)),
-      (e) => this.track(fn({ exitCode: null, killed: false, isError: true, text: errMsg(e), costUsd: null, rateLimited: false, sessionId: spec.sessionId, changedFiles: [] })),
+      (r) => { if (!this.closed) this.track(fn(r)); },
+      (e) => { if (!this.closed) this.track(fn({ exitCode: null, killed: false, isError: true, text: errMsg(e), costUsd: null, rateLimited: false, sessionId: spec.sessionId, changedFiles: [] })); },
     );
   }
 
   private sink(agentId: string): RunSink {
     return {
       events: (evs) => {
+        if (this.closed) return;
         try {
           this.deps.ingest(evs);
         } catch (e) {
@@ -828,6 +873,7 @@ export class Orchestrator {
         }
       },
       limited: (on) => {
+        if (this.closed) return;
         const s = this.deps.tickets.getManaged(agentId)?.state;
         if (s === 'running' || s === 'limited') this.setLimited(agentId, on);
       },

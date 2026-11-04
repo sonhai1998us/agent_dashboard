@@ -87,9 +87,21 @@ function text(v: unknown, field: string, max: number): string {
   return v.trim();
 }
 
+const WIN = process.platform === 'win32';
+
+/** Đường dẫn tuyệt đối; trên Windows phải có ổ đĩa (`D:\…`), không nhận `\foo` hay UNC. */
 function absDir(v: unknown): string {
-  if (typeof v !== 'string' || !v || !path.isAbsolute(v)) throw new HttpError(400, 'dir phải là đường dẫn tuyệt đối');
-  return path.resolve(v);
+  const ok = typeof v === 'string' && !!v && (WIN ? /^[A-Za-z]:[\\/]/.test(v) : path.isAbsolute(v));
+  if (!ok) throw new HttpError(400, WIN ? 'dir phải là đường dẫn tuyệt đối có ổ đĩa (vd. D:\\du-an)' : 'dir phải là đường dẫn tuyệt đối');
+  return path.resolve(v as string);
+}
+
+/** dir là root hoặc nằm trong root (không phân biệt hoa thường trên Windows). */
+function inside(dir: string, root: string): boolean {
+  const norm = (p: string): string => (WIN ? path.resolve(p).toLowerCase() : path.resolve(p));
+  const d = norm(dir);
+  const r = norm(root).replace(/[\\/]+$/, '');
+  return d === r || d.startsWith(r + path.sep);
 }
 
 function overrides(v: unknown, core: Core): Ticket['overrides'] {
@@ -216,11 +228,15 @@ const ROUTES: Route[] = [
   { method: 'GET', re: /^\/api\/fs\/check$/, run: async ({ url }) => ok(await gitInfo(absDir(url.searchParams.get('dir') ?? undefined))) },
   {
     method: 'POST', re: /^\/api\/fs\/git-init$/,
-    run: async ({ req }) => {
+    run: async ({ req, core }) => {
       const dir = absDir(objBody(await readJson(req)).dir);
       let isDir = false;
       try { isDir = fs.statSync(dir).isDirectory(); } catch { /* không tồn tại */ }
       if (!isDir) throw new HttpError(400, 'Thư mục không tồn tại');
+      const { home, claudeDir, codexDir } = core.cfg;
+      if ([home, claudeDir, codexDir].some((r) => inside(dir, r))) {
+        throw new HttpError(400, 'Không được git init trong thư mục của dashboard, Claude hoặc Codex');
+      }
       if ((await gitInfo(dir)).isGit) throw new HttpError(409, 'Thư mục đã là git repo');
       await gitInit(dir);
       return ok(await gitInfo(dir));
@@ -241,8 +257,11 @@ const ROUTES: Route[] = [
   {
     method: 'POST', re: /^\/api\/guard$/,
     run: async ({ req, url, core }) => {
+      const agent = url.searchParams.get('agent') ?? '';
+      const token = bearer(req);
+      if (!core.orchestrator.checkGuardToken(agent, token)) throw new HttpError(401, 'token không hợp lệ');
       const input = await readJson(req, GUARD_BODY_MAX);
-      const d = core.orchestrator.guard(url.searchParams.get('agent') ?? '', bearer(req), input);
+      const d = core.orchestrator.guard(agent, token, input);
       if (!d) throw new HttpError(401, 'token không hợp lệ');
       return ok(d);
     },
@@ -284,6 +303,7 @@ export async function handleApi(req: http.IncomingMessage, res: http.ServerRespo
       res.end();
     } else sendJson(res, r.status, r.json);
   } catch (err) {
+    if (!req.complete) req.resume(); // body chưa đọc (vd. 401 trước khi đọc): bỏ đi
     if (res.headersSent) return void res.end();
     if (err instanceof HttpError) {
       if (err.status === 413) res.setHeader('connection', 'close');

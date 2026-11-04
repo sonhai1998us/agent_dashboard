@@ -112,3 +112,20 @@ test('saveSettings ghi atomically, giữ backfillHours, loadConfig đọc lại,
   expect(again.settings.maxParallel).toBe(4);
   expect(again.thresholds.stuckMs).toBe(999);
 });
+
+test('validateSettings trả object mới chỉ gồm trường đã biết (key lạ ở mọi cấp bị bỏ)', () => {
+  const raw = cloneDefaults() as any;
+  raw.junk = 1;
+  raw.settings.junk = 1;
+  raw.settings.roleDefaults.dev.junk = 1;
+  raw.settings.allowedModels.gemini = ['g'];
+  raw.settings.prices = { m: { in: 1, out: 2, junk: 3 } };
+  raw.thresholds.junk = 1;
+  const r = validateSettings(raw);
+  expect(r.ok).toBe(true);
+  if (!r.ok) return;
+  expect(r.settings).toEqual({ ...DEFAULT_SETTINGS, prices: { m: { in: 1, out: 2 } } });
+  expect(r.thresholds).toEqual(DEFAULT_THRESHOLDS);
+  expect(r.settings.roleDefaults.dev).not.toBe(raw.settings.roleDefaults.dev);
+  expect(r.settings.denyBash).not.toBe(raw.settings.denyBash);
+});

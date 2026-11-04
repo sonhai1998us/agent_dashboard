@@ -190,6 +190,50 @@ describe('điều khiển agent', () => {
     });
   });
 
+  describe('shutdown (dashboard tắt)', () => {
+    afterEach(() => { vi.useRealTimers(); });
+
+    it('kill worker + lượt Controller đang chạy, huỷ hẹn giờ thử lại, đánh dấu interrupted, sau đó không ghi gì nữa', async () => {
+      const { orch, tickets, store } = env;
+      const T = await toRunning(env);
+      const { ctrl, dev1, dev2 } = ids(T);
+      const tools = orch.mcpTools(T);
+      await tools.spawn_agent({ role: 'dev', task: 'a', files: ['src/a.ts'] });
+      await tools.spawn_agent({ role: 'dev', task: 'b', files: ['src/b.ts'] });
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      runOf(env, dev1)!.finish({ rateLimited: true, isError: true, text: 'limit' });
+      await orch.idle();
+      expect(vi.getTimerCount()).toBe(1);
+      expect(tickets.getManaged(dev1)!.state).toBe('limited');
+      const ctrlRun = runOf(env, ctrl)!;
+      const dev2Run = runOf(env, dev2)!;
+      expect(ctrlRun.ended || dev2Run.ended).toBe(false);
+
+      await orch.shutdown();
+      expect(ctrlRun.killed).toBe(true);
+      expect(dev2Run.killed).toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+      for (const id of [ctrl, dev1, dev2]) {
+        expect(tickets.getManaged(id)).toMatchObject({ state: 'interrupted', stopReason: 'bị gián đoạn: dashboard tắt' });
+        expect(store.getAgent(id)!.status).toBe('ended');
+      }
+      expect(tickets.getTicket(T)!.status).toBe('running');
+
+      const published = env.published.length;
+      const runs = env.runs.length;
+      const calls = store.listCalls(dev2).length;
+      dev2Run.emit([{ type: 'call_start', call: { id: 'late', agentId: dev2, kind: 'tool', name: 'Bash', inputHash: 'h', inputPreview: 'ls', startedAt: 1, tokensIn: null, tokensOut: null } }]);
+      dev2Run.limited(true);
+      vi.advanceTimersByTime(600_000);
+      orch.onAlert({ id: `${dev2}:loop`, agentId: dev2, kind: 'loop', level: 'critical', message: 'x', since: 9, active: true });
+      await orch.idle();
+      expect(env.published.length).toBe(published);
+      expect(env.runs.length).toBe(runs);
+      expect(store.listCalls(dev2).length).toBe(calls);
+      await orch.shutdown(); // lần hai: không lỗi
+    });
+  });
+
   it('rate limit Controller: thử lại cùng message, không tính là nhắc', async () => {
     const { orch, tickets } = env;
     const T = await toRunning(env);

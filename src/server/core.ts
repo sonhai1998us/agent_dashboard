@@ -114,7 +114,7 @@ export async function createCore(cfg: Config, watcherOptions: WatcherOptions = {
     clearInterval(tick);
     unsub();
     await Promise.allSettled(watchers.map((w) => w.stop()));
-    await orchestrator.idle();
+    await orchestrator.shutdown();
     store.close();
     throw err;
   }
@@ -138,7 +138,7 @@ export async function createCore(cfg: Config, watcherOptions: WatcherOptions = {
       clearInterval(tick);
       unsub();
       await Promise.allSettled(watchers.map((w) => w.stop()));
-      await orchestrator.idle();
+      await orchestrator.shutdown(); // kill agent đang chạy trước khi đóng store
       store.close();
     },
   };
