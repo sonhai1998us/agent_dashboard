@@ -2,6 +2,7 @@
 import { useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import type { AgentInfo, Alert, Source } from '@/src/core/model';
 import { selectAgent, useLive } from '../lib/liveStore';
+import { isExternal } from '../lib/tickets';
 import { buildRoots } from '../lib/tree';
 import styles from './SessionList.module.css';
 
@@ -34,7 +35,7 @@ export default function SessionList() {
 
   const rows = useMemo(() => {
     const alerts = Object.values(alertsMap);
-    return buildRoots(Object.values(agentsMap))
+    return buildRoots(Object.values(agentsMap).filter(isExternal))
       .map((r) => r.session)
       .filter((a) => (source === 'all' || a.source === source) && (!onlyRunning || a.status === 'running'))
       .map((a) => ({ a, st: statusOf(a, alerts) }));
@@ -51,8 +52,8 @@ export default function SessionList() {
   };
 
   return (
-    <nav className={styles.box} aria-label="Phiên">
-      <h2 className={styles.h}>Phiên</h2>
+    <nav className={styles.box} aria-label="Phiên ngoài ticket">
+      <h2 className={styles.h}>Phiên ngoài ticket</h2>
       <div className={styles.filters}>
         <label className={styles.f}>
           <span className={styles.sr}>Lọc theo nguồn</span>

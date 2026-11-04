@@ -1,5 +1,6 @@
 'use client';
 import TopBar from './TopBar';
+import TicketList from './TicketList';
 import SessionList from './SessionList';
 import AgentTimeline from './AgentTimeline';
 import AgentDetail from './AgentDetail';
@@ -10,7 +11,10 @@ export default function Dashboard() {
     <div className={styles.shell}>
       <TopBar />
       <main className={styles.grid}>
-        <SessionList />
+        <div className={styles.left}>
+          <TicketList />
+          <SessionList />
+        </div>
         <AgentTimeline />
         <AgentDetail />
       </main>
