@@ -8,9 +8,10 @@ import { makeEnv, cleanup, validPlan, ids, runOf, openWaits, toRunning, g, type 
 let env: Env;
 afterEach(() => cleanup(env));
 
-const loop = (agentId: string, level: Alert['level'] = 'critical', active = true): Alert => ({
-  id: `${agentId}:loop`, agentId, kind: 'loop', level, message: 'lặp 10× Bash', since: 0, active,
+const loop = (agentId: string, level: Alert['level'] = 'critical', active = true, since = 0): Alert => ({
+  id: `${agentId}:loop`, agentId, kind: 'loop', level, message: 'lặp 10× Bash', since, active,
 });
+const ESCALATED = 'ticket chuyển sang cần người dùng quyết';
 const runsOf = (e: Env, agentId: string) => e.runs.filter((r) => r.spec.agentId === agentId);
 const logs = (e: Env, T: string) => e.tickets.listLog(T).map((l) => l.text);
 
@@ -116,9 +117,12 @@ describe('điều khiển agent', () => {
     const { orch, tickets, store } = env;
     const T = await toRunning(env);
     const tools = orch.mcpTools(T);
-    const { dev1, dev2 } = ids(T);
-    await tools.spawn_agent({ role: 'dev', task: 'a', files: ['src/a.ts'] });
-    await tools.spawn_agent({ role: 'dev', task: 'b', files: ['src/b.ts'] });
+    const { ctrl, dev1, dev2 } = ids(T);
+    await tools.spawn_agent({ role: 'dev', task: 'a', files: ['src/a.ts', 'src/b.ts'] });
+    await tools.spawn_agent({ role: 'dev', task: 'c', files: ['src/c.ts'] });
+    await tools.wait_agents({ ids: [dev1] });
+    runOf(env, ctrl)!.finish({});
+    await orch.idle();
     const r0 = runOf(env, dev1)!;
     r0.limited(true);
     expect(tickets.getManaged(dev1)!.state).toBe('limited');
@@ -127,7 +131,7 @@ describe('điều khiển agent', () => {
     expect(tickets.getManaged(dev1)!.state).toBe('running');
     expect(store.getAgent(dev1)!.status).toBe('running');
 
-    r0.finish({ rateLimited: true, isError: true });
+    r0.finish({ rateLimited: true, isError: true, changedFiles: ['src/a.ts'] });
     await orch.idle();
     expect(tickets.getManaged(dev1)!.state).toBe('limited');
     expect(store.getAgent(dev1)!.status).toBe('limited');
@@ -138,29 +142,52 @@ describe('điều khiển agent', () => {
       expect(r.spec).toMatchObject({ resume: true, prompt: 'Tiếp tục công việc đang dở.', sessionId: r0.spec.sessionId, cwd: r0.spec.cwd });
       expect(tickets.getManaged(dev1)!.state).toBe('running');
       expect(tickets.getManaged(dev2)!.state).toBe('queued');
-      r.finish({ rateLimited: true, isError: true });
+      // mỗi tiến trình chỉ báo file nó sửa; --resume không báo lại file của lần trước
+      r.finish({ rateLimited: true, isError: true, changedFiles: i === 1 ? [join(r0.spec.cwd, 'src', 'b.ts')] : [] });
       await orch.idle();
     }
-    expect(tickets.getManaged(dev1)).toMatchObject({ state: 'failed', stopReason: 'bị giới hạn: hết lượt thử' });
+    expect(tickets.getManaged(dev1)).toMatchObject({ state: 'failed', stopReason: 'bị giới hạn: hết lượt thử', changedFiles: ['src/a.ts', 'src/b.ts'] });
+    const last = runOf(env, ctrl)!;
+    expect(last.spec.prompt.startsWith('Các agent đã xong')).toBe(true);
+    expect(last.spec.prompt).toMatch(/"changedFiles": \[\s*"src\/a\.ts",\s*"src\/b\.ts"\s*\]/);
+    expect(JSON.parse((await tools.wait_agents({ ids: [dev1] })).text)[0].changedFiles).toEqual(['src/a.ts', 'src/b.ts']);
     expect(store.getAgent(dev1)!.status).toBe('ended');
     expect(runsOf(env, dev1)).toHaveLength(4);
     expect(runOf(env, dev2)).toBeDefined();
   });
 
-  it('dừng agent đang chờ thử lại sau rate limit → không thử lại nữa', async () => {
-    cleanup(env);
-    env = makeEnv({ delays: { rateLimitMs: [30, 30, 30] } });
-    const T = await toRunning(env);
-    const { dev1 } = ids(T);
-    await env.orch.mcpTools(T).spawn_agent({ role: 'dev', task: 'a', files: ['src/a.ts'] });
-    runOf(env, dev1)!.finish({ rateLimited: true, isError: true, text: 'limit' });
-    await env.orch.idle();
-    await env.orch.stopAgent(dev1, 'người dùng dừng');
-    await env.orch.idle();
-    expect(env.tickets.getManaged(dev1)).toMatchObject({ state: 'stopped', stopReason: 'người dùng dừng' });
-    await new Promise((r) => setTimeout(r, 60));
-    await env.orch.idle();
-    expect(runsOf(env, dev1)).toHaveLength(1);
+  describe('đang chờ thử lại sau rate limit (fake timers)', () => {
+    let T: string;
+    let dev1: string;
+    beforeEach(async () => {
+      T = await toRunning(env);
+      dev1 = ids(T).dev1;
+      await env.orch.mcpTools(T).spawn_agent({ role: 'dev', task: 'a', files: ['src/a.ts'] });
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      runOf(env, dev1)!.finish({ rateLimited: true, isError: true, text: 'limit' });
+      await env.orch.idle();
+      expect(vi.getTimerCount()).toBe(1);
+    });
+    afterEach(() => { vi.useRealTimers(); });
+
+    it('dừng agent → huỷ hẹn giờ, không thử lại nữa', async () => {
+      await env.orch.stopAgent(dev1, 'người dùng dừng');
+      await env.orch.idle();
+      expect(env.tickets.getManaged(dev1)).toMatchObject({ state: 'stopped', stopReason: 'người dùng dừng' });
+      expect(vi.getTimerCount()).toBe(0);
+      vi.advanceTimersByTime(60_000);
+      await env.orch.idle();
+      expect(runsOf(env, dev1)).toHaveLength(1);
+    });
+
+    it('ticket không còn running khi tới giờ thử lại → không chạy lại, stopped', async () => {
+      env.tickets.updateTicket(T, { status: 'escalated' });
+      vi.advanceTimersByTime(10);
+      await env.orch.idle();
+      expect(runsOf(env, dev1)).toHaveLength(1);
+      expect(env.tickets.getManaged(dev1)).toMatchObject({ state: 'stopped', stopReason: 'ticket không còn chạy' });
+      expect(env.store.getAgent(dev1)!.status).toBe('ended');
+    });
   });
 
   it('rate limit Controller: thử lại cùng message, không tính là nhắc', async () => {
@@ -206,9 +233,59 @@ describe('điều khiển agent', () => {
     await tools.spawn_agent({ role: 'dev', task: 'a', files: ['src/a.ts'] });
     expect(await tools.finish({ status: 'done', report: 'ok' })).toEqual({ isError: true, text: 'Còn agent đang chạy; hãy wait_agents trước khi finish' });
     expect(env.tickets.getTicket(T)!.status).toBe('running');
-    runOf(env, ids(T).dev1)!.finish({});
+    // đã dừng nhưng tiến trình chưa thoát hẳn → vẫn tính là còn chạy
+    env.fake.deferKill = true;
+    await env.orch.stopAgent(ids(T).dev1, 'người dùng dừng');
+    expect(runOf(env, ids(T).dev1)!.killed).toBe(true);
+    expect(env.tickets.getManaged(ids(T).dev1)!.state).toBe('stopped');
+    expect((await tools.finish({ status: 'done', report: 'ok' })).text).toBe('Còn agent đang chạy; hãy wait_agents trước khi finish');
+    runOf(env, ids(T).dev1)!.finish({ exitCode: null, killed: true, isError: true });
     await env.orch.idle();
     expect((await tools.finish({ status: 'done', report: 'ok' })).isError).toBeFalsy();
+  });
+
+  it('escalate không qua finish dừng mọi worker còn sống', async () => {
+    cleanup(env);
+    env = makeEnv({ maxParallel: 1, delays: { rateLimitMs: [10, 10, 10] } });
+    const { orch, tickets } = env;
+    // 1. Controller tự dừng vì lặp: dev-1 đang chạy, dev-2 xếp hàng
+    const T = await toRunning(env);
+    const { ctrl, dev1, dev2 } = ids(T);
+    await orch.mcpTools(T).spawn_agent({ role: 'dev', task: 'a', files: ['src/a.ts'] });
+    await orch.mcpTools(T).spawn_agent({ role: 'dev', task: 'b', files: ['src/b.ts'] });
+    orch.onAlert(loop(ctrl));
+    await orch.idle();
+    expect(tickets.getTicket(T)!.status).toBe('escalated');
+    expect(runOf(env, dev1)!.killed).toBe(true);
+    for (const id of [dev1, dev2]) expect(tickets.getManaged(id)).toMatchObject({ state: 'stopped', stopReason: ESCALATED });
+    expect(runOf(env, dev2)).toBeUndefined();
+
+    // 2. nhắc hết lượt
+    const t2 = await toRunning(env);
+    const w2 = ids(t2).dev1;
+    await orch.mcpTools(t2).spawn_agent({ role: 'dev', task: 'a', files: ['src/a.ts'] });
+    for (let i = 0; i < 3; i++) {
+      runOf(env, ids(t2).ctrl)!.finish({});
+      await orch.idle();
+    }
+    expect(tickets.getTicket(t2)).toMatchObject({ status: 'escalated', report: 'Controller dừng mà không kết luận' });
+    expect(runOf(env, w2)!.killed).toBe(true);
+    expect(tickets.getManaged(w2)).toMatchObject({ state: 'stopped', stopReason: ESCALATED });
+
+    // 3. Controller hết lượt thử rate limit
+    const t3 = await toRunning(env);
+    const w3 = ids(t3).dev1;
+    await orch.mcpTools(t3).spawn_agent({ role: 'dev', task: 'a', files: ['src/a.ts'] });
+    for (let i = 0; i < 4; i++) {
+      const n = runsOf(env, ids(t3).ctrl).length;
+      runOf(env, ids(t3).ctrl)!.finish({ rateLimited: true, isError: true });
+      await orch.idle();
+      if (i < 3) await vi.waitFor(() => expect(runsOf(env, ids(t3).ctrl)).toHaveLength(n + 1));
+    }
+    expect(tickets.getTicket(t3)).toMatchObject({ status: 'escalated', report: 'Controller bị giới hạn: hết lượt thử' });
+    expect(tickets.getManaged(ids(t3).ctrl)).toMatchObject({ state: 'failed', stopReason: 'bị giới hạn: hết lượt thử' });
+    expect(runOf(env, w3)!.killed).toBe(true);
+    expect(tickets.getManaged(w3)).toMatchObject({ state: 'stopped', stopReason: ESCALATED });
   });
 
   it('escalated → continueTicket → running, maxRounds + 1, lượt mới có chỉ đạo', async () => {
@@ -229,6 +306,26 @@ describe('điều khiển agent', () => {
     expect(env.runs[n].spec.prompt).toContain('4 vòng');
     expect(tickets.getManaged(ctrl)!.state).toBe('running');
     await expect(orch.continueTicket(T, 'nữa')).rejects.toMatchObject({ status: 409 });
+  });
+
+  it('Controller tự dừng → tiếp tục → vòng lặp mới (since mới) bị tự dừng lại; alert cũ gửi lại bị bỏ qua', async () => {
+    const { orch, tickets } = env;
+    const T = await toRunning(env);
+    const { ctrl } = ids(T);
+    orch.onAlert(loop(ctrl, 'critical', true, 100));
+    await orch.idle();
+    expect(tickets.getManaged(ctrl)).toMatchObject({ state: 'stopped', stopReason: 'auto-stop: loop' });
+    await orch.continueTicket(T, 'thử lại');
+    const r = runOf(env, ctrl)!;
+    expect(tickets.getManaged(ctrl)).toMatchObject({ state: 'running', stopReason: null });
+    orch.onAlert(loop(ctrl, 'critical', true, 100));
+    await orch.idle();
+    expect(r.killed).toBe(false);
+    expect(tickets.getTicket(T)!.status).toBe('running');
+    orch.onAlert(loop(ctrl, 'critical', true, 200));
+    await orch.idle();
+    expect(r.killed).toBe(true);
+    expect(tickets.getTicket(T)).toMatchObject({ status: 'escalated', report: 'Controller lặp vòng (auto-stop: loop)' });
   });
 
   it('escalated khi chưa duyệt kế hoạch → continueTicket quay về planning', async () => {
@@ -378,6 +475,28 @@ describe('recover sau khi dashboard khởi động lại', () => {
     await orch2.recover();
     await orch2.idle();
     expect(env.runs).toHaveLength(n + 1);
+  });
+
+  it('dừng giữa lúc duyệt (running, chưa có worktree) → quay lại awaiting_approval, mở lại lượt chờ duyệt', async () => {
+    cleanup(env);
+    env = makeEnv({ git: { createWorktree: () => new Promise<never>(() => {}) } });
+    const t0 = await env.orch.createTicket({ title: 'x', description: 'y', dir: env.repo });
+    const T = t0.id;
+    const { ctrl } = ids(T);
+    await env.orch.mcpTools(T).propose_plan({ plan: validPlan() });
+    env.runs[0].finish({});
+    await env.orch.idle();
+    void env.orch.approve(T);
+    expect(env.tickets.getTicket(T)).toMatchObject({ status: 'running', worktree: null });
+    const orch2 = env.reopen();
+    const n = env.runs.length;
+    await orch2.recover();
+    await orch2.idle();
+    expect(env.tickets.getTicket(T)!.status).toBe('awaiting_approval');
+    expect(env.tickets.getTicket(T)!.plan).not.toBeNull();
+    expect(env.tickets.getManaged(ctrl)!.state).toBe('waiting');
+    expect(openWaits(env, ctrl).filter((w) => w.endedAt === null)).toEqual([expect.objectContaining({ kind: 'approval' })]);
+    expect(env.runs).toHaveLength(n);
   });
 
   it('Controller đang chạy (running hoặc planning) → interrupted rồi lượt restarted', async () => {

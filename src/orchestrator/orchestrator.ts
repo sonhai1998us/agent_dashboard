@@ -29,8 +29,8 @@ export class OrchestratorError extends Error {
 type Timer = ReturnType<typeof setTimeout>;
 /** `timer`: đang chờ thử lại sau rate limit (lượt vẫn được coi là đang chạy). */
 interface CtrlState { handle: RunHandle | null; message: string | null; queue: string[]; nudges: number; waking: boolean; retries: number; timer: Timer | null }
-/** Giữ slot suốt các lần thử lại sau rate limit; `cost` cộng dồn qua các lần chạy. */
-interface WorkerRun { handle: RunHandle; spec: RunSpec; retries: number; timer: Timer | null; cost: number | null; last: RunResult | null }
+/** Giữ slot suốt các lần thử lại sau rate limit; `cost` và `files` cộng dồn qua các lần chạy (--resume không báo lại file cũ). */
+interface WorkerRun { handle: RunHandle; spec: RunSpec; retries: number; timer: Timer | null; cost: number | null; files: string[]; last: RunResult | null }
 
 const CTRL_TOOLS = ['Read', 'Glob', 'Grep'];
 const MCP_TOOLS = ['propose_plan', 'spawn_agent', 'wait_agents', 'get_agent_log', 'finish'].map((n) => `mcp__acctv__${n}`);
@@ -53,6 +53,7 @@ const LIMIT_EXHAUSTED = 'bị giới hạn: hết lượt thử';
 const CANCELLED = 'ticket bị huỷ';
 const INTERRUPTED = 'bị gián đoạn: dashboard khởi động lại';
 const LOOP_STOP = 'auto-stop: loop';
+const ESCALATED = 'ticket chuyển sang cần người dùng quyết';
 
 export const controllerId = (ticketId: string): string => `acctv:${ticketId}:controller`;
 /** meta: Controller của ticket đã khởi động được ít nhất một tiến trình (session tồn tại → --resume). */
@@ -200,9 +201,7 @@ export class Orchestrator {
     this.move(ticketId, 'cancel', { pendingWait: null });
     this.ctrl(ticketId).queue.length = 0;
     this.log(ticketId, 'Người dùng huỷ ticket');
-    // agent đang xếp hàng ra khỏi hàng trước, để slot được giải phóng không khởi chạy chúng
-    const live = this.liveWorkers(ticketId).sort((a, b) => Number(b.state === 'queued') - Number(a.state === 'queued'));
-    await Promise.all([...live.map((m) => this.stopWorker(m, CANCELLED)), this.stopController(ticketId, CANCELLED)]);
+    await Promise.all([this.stopLiveWorkers(ticketId, CANCELLED), this.stopController(ticketId, CANCELLED)]);
     return this.mustTicket(ticketId);
   }
 
@@ -261,24 +260,32 @@ export class Orchestrator {
     for (const t of this.deps.tickets.listTickets()) {
       if (t.status === 'planning') this.restartTurn(t.id);
       else if (t.status !== 'running') continue;
+      else if (!t.worktree) {
+        // dừng giữa lúc duyệt (worktree chưa tạo xong) → chờ duyệt lại
+        this.save(t.id, { status: 'awaiting_approval' });
+        this.log(t.id, 'Dashboard khởi động lại khi đang duyệt; chờ duyệt lại');
+        this.ctrlWaiting(t.id, 'approval');
+      }
       else if (t.pendingWait) await this.checkWait(t.id);
       else if (this.deps.tickets.getManaged(controllerId(t.id))?.state !== 'waiting') this.restartTurn(t.id);
     }
   }
 
   onAlert(a: Alert): void {
-    if (a.kind !== 'loop' || a.level !== 'critical' || !a.active || !isManagedId(a.agentId) || this.alerted.has(a.agentId)) return;
+    // một vòng lặp mới có `since` mới → Controller được tiếp tục vẫn bị tự dừng lại được
+    const key = `${a.agentId}:${a.since}`;
+    if (a.kind !== 'loop' || a.level !== 'critical' || !a.active || !isManagedId(a.agentId) || this.alerted.has(key)) return;
     const m = this.deps.tickets.getManaged(a.agentId);
     if (!m) return;
     if (m.role !== 'controller') {
       if (!LIVE.includes(m.state)) return;
-      this.alerted.add(m.agentId);
+      this.alerted.add(key);
       this.track(this.stopWorker(m, LOOP_STOP));
       return;
     }
     const st = this.ctrl(m.ticketId);
     if (!st.handle && !st.timer) return;
-    this.alerted.add(m.agentId);
+    this.alerted.add(key);
     this.track(this.autoStopController(m.ticketId));
   }
 
@@ -481,9 +488,14 @@ export class Orchestrator {
       await st.handle?.kill();
       return;
     }
-    this.move(T, 'finish_escalated', { report: `Controller lặp vòng (${LOOP_STOP})`, pendingWait: null });
+    await Promise.all([this.escalate(T, `Controller lặp vòng (${LOOP_STOP})`), this.stopController(T, LOOP_STOP)]);
+  }
+
+  /** Escalate không qua finish: ticket cần người dùng quyết, dừng mọi worker còn chạy. */
+  private async escalate(T: string, report: string): Promise<void> {
+    this.move(T, 'finish_escalated', { report, pendingWait: null });
     this.ctrl(T).queue.length = 0;
-    await this.stopController(T, LOOP_STOP);
+    await this.stopLiveWorkers(T, ESCALATED);
   }
 
   private async retryController(T: string, message: string): Promise<void> {
@@ -509,7 +521,7 @@ export class Orchestrator {
     this.mcpTokens.set(T, mcpToken);
     this.guards.set(id, { token, policy: this.policy('controller', t.dir, t.worktree ? [t.worktree] : [], []) });
     this.closeWaits(id);
-    this.saveManaged(id, { state: 'running', endedAt: null });
+    this.saveManaged(id, { state: 'running', stopReason: null, endedAt: null });
     // watcher bỏ qua transcript của agent acctv: chỉ khi đã thấy session này lúc phát hiện file → ingest trước khi chạy
     this.emitAgent({
       id, source: 'claude', sessionId: t.controllerSessionId, label: 'Controller', role: 'controller', parentId: null,
@@ -561,11 +573,10 @@ export class Orchestrator {
         return;
       }
       st.retries = 0;
-      st.queue.length = 0;
       this.saveManaged(id, { state: 'failed', stopReason: LIMIT_EXHAUSTED });
-      this.move(T, 'finish_escalated', { report: `Controller ${LIMIT_EXHAUSTED}`, pendingWait: null });
       this.log(T, `Controller ${LIMIT_EXHAUSTED} → escalated`);
       this.endController(T);
+      await this.escalate(T, `Controller ${LIMIT_EXHAUSTED}`);
       return;
     }
     st.retries = 0;
@@ -587,9 +598,9 @@ export class Orchestrator {
       this.startControllerTurn(T, turn.nudge());
     } else {
       st.nudges = 0;
-      this.move(T, 'finish_escalated', { report: 'Controller dừng mà không kết luận' });
       this.log(T, 'Controller dừng 3 lượt liên tiếp mà không kết luận → escalated');
       this.endController(T);
+      await this.escalate(T, 'Controller dừng mà không kết luận');
     }
   }
 
@@ -646,7 +657,7 @@ export class Orchestrator {
     this.saveManaged(id, { state: 'running' });
     this.emitAgent({ id, source: m.runner, sessionId: m.sessionId, status: 'running', lastEventAt: this.now() });
     const handle = this.launch(spec, this.sink(id));
-    this.workers.set(id, { handle, spec, retries: 0, timer: null, cost: null, last: null });
+    this.workers.set(id, { handle, spec, retries: 0, timer: null, cost: null, files: [], last: null });
     this.emitPid(id, spec, handle);
     this.onEnd(spec, handle, (r) => this.onWorkerExit(id, handle, r));
   }
@@ -657,6 +668,7 @@ export class Orchestrator {
     if (!run || run.handle !== handle) return;
     run.last = r;
     if (r.costUsd !== null) run.cost = (run.cost ?? 0) + r.costUsd;
+    run.files = [...new Set([...run.files, ...relFiles(run.spec.cwd, r.changedFiles)])];
     const m = this.deps.tickets.getManaged(id);
     if (m && r.rateLimited && !r.killed && !isTerminal(m.state)) {
       const ms = this.delays[run.retries];
@@ -678,6 +690,11 @@ export class Orchestrator {
     run.timer = null;
     const m = this.deps.tickets.getManaged(id);
     if (!m || isTerminal(m.state)) return this.onWorkerDone(id, run.last!);
+    if (this.deps.tickets.getTicket(m.ticketId)?.status !== 'running') {
+      this.saveManaged(id, { state: 'stopped', stopReason: 'ticket không còn chạy' });
+      this.log(m.ticketId, `${id} không chạy lại: ticket không còn chạy`);
+      return this.onWorkerDone(id, run.last!);
+    }
     const spec: RunSpec = { ...run.spec, resume: true, prompt: RESUME_PROMPT };
     this.saveManaged(id, { state: 'running' });
     this.emitAgent({ id, source: m.runner, sessionId: m.sessionId, status: 'running', lastEventAt: this.now() });
@@ -706,8 +723,15 @@ export class Orchestrator {
     await run.handle.kill();
   }
 
+  /** Worker còn sống: queued/running/limited, hoặc đã dừng nhưng tiến trình chưa thoát hẳn. */
   private liveWorkers(T: string): ManagedAgent[] {
-    return this.deps.tickets.listManaged(T).filter((m) => m.role !== 'controller' && LIVE.includes(m.state));
+    return this.deps.tickets.listManaged(T).filter((m) => m.role !== 'controller' && (LIVE.includes(m.state) || this.workers.has(m.agentId)));
+  }
+
+  private async stopLiveWorkers(T: string, reason: string): Promise<void> {
+    // agent đang xếp hàng ra khỏi hàng trước, để slot được giải phóng không khởi chạy chúng
+    const live = this.liveWorkers(T).filter((m) => LIVE.includes(m.state)).sort((a, b) => Number(b.state === 'queued') - Number(a.state === 'queued'));
+    await Promise.all(live.map((m) => this.stopWorker(m, reason)));
   }
 
   private setLimited(id: string, on: boolean): void {
@@ -726,7 +750,7 @@ export class Orchestrator {
     if (!m) return;
     const state: ManagedState = isTerminal(m.state) ? m.state : r.isError ? 'failed' : 'done';
     this.saveManaged(id, {
-      state, resultText: r.text, changedFiles: relFiles(run?.spec.cwd ?? '', r.changedFiles), costUsd: run ? run.cost : r.costUsd, endedAt: this.now(),
+      state, resultText: r.text, changedFiles: run ? run.files : relFiles('', r.changedFiles), costUsd: run ? run.cost : r.costUsd, endedAt: this.now(),
     });
     this.emitAgent({ id, source: m.runner, sessionId: m.sessionId, status: 'ended' });
     this.log(m.ticketId, `${id} ${state === 'done' ? 'xong' : state === 'failed' ? 'thất bại' : state}`);

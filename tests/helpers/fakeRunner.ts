@@ -14,10 +14,13 @@ export interface FakeRun {
   finish(r?: Partial<RunResult>): void;
 }
 
-/** `control.spawnFailures = n`: n lần gọi runner tiếp theo trả pid null và kết thúc ngay với lỗi spawn. */
-export function createFakeRunner(): { runner: Runner; runs: FakeRun[]; control: { spawnFailures: number } } {
+/**
+ * `control.spawnFailures = n`: n lần gọi runner tiếp theo trả pid null và kết thúc ngay với lỗi spawn.
+ * `control.deferKill = true`: kill() chỉ đánh dấu killed; tiến trình "thoát" khi test gọi finish().
+ */
+export function createFakeRunner(): { runner: Runner; runs: FakeRun[]; control: { spawnFailures: number; deferKill: boolean } } {
   const runs: FakeRun[] = [];
-  const control = { spawnFailures: 0 };
+  const control = { spawnFailures: 0, deferKill: false };
   const runner: Runner = (spec, sink) => {
     let resolve!: (r: RunResult) => void;
     const done = new Promise<RunResult>((r) => { resolve = r; });
@@ -44,7 +47,7 @@ export function createFakeRunner(): { runner: Runner; runs: FakeRun[]; control: 
       async kill() {
         if (run.ended) return;
         run.killed = true;
-        run.finish({ exitCode: null, killed: true, isError: true });
+        if (!control.deferKill) run.finish({ exitCode: null, killed: true, isError: true });
       },
     };
   };

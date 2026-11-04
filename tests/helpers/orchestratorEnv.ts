@@ -17,7 +17,7 @@ export const g = (dir: string, ...a: string[]): string => execFileSync('git', ['
 
 export interface Env {
   root: string; repo: string; cfg: Config; store: Store; tickets: TicketStore; hub: Hub; orch: Orchestrator;
-  runs: FakeRun[]; fake: { spawnFailures: number }; published: HubEvent[]; order: string[]; managedAtSpawn: boolean[]; clock: { t: number };
+  runs: FakeRun[]; fake: { spawnFailures: number; deferKill: boolean }; published: HubEvent[]; order: string[]; managedAtSpawn: boolean[]; clock: { t: number };
   /** Orchestrator mới trên cùng DB và runner giả (giả lập dashboard khởi động lại). */
   reopen(): Orchestrator;
 }

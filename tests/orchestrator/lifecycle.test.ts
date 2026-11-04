@@ -431,10 +431,8 @@ describe('các trường hợp riêng', () => {
     await tools.spawn_agent({ role: 'dev', task: 'a', files: ['src/a.ts'] });
     await tools.spawn_agent({ role: 'dev', task: 'b', files: ['src/b.ts'] });
     expect(env.tickets.getManaged(dev2)!.state).toBe('queued');
-    // finish bị từ chối khi còn worker chạy; ticket rời running khi Controller bị tự dừng
-    env.orch.onAlert({ id: 'a', agentId: ids(T).ctrl, kind: 'loop', level: 'critical', message: 'lặp', since: 0, active: true });
-    await env.orch.idle();
-    expect(env.tickets.getTicket(T)!.status).toBe('escalated');
+    // finish/cancel/escalate đều dừng worker trước; ở đây chỉnh thẳng DB để kiểm lớp chặn cuối trong startWorker
+    env.tickets.updateTicket(T, { status: 'escalated' });
     runOf(env, dev1)!.finish({});
     await env.orch.idle();
     expect(runOf(env, dev2)).toBeUndefined();
