@@ -4,19 +4,13 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { loadConfig, type Config } from '@/src/core/config';
-import { agentMetrics, globalMetrics, type AgentMetrics } from '@/src/core/metrics';
 import type { WatcherOptions } from '@/src/adapters/watchBase';
-import { createCore, type Core } from './core';
+import { createCore, type Core, type Runners } from './core';
+import { handleApi, liveMetrics, originAllowed, sendJson } from './routes';
 
 type Handler = (req: http.IncomingMessage, res: http.ServerResponse) => boolean;
 
-const HOUR_MS = 3600_000;
 const METRICS_MS = 5000;
-
-function sendJson(res: http.ServerResponse, status: number, body: unknown): void {
-  res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
-  res.end(JSON.stringify(body));
-}
 
 export function hostAllowed(host: string | undefined, port: number): boolean {
   return host === `127.0.0.1:${port}` || host === `localhost:${port}`;
@@ -30,63 +24,16 @@ function safeUrl(raw: string | undefined): URL | null {
   }
 }
 
-export function originAllowed(origin: string | undefined, port: number): boolean {
-  return origin === undefined || origin === `http://127.0.0.1:${port}` || origin === `http://localhost:${port}`;
-}
-
-function parseIntParam(v: string | null, def: number, min: number, max: number): number | null {
-  if (v === null) return def;
-  if (!/^\d+$/.test(v)) return null;
-  const n = Number(v);
-  return n >= min && n <= max ? n : null;
-}
-
-function liveMetrics(core: Core, now: number) {
-  return globalMetrics(
-    core.store.listAgents({ since: now - core.cfg.backfillHours * HOUR_MS }),
-    core.store.recentCalls(now - HOUR_MS),
-    core.store.activeAlerts(),
-    now,
-  );
-}
-
+/** Nhận `/api/*` và `/mcp` (route ở routes.ts); path khác trả false để giao cho Next. */
 export function attachApi(server: http.Server, core: Core): Handler {
   return (req, res) => {
     const port = (server.address() as { port: number } | null)?.port ?? 0;
     if (!hostAllowed(req.headers.host, port)) { sendJson(res, 403, { error: 'forbidden host' }); return true; }
     const url = safeUrl(req.url);
     if (!url) { sendJson(res, 400, { error: 'bad request url' }); return true; }
-    if (url.pathname !== '/api' && !url.pathname.startsWith('/api/')) return false;
-    if (req.method !== 'GET') { sendJson(res, 405, { error: 'method not allowed' }); return true; }
-
-    try {
-      if (url.pathname === '/api/snapshot') {
-        const now = Date.now();
-        const agents = core.store.listAgents({ since: now - core.cfg.backfillHours * HOUR_MS });
-        const agentM: Record<string, AgentMetrics> = {};
-        for (const a of agents) agentM[a.id] = agentMetrics(a, core.store.listCalls(a.id, { limit: 2000 }), now);
-        sendJson(res, 200, {
-          generatedAt: now, agents, alerts: core.store.activeAlerts(),
-          metrics: liveMetrics(core, now), agentMetrics: agentM,
-        });
-        return true;
-      }
-      const m = /^\/api\/agents\/([^/]+)\/calls$/.exec(url.pathname);
-      if (m) {
-        let id: string;
-        try { id = decodeURIComponent(m[1]); } catch { sendJson(res, 400, { error: 'bad agent id' }); return true; }
-        const limit = parseIntParam(url.searchParams.get('limit'), 500, 1, 2000);
-        const since = parseIntParam(url.searchParams.get('since'), 0, 0, Number.MAX_SAFE_INTEGER);
-        if (limit === null) { sendJson(res, 400, { error: 'limit must be an integer 1..2000' }); return true; }
-        if (since === null) { sendJson(res, 400, { error: 'since must be a non-negative integer (ms)' }); return true; }
-        if (!core.store.getAgent(id)) { sendJson(res, 404, { error: 'agent not found' }); return true; }
-        sendJson(res, 200, core.store.listCalls(id, { since, limit }));
-        return true;
-      }
-      sendJson(res, 404, { error: 'not found' });
-    } catch (err) {
-      sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) });
-    }
+    const p = url.pathname;
+    if (p !== '/mcp' && p !== '/api' && !p.startsWith('/api/')) return false;
+    void handleApi(req, res, url, core, port);
     return true;
   };
 }
@@ -102,6 +49,8 @@ export interface StartOptions {
   withNext?: boolean;
   /** Passed to the file watchers (tests use polling). */
   watcher?: WatcherOptions;
+  /** Runner thay cho CLI thật (test). Không truyền: dò `claude` trên máy. */
+  runners?: Runners;
 }
 
 export interface RunningServer {
@@ -144,7 +93,7 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
   const port = () => (server.address() as { port: number }).port;
 
   try {
-    core = await createCore(cfg, opts.watcher);
+    core = await createCore(cfg, opts.watcher, { runners: opts.runners, port });
     const c = core;
     const api = attachApi(server, c);
     let nextHandler: ((req: http.IncomingMessage, res: http.ServerResponse) => Promise<void>) | undefined;

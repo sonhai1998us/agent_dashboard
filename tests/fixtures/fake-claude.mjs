@@ -50,12 +50,15 @@ for (const step of turn?.steps ?? []) {
     const cfg = JSON.parse(readFileSync(arg('--mcp-config'), 'utf8'));
     const srv = Object.values(cfg.mcpServers)[0];
     const id = ++n;
-    out({ type: 'assistant', message: { role: 'assistant', model: 'fake', content: [{ type: 'tool_use', id: `mcp-${id}`, name: `mcp__acctv__${step.mcp}`, input: step.args ?? {} }] } });
+    // "{ticket}" trong args → id ticket lấy từ URL MCP (kịch bản dùng được cho mọi ticket)
+    const ticket = new URL(srv.url).searchParams.get('ticket') ?? '';
+    const args = JSON.parse(JSON.stringify(step.args ?? {}).replaceAll('{ticket}', ticket));
+    out({ type: 'assistant', message: { role: 'assistant', model: 'fake', content: [{ type: 'tool_use', id: `mcp-${id}`, name: `mcp__acctv__${step.mcp}`, input: args }] } });
     let text;
     try {
       const res = await fetch(srv.url, {
         method: 'POST', headers: { 'content-type': 'application/json', ...(srv.headers ?? {}) },
-        body: JSON.stringify({ jsonrpc: '2.0', id, method: 'tools/call', params: { name: step.mcp, arguments: step.args ?? {} } }),
+        body: JSON.stringify({ jsonrpc: '2.0', id, method: 'tools/call', params: { name: step.mcp, arguments: args } }),
       });
       const j = await res.json();
       text = j.result?.content?.[0]?.text ?? JSON.stringify(j.result ?? j.error ?? j);
