@@ -74,3 +74,14 @@ export function detectErrorBurst(a: AgentInfo, recentTools: CallRecord[], t: Thr
   if (n < t.errorBurst) return null;
   return mk(a, 'error_burst', 'critical', `${n} call lỗi liên tiếp`, first);
 }
+
+const GUARD = '[acctv-guard]';
+const GUARD_SCOPE = '[acctv-guard] ngoài phạm vi';
+
+export function detectGuard(a: AgentInfo, recentTools: CallRecord[]): Alert | null {
+  const hits = tools(recentTools).filter((c) => c.errorPreview?.startsWith(GUARD));
+  if (hits.length === 0) return null;
+  const m = hits.filter((c) => c.errorPreview!.startsWith(GUARD_SCOPE)).length;
+  const message = `bị chặn ×${hits.length}${m > 0 ? ` · ngoài phạm vi ×${m}` : ''}`;
+  return mk(a, 'guard', m >= 3 ? 'critical' : 'warn', message, hits[0].startedAt);
+}

@@ -95,3 +95,24 @@ test('engine: subagent background không che long_tool của call cha', () => {
   e.tick(1000 + 600_000);
   expect(s.activeAlerts()).toContainEqual(expect.objectContaining({ agentId: ID, kind: 'long_tool' }));
 });
+
+test('engine: agent limited/queued im lặng 10 phút không có alert stuck', () => {
+  for (const st of ['limited', 'queued'] as const) {
+    const { s, e } = setup();
+    s.setAgentStatus(ID, st);
+    e.tick(1000 + 600000);
+    expect(s.activeAlerts().filter((a) => a.kind === 'stuck')).toEqual([]);
+  }
+});
+
+test('engine: guard alert khi có call bị chặn, tắt khi agent ended', () => {
+  const { s, ev, e } = setup();
+  const id = start(s, 'Edit', 'x.ts', 2000);
+  s.applyEvent({ type: 'call_end', agentId: ID, callId: id, endedAt: 2005, ok: false, errorPreview: '[acctv-guard] ngoài phạm vi: x.ts' });
+  e.onCall(ID);
+  expect(s.activeAlerts().find((a) => a.kind === 'guard')).toMatchObject({ level: 'warn', message: 'bị chặn ×1 · ngoài phạm vi ×1' });
+  s.setAgentStatus(ID, 'ended');
+  e.tick(4000);
+  expect(s.activeAlerts()).toEqual([]);
+  expect(ev.at(-1)).toMatchObject({ alert: { kind: 'guard', active: false } });
+});

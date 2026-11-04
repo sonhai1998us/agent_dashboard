@@ -1,9 +1,9 @@
 import type { Store } from '@/src/core/store';
 import type { Config } from '@/src/core/config';
 import type { Alert, AlertKind, HubEvent } from '@/src/core/model';
-import { detectStuck, detectLongTool, detectLoop, detectErrorBurst } from './rules';
+import { detectStuck, detectLongTool, detectLoop, detectErrorBurst, detectGuard } from './rules';
 
-const KINDS: AlertKind[] = ['stuck', 'long_tool', 'loop', 'error_burst'];
+const KINDS: AlertKind[] = ['stuck', 'long_tool', 'loop', 'error_burst', 'guard'];
 
 // Phase 1: chỉ cảnh báo, không bao giờ dừng/kill agent.
 export class DetectEngine {
@@ -26,7 +26,7 @@ export class DetectEngine {
       const next: Alert = { ...cand, since: wasActive ? prev!.since : cand.since };
       const levelChanged = !wasActive || prev!.level !== next.level;
       // stuck/long_tool có thông điệp đổi mỗi tick (thời lượng) nên không publish theo message
-      const msgChanged = wasActive && prev!.message !== next.message && (kind === 'loop' || kind === 'error_burst');
+      const msgChanged = wasActive && prev!.message !== next.message && (kind === 'loop' || kind === 'error_burst' || kind === 'guard');
       if (!wasActive || prev!.message !== next.message || levelChanged) {
         this.store.upsertAlert(next);
         this.state.set(id, next);
@@ -47,6 +47,7 @@ export class DetectEngine {
     const tools = live ? this.recentTools(agentId) : [];
     this.reconcile(agentId, 'loop', live ? detectLoop(a, tools, this.cfg.thresholds) : null);
     this.reconcile(agentId, 'error_burst', live ? detectErrorBurst(a, tools, this.cfg.thresholds) : null);
+    this.reconcile(agentId, 'guard', live ? detectGuard(a, tools) : null);
   }
 
   tick(now: number): void {
