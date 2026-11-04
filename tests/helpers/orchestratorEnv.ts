@@ -18,6 +18,8 @@ export const g = (dir: string, ...a: string[]): string => execFileSync('git', ['
 export interface Env {
   root: string; repo: string; cfg: Config; store: Store; tickets: TicketStore; hub: Hub; orch: Orchestrator;
   runs: FakeRun[]; fake: { spawnFailures: number }; published: HubEvent[]; order: string[]; managedAtSpawn: boolean[]; clock: { t: number };
+  /** Orchestrator mới trên cùng DB và runner giả (giả lập dashboard khởi động lại). */
+  reopen(): Orchestrator;
 }
 
 export function makeEnv(opts: { maxParallel?: number; maxRounds?: number; runners?: Partial<Record<AgentKind, Runner | null>>; delays?: OrchestratorDeps['delays']; git?: Partial<typeof git> } = {}): Env {
@@ -60,11 +62,15 @@ export function makeEnv(opts: { maxParallel?: number; maxRounds?: number; runner
   for (const k of Object.keys(want) as AgentKind[]) if (want[k]) runners[k] = want[k]!;
   const clock = { t: 1_700_000_000_000 };
   let sid = 0;
-  const orch = new Orchestrator({
+  const deps: OrchestratorDeps = {
     cfg, store, tickets, hub, ingest, runners, git: { ...git, ...opts.git }, port: () => 4777,
     now: () => clock.t, newSessionId: () => `sid-${++sid}`, delays: opts.delays,
-  });
-  return { root, repo, cfg, store, tickets, hub, orch, runs: fake.runs, fake: fake.control, published, order, managedAtSpawn, clock };
+  };
+  const orch = new Orchestrator(deps);
+  return {
+    root, repo, cfg, store, tickets, hub, orch, runs: fake.runs, fake: fake.control, published, order, managedAtSpawn, clock,
+    reopen: () => new Orchestrator(deps),
+  };
 }
 
 export function cleanup(env: Env): void {
