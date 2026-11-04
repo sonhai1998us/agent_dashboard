@@ -234,3 +234,26 @@ test('subagent background: call của cha đóng (khởi chạy async) không l�
   s.applyEvent({ type: 'agent', agent: { id: 'claude:s1:bg', source: 'claude', sessionId: 's1', status: 'running', lastEventAt: 2150 } } as any);
   expect(s.getAgent('claude:s1:bg')?.status).toBe('running');
 });
+
+test('clearIngested giữ agent/call do dashboard chạy; isManagedSession; dropAgent', () => {
+  const s = new Store(':memory:');
+  s.applyEvent({ type: 'agent', agent: { id: 'acctv:T-1:dev-1', source: 'claude', sessionId: 'sid-x', label: 'dev', startedAt: 1, lastEventAt: 1 } });
+  s.applyEvent({ type: 'call_start', call: { id: 'm1', agentId: 'acctv:T-1:dev-1', kind: 'tool', name: 'Bash', inputHash: 'h', inputPreview: 'x', startedAt: 2, tokensIn: null, tokensOut: null } });
+  s.applyEvent(agentEv); s.applyEvent(callStart());
+  s.upsertAlert({ id: 'al1', agentId: 'acctv:T-1:dev-1', kind: 'loop', level: 'warn', message: 'm', since: 1, active: true });
+  s.upsertAlert({ id: 'al2', agentId: 'claude:s1', kind: 'loop', level: 'warn', message: 'm', since: 1, active: true });
+  s.setOffset('f', 1, 1);
+  s.clearIngested();
+  expect(s.getAgent('acctv:T-1:dev-1')).toBeTruthy();
+  expect(s.listCalls('acctv:T-1:dev-1').length).toBe(1);
+  expect(s.activeAlerts().map((a) => a.id)).toEqual(['al1']);
+  expect(s.getAgent('claude:s1')).toBeUndefined();
+  expect(s.getOffset('f')).toBeUndefined();
+  expect(s.isManagedSession('sid-x')).toBe(true);
+  expect(s.isManagedSession('s1')).toBe(false);
+  s.dropAgent('acctv:T-1:dev-1');
+  expect(s.getAgent('acctv:T-1:dev-1')).toBeUndefined();
+  expect(s.listCalls('acctv:T-1:dev-1').length).toBe(0);
+  expect(s.activeAlerts().length).toBe(0);
+  expect(s.isManagedSession('sid-x')).toBe(false);
+});

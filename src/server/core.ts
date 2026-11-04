@@ -8,13 +8,17 @@ import { DetectEngine } from '@/src/detect/engine';
 import { createClaudeWatcher } from '@/src/adapters/claude/watch';
 import { createCodexWatcher } from '@/src/adapters/codex/watch';
 import type { Watcher, WatcherOptions } from '@/src/adapters/watchBase';
-import type { HubEvent } from '@/src/core/model';
+import type { HubEvent, NormalizedEvent } from '@/src/core/model';
+import { TicketStore } from '@/src/tickets/store';
 
 export interface Core {
   cfg: Config;
   store: Store;
   hub: Hub;
   engine: DetectEngine;
+  tickets: TicketStore;
+  /** Applies events from dashboard-run agents, then publishes them like watcher events. */
+  ingest(evs: NormalizedEvent[]): void;
   /** Resolves when every watcher has finished its background backfill. */
   backfilled(): Promise<void>;
   stop(): Promise<void>;
@@ -37,6 +41,11 @@ export async function createCore(cfg: Config, watcherOptions: WatcherOptions = {
       hub.publish(e);
       if (e.type === 'call') engine.onCall(e.call.agentId);
     }
+  };
+  const tickets = new TicketStore(store);
+  const ingest = (evs: NormalizedEvent[]): void => {
+    const out = store.transaction(() => evs.flatMap((e) => store.applyEvent(e)));
+    onEvents(out);
   };
   const watchers: Watcher[] = [
     createClaudeWatcher(cfg, store, onEvents, watcherOptions),
@@ -61,7 +70,7 @@ export async function createCore(cfg: Config, watcherOptions: WatcherOptions = {
 
   let stopped = false;
   return {
-    cfg, store, hub, engine,
+    cfg, store, hub, engine, tickets, ingest,
     async backfilled() {
       await Promise.all(watchers.map((w) => w.backfilled()));
     },

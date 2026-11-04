@@ -30,7 +30,11 @@ export function createCodexWatcher(
   const core = createTailCore<CodexFileCtx>({
     name: 'codex',
     root: path.join(cfg.codexDir, 'sessions'),
-    match: (f) => /\.jsonl(\.zst)?$/i.test(f),
+    match: (f) => {
+      if (!/\.jsonl(\.zst)?$/i.test(f)) return false;
+      const tid = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl(\.zst)?$/i.exec(f)?.[1];
+      return !(tid && store.isManagedSession(tid));
+    },
     makeCtx: (f, resumed) => codexCtxForPath(f, { resumed }),
     parse: parseCodexLine,
     agentId: (c) => c.agentId,
