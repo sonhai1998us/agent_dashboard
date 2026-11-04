@@ -1,10 +1,18 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import * as proc from '@/src/runner/proc';
 import { createClaudeRunner } from '@/src/runner/claude';
 import type { RunSpec, RunSink } from '@/src/runner/types';
 import type { NormalizedEvent } from '@/src/core/model';
+
+vi.mock('@/src/runner/proc', async (orig) => {
+  const m = await orig<typeof import('@/src/runner/proc')>();
+  return { ...m, killTree: vi.fn(m.killTree) };
+});
+
+afterEach(() => { delete process.env.FAKE_CLAUDE_SCRIPT; delete process.env.FAKE_CLAUDE_LOG; delete process.env.FAKE_CLAUDE_CHILD_PID; });
 
 const fake = path.resolve('tests/fixtures/fake-claude.mjs');
 const guardScript = path.resolve('bin/acctv-guard.mjs');
@@ -79,7 +87,6 @@ describe('createClaudeRunner', () => {
     const t2 = Date.now();
     while (Date.now() - t2 < 5000 && alive(child)) await new Promise((r) => setTimeout(r, 50));
     expect(alive(child)).toBe(false);
-    delete process.env.FAKE_CLAUDE_CHILD_PID;
   }, 40000);
 
   it('exit 3 without result is an error with stderr as text', async () => {
@@ -96,5 +103,32 @@ describe('createClaudeRunner', () => {
     expect(r.isError).toBe(false);
     const end = s.events.find((e) => e.type === 'call_end');
     expect(end).toMatchObject({ ok: false });
+  }, 30000);
+
+  it('kill() after exit does not call killTree', async () => {
+    const s = setup({ '*': [{ steps: [] }] });
+    const h = s.runner(s.spec, s.sink);
+    await h.done;
+    vi.mocked(proc.killTree).mockClear();
+    await h.kill();
+    expect(proc.killTree).not.toHaveBeenCalled();
+    expect((await h.done).killed).toBe(false);
+  }, 30000);
+
+  it('a nonexistent command resolves as an error result without throwing', async () => {
+    const s = setup({});
+    const runner = createClaudeRunner({ command: path.join(s.root, 'khong-co', 'claude.exe'), guardScript });
+    const r = await runner(s.spec, s.sink).done;
+    expect(r.isError).toBe(true);
+    expect(r.text.length).toBeGreaterThan(0);
+  }, 30000);
+
+  it('a command that throws synchronously on spawn resolves as an error result', async () => {
+    const s = setup({});
+    const cmd = path.join(s.root, 'x.cmd');
+    writeFileSync(cmd, '@echo hi');
+    const r = await createClaudeRunner({ command: cmd, guardScript })(s.spec, s.sink).done;
+    expect(r.isError).toBe(true);
+    expect(r.text.length).toBeGreaterThan(0);
   }, 30000);
 });

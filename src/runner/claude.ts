@@ -39,9 +39,17 @@ export function createClaudeRunner(opts: { command: string; prefixArgs?: string[
       pid: proc.pid,
       done,
       async kill() {
+        const pid = proc.pid;
+        if (proc.exited() || pid === null) return;
         killed = true;
-        if (proc.pid !== null) await killTree(proc.pid);
-        await proc.exit;
+        await killTree(pid);
+        let timer: NodeJS.Timeout | undefined;
+        const ok = await Promise.race([
+          proc.exit.then(() => true),
+          new Promise<boolean>((r) => { timer = setTimeout(() => r(false), 5000); }),
+        ]);
+        clearTimeout(timer);
+        if (!ok && !proc.exited()) { try { process.kill(pid, 'SIGKILL'); } catch { /* gone */ } }
       },
     };
   };
