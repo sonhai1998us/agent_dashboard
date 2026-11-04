@@ -80,5 +80,10 @@ export function parseStreamLine(line: string, ctx: StreamCtx, now: number): Stre
     return { events: [], result: { isError, text, costUsd, rateLimited: isError && RATE_LIMIT_RE.test(text) } };
   }
 
+  if (rec.type === 'rate_limit_event') {
+    const st = rec.rate_limit_info?.status;
+    return typeof st === 'string' && !st.startsWith('allowed') ? { events: [], limited: true } : { events: [] };
+  }
+
   return { events: [] };
 }

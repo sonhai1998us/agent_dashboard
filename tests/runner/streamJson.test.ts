@@ -61,7 +61,23 @@ describe('parseStreamLine', () => {
     expect(parseStreamLine(line, newStreamCtx(spec), T0).result).toMatchObject({ isError: true, rateLimited: true });
   });
   it('ignores unknown types', () => {
+    expect(parseStreamLine('{"type":"foo"}', newStreamCtx(spec), T0)).toEqual({ events: [] });
+  });
+  it.each([['allowed', false], ['allowed_warning', false], ['rejected', true]])('rate_limit_event %s', (status, lim) => {
+    const o = parseStreamLine(JSON.stringify({ type: 'rate_limit_event', rate_limit_info: { status } }), newStreamCtx(spec), T0);
+    if (lim) expect(o.limited).toBe(true); else expect(o).not.toHaveProperty('limited');
+  });
+  it('rate_limit_event without status yields no limited', () => {
     expect(parseStreamLine('{"type":"rate_limit_event"}', newStreamCtx(spec), T0)).toEqual({ events: [] });
+  });
+  it('real stream rate_limit_event is not limited', () => {
+    const l = fx('stream-real.jsonl').find((x) => x.includes('rate_limit_event'))!;
+    expect(parseStreamLine(l, newStreamCtx(spec), T0)).not.toHaveProperty('limited');
+  });
+  it('retry 529 is limited, retry 500 is not', () => {
+    const r = (o: object) => parseStreamLine(JSON.stringify({ type: 'system', subtype: 'api_retry', ...o }), newStreamCtx(spec), T0);
+    expect(r({ error_status: 529 }).limited).toBe(true);
+    expect(r({ error_status: 500, error: 'server_error' })).not.toHaveProperty('limited');
   });
   it('reads a real captured stream', () => {
     const r = run(fx('stream-real.jsonl'));
