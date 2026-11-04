@@ -17,10 +17,10 @@ export const g = (dir: string, ...a: string[]): string => execFileSync('git', ['
 
 export interface Env {
   root: string; repo: string; cfg: Config; store: Store; tickets: TicketStore; hub: Hub; orch: Orchestrator;
-  runs: FakeRun[]; published: HubEvent[]; order: string[]; managedAtSpawn: boolean[]; clock: { t: number };
+  runs: FakeRun[]; fake: { spawnFailures: number }; published: HubEvent[]; order: string[]; managedAtSpawn: boolean[]; clock: { t: number };
 }
 
-export function makeEnv(opts: { maxParallel?: number; maxRounds?: number; runners?: Partial<Record<AgentKind, Runner | null>>; delays?: OrchestratorDeps['delays'] } = {}): Env {
+export function makeEnv(opts: { maxParallel?: number; maxRounds?: number; runners?: Partial<Record<AgentKind, Runner | null>>; delays?: OrchestratorDeps['delays']; git?: Partial<typeof git> } = {}): Env {
   const root = mkdtempSync(join(tmpdir(), 'acctv-orch-'));
   const repo = join(root, 'Dự án demo');
   mkdirSync(join(repo, 'src'), { recursive: true });
@@ -61,10 +61,10 @@ export function makeEnv(opts: { maxParallel?: number; maxRounds?: number; runner
   const clock = { t: 1_700_000_000_000 };
   let sid = 0;
   const orch = new Orchestrator({
-    cfg, store, tickets, hub, ingest, runners, git, port: () => 4777,
+    cfg, store, tickets, hub, ingest, runners, git: { ...git, ...opts.git }, port: () => 4777,
     now: () => clock.t, newSessionId: () => `sid-${++sid}`, delays: opts.delays,
   });
-  return { root, repo, cfg, store, tickets, hub, orch, runs: fake.runs, published, order, managedAtSpawn, clock };
+  return { root, repo, cfg, store, tickets, hub, orch, runs: fake.runs, fake: fake.control, published, order, managedAtSpawn, clock };
 }
 
 export function cleanup(env: Env): void {

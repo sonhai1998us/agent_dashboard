@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { existsSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
+import * as git from '@/src/git/git';
 import { OrchestratorError } from '@/src/orchestrator/orchestrator';
 import { makeEnv, cleanup, validPlan, ids, runOf, openWaits, toRunning, g, type Env } from '../helpers/orchestratorEnv';
 
@@ -363,6 +364,110 @@ describe('các trường hợp riêng', () => {
     run.finish({});
     await env.orch.idle();
     expect(env.orch.guard(dev1, tok, { tool_name: 'Read', tool_input: { file_path: join(wt, 'src', 'a.ts') }, cwd: wt })).toBeNull();
+  });
+
+  it('lượt Controller kết thúc khi approve còn tạo worktree → không nhắc, chờ rồi chạy lượt duyệt', async () => {
+    cleanup(env);
+    let open!: () => void;
+    const gate = new Promise<void>((r) => { open = r; });
+    env = makeEnv({ git: { createWorktree: async (...a: Parameters<typeof git.createWorktree>) => { await gate; return git.createWorktree(...a); } } });
+    const { orch, runs } = env;
+    const t = await orch.createTicket({ title: 'x', description: 'y', dir: env.repo });
+    const { ctrl } = ids(t.id);
+    await orch.mcpTools(t.id).propose_plan({ plan: validPlan() });
+    const approving = orch.approve(t.id);
+    runs[0].finish({});
+    await orch.idle();
+    expect(runs).toHaveLength(1);
+    expect(env.tickets.getManaged(ctrl)!.state).toBe('waiting');
+    expect(openWaits(env, ctrl)).toEqual([expect.objectContaining({ kind: 'approval' })]);
+    open();
+    await approving;
+    await orch.idle();
+    expect(runs).toHaveLength(2);
+    expect(runs[1].spec.prompt.startsWith('Kế hoạch đã được duyệt')).toBe(true);
+    expect(runs[1].spec.addDirs).toEqual([env.tickets.getTicket(t.id)!.worktree]);
+    expect(openWaits(env, ctrl)).toEqual([]);
+  });
+
+  it('approve: tạo worktree lỗi → 400, quay lại chờ duyệt, wait duyệt vẫn mở, không có lượt mới', async () => {
+    cleanup(env);
+    env = makeEnv({ git: { createWorktree: async () => { throw new Error('boom'); } } });
+    const t = await env.orch.createTicket({ title: 'x', description: 'y', dir: env.repo });
+    await env.orch.mcpTools(t.id).propose_plan({ plan: validPlan() });
+    env.runs[0].finish({});
+    await env.orch.idle();
+    await expect(env.orch.approve(t.id)).rejects.toMatchObject({ status: 400, message: expect.stringContaining('boom') });
+    await env.orch.idle();
+    const cur = env.tickets.getTicket(t.id)!;
+    expect(cur).toMatchObject({ status: 'awaiting_approval', worktree: null, branch: null });
+    expect(cur.plan).toEqual(validPlan());
+    expect(openWaits(env, ids(t.id).ctrl)).toEqual([expect.objectContaining({ kind: 'approval' })]);
+    expect(env.runs).toHaveLength(1);
+  });
+
+  it('ticket đã kết thúc: bỏ message xếp hàng, Controller không chạy lượt mới', async () => {
+    const T = await toRunning(env);
+    const tools = env.orch.mcpTools(T);
+    const { ctrl, dev1 } = ids(T);
+    await tools.spawn_agent({ role: 'dev', task: 'a', files: ['src/a.ts'] });
+    await tools.wait_agents({ ids: [dev1] });
+    runOf(env, dev1)!.finish({ text: 'xong' });
+    await env.orch.idle(); // lượt agentsDone xếp hàng vì lượt duyệt còn chạy
+    expect(env.runs).toHaveLength(3);
+    await tools.finish({ report: 'ok', status: 'done' });
+    runOf(env, ctrl)!.finish({});
+    await env.orch.idle();
+    expect(env.runs).toHaveLength(3);
+    expect(env.store.getAgent(ctrl)!.status).toBe('ended');
+  });
+
+  it('worker xếp hàng trước khi ticket rời running thì không bao giờ chạy', async () => {
+    cleanup(env);
+    env = makeEnv({ maxParallel: 1 });
+    const T = await toRunning(env);
+    const tools = env.orch.mcpTools(T);
+    const { dev1, dev2 } = ids(T);
+    await tools.spawn_agent({ role: 'dev', task: 'a', files: ['src/a.ts'] });
+    await tools.spawn_agent({ role: 'dev', task: 'b', files: ['src/b.ts'] });
+    expect(env.tickets.getManaged(dev2)!.state).toBe('queued');
+    await tools.finish({ report: 'dừng', status: 'escalated' });
+    runOf(env, dev1)!.finish({});
+    await env.orch.idle();
+    expect(runOf(env, dev2)).toBeUndefined();
+    expect(env.tickets.getManaged(dev2)).toMatchObject({ state: 'stopped', stopReason: 'ticket không còn chạy' });
+    expect(env.store.getAgent(dev2)!.status).toBe('ended');
+  });
+
+  it('lượt đầu không spawn được → lượt sau resume: false; có tiến trình rồi mới resume', async () => {
+    env.fake.spawnFailures = 1;
+    await env.orch.createTicket({ title: 'x', description: 'y', dir: env.repo });
+    await env.orch.idle();
+    expect(env.runs).toHaveLength(2);
+    expect(env.runs[0].spec.resume).toBe(false);
+    expect(env.runs[1].spec.resume).toBe(false);
+    env.runs[1].finish({});
+    await env.orch.idle();
+    expect(env.runs[2].spec.resume).toBe(true);
+  });
+
+  it('wait chỉ có qc: không tăng vòng, không commit snapshot', async () => {
+    const T = await toRunning(env);
+    const tools = env.orch.mcpTools(T);
+    const { qc1 } = ids(T);
+    await tools.spawn_agent({ role: 'qc', task: 'review', files: [] });
+    await tools.wait_agents({ ids: [qc1] });
+    env.runs[1].finish({});
+    await env.orch.idle();
+    runOf(env, qc1)!.finish({ text: 'đạt' });
+    await env.orch.idle();
+    const t = env.tickets.getTicket(T)!;
+    expect(t.round).toBe(0);
+    expect(t.pendingWait).toBeNull();
+    expect(g(env.repo, 'log', '-1', '--format=%s', t.branch!).trim()).toBe('first');
+    const last = env.runs[env.runs.length - 1];
+    expect(last.spec.prompt.startsWith('Các agent đã xong')).toBe(true);
+    expect(last.spec.prompt).toContain('vòng 0/3');
   });
 
   it('hàng đợi FIFO toàn hệ thống theo maxParallel', async () => {

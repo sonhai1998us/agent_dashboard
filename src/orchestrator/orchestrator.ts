@@ -46,6 +46,8 @@ const NOT_APPROVED = 'Kế hoạch chưa được duyệt; chưa được khởi
 const NO_CLI: Record<AgentKind, string> = { claude: 'Không tìm thấy Claude CLI', codex: 'Codex CLI chưa được cài trên máy' };
 
 export const controllerId = (ticketId: string): string => `acctv:${ticketId}:controller`;
+/** meta: Controller của ticket đã khởi động được ít nhất một tiến trình (session tồn tại → --resume). */
+const startedKey = (ticketId: string): string => `ctrlStarted:${ticketId}`;
 const ok = (text: string): ToolResult => ({ text });
 const fail = (text: string): ToolResult => ({ isError: true, text });
 const isStr = (v: unknown): v is string => typeof v === 'string';
@@ -296,6 +298,7 @@ export class Orchestrator {
     if (!report.trim()) return fail('report không được rỗng');
     // chuyển trạng thái trước khi await để lượt chờ agent không đánh thức Controller nữa
     this.move(T, status === 'done' ? 'finish_done' : 'finish_escalated', { report, pendingWait: null });
+    this.ctrl(T).queue.length = 0;
     this.log(T, `Controller kết thúc ticket (${status})`);
     if (t.worktree) await this.snapshot(T, t.worktree, `acctv: ${T} kết thúc`, 'Snapshot cuối');
     if (t.baseRef && t.branch) {
@@ -329,7 +332,8 @@ export class Orchestrator {
     const id = controllerId(T);
     const m = this.deps.tickets.getManaged(id)!;
     const now = this.now();
-    const resume = !!this.deps.store.getAgent(id);
+    const resume = this.deps.store.getMeta(startedKey(T)) === '1';
+    const firstSeen = !this.deps.store.getAgent(id);
     const port = this.deps.port();
     const token = newToken();
     const mcpToken = newToken();
@@ -340,7 +344,7 @@ export class Orchestrator {
     // watcher bỏ qua transcript của agent acctv: chỉ khi đã thấy session này lúc phát hiện file → ingest trước khi chạy
     this.emitAgent({
       id, source: 'claude', sessionId: t.controllerSessionId, label: 'Controller', role: 'controller', parentId: null,
-      model: m.model, effort: m.effort, cwd: t.dir, status: 'running', lastEventAt: now, ...(resume ? {} : { startedAt: now }),
+      model: m.model, effort: m.effort, cwd: t.dir, status: 'running', lastEventAt: now, ...(firstSeen ? { startedAt: now } : {}),
     });
     const spec: RunSpec = {
       agentId: id, ticketId: T, role: 'controller', agent: 'claude', label: 'Controller', parentId: null, cwd: t.dir,
@@ -352,6 +356,8 @@ export class Orchestrator {
     };
     st.message = message;
     st.handle = this.launch(spec, this.sink(id));
+    // tiến trình đã khởi động (có pid) thì session Claude tồn tại: các lượt sau dùng --resume, kể cả sau khi dashboard khởi động lại
+    if (st.handle.pid !== null && !resume) this.deps.store.setMeta(startedKey(T), '1');
     this.emitPid(id, spec, st.handle);
     this.onEnd(spec, st.handle, (r) => this.onControllerDone(T, r));
   }
@@ -367,22 +373,25 @@ export class Orchestrator {
     if (m && r.costUsd !== null) this.saveManaged(id, { costUsd: (m.costUsd ?? 0) + r.costUsd });
     // Task 11: nhánh rate limit và lỗi tiến trình
 
-    const next = st.queue.shift();
-    if (next !== undefined) {
-      st.nudges = 0;
-      this.startControllerTurn(T, next);
-      return;
-    }
     const t = this.mustTicket(T);
     if (ENDED_TICKET.includes(t.status)) {
       st.nudges = 0;
+      st.queue.length = 0;
       this.endController(T);
+      return;
+    }
+    const next = st.queue.shift();
+    // đang duyệt: ticket đã running nhưng approve() còn chờ tạo worktree → chờ như đang chờ duyệt
+    const approving = t.status === 'running' && !t.worktree;
+    if (next !== undefined) {
+      st.nudges = 0;
+      this.startControllerTurn(T, next);
     } else if (t.pendingWait && this.allEnded(t.pendingWait)) {
       st.nudges = 0;
       await this.checkWait(T);
-    } else if (t.status === 'awaiting_approval' || t.pendingWait || st.waking) {
+    } else if (t.status === 'awaiting_approval' || approving || t.pendingWait || st.waking) {
       st.nudges = 0;
-      this.ctrlWaiting(T, t.status === 'awaiting_approval' ? 'approval' : 'agents');
+      this.ctrlWaiting(T, t.status === 'awaiting_approval' || approving ? 'approval' : 'agents');
     } else if (st.nudges < 2) {
       st.nudges++;
       this.log(T, `Controller dừng mà không gọi tool chờ hay finish; nhắc lần ${st.nudges}`);
@@ -424,7 +433,13 @@ export class Orchestrator {
   private startWorker(id: string): void {
     const m = this.deps.tickets.getManaged(id);
     const t = m && this.deps.tickets.getTicket(m.ticketId);
-    if (!m || !t || m.state !== 'queued' || !t.worktree || !t.plan) return;
+    if (!m || !t || m.state !== 'queued') return;
+    if (t.status !== 'running' || !t.worktree || !t.plan) {
+      this.saveManaged(id, { state: 'stopped', stopReason: 'ticket không còn chạy', endedAt: this.now() });
+      this.emitAgent({ id, source: m.runner, sessionId: m.sessionId, status: 'ended' });
+      this.log(m.ticketId, `${id} không chạy: ticket không còn chạy`);
+      return;
+    }
     const role = m.role as WorkRole;
     const wt = t.worktree;
     const port = this.deps.port();

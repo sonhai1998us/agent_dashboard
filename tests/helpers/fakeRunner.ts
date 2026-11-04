@@ -5,6 +5,8 @@ export interface FakeRun {
   spec: RunSpec;
   sink: RunSink;
   done: Promise<RunResult>;
+  /** null khi run giả lập lỗi spawn đồng bộ */
+  pid: number | null;
   killed: boolean;
   ended: boolean;
   emit(evs: NormalizedEvent[]): void;
@@ -12,13 +14,17 @@ export interface FakeRun {
   finish(r?: Partial<RunResult>): void;
 }
 
-export function createFakeRunner(): { runner: Runner; runs: FakeRun[] } {
+/** `control.spawnFailures = n`: n lần gọi runner tiếp theo trả pid null và kết thúc ngay với lỗi spawn. */
+export function createFakeRunner(): { runner: Runner; runs: FakeRun[]; control: { spawnFailures: number } } {
   const runs: FakeRun[] = [];
+  const control = { spawnFailures: 0 };
   const runner: Runner = (spec, sink) => {
     let resolve!: (r: RunResult) => void;
     const done = new Promise<RunResult>((r) => { resolve = r; });
+    const spawnFail = control.spawnFailures > 0;
+    if (spawnFail) control.spawnFailures--;
     const run: FakeRun = {
-      spec, sink, done, killed: false, ended: false,
+      spec, sink, done, pid: spawnFail ? null : 10000 + runs.length, killed: false, ended: false,
       emit: (evs) => sink.events(evs),
       limited: (on) => sink.limited(on),
       finish(r = {}) {
@@ -31,8 +37,9 @@ export function createFakeRunner(): { runner: Runner; runs: FakeRun[] } {
       },
     };
     runs.push(run);
+    if (spawnFail) run.finish({ exitCode: null, isError: true, text: 'spawn ENOENT' });
     return {
-      pid: null,
+      pid: run.pid,
       done,
       async kill() {
         if (run.ended) return;
@@ -41,5 +48,5 @@ export function createFakeRunner(): { runner: Runner; runs: FakeRun[] } {
       },
     };
   };
-  return { runner, runs };
+  return { runner, runs, control };
 }
