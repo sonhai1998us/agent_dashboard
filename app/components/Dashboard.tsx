@@ -1,4 +1,6 @@
 'use client';
+import { useEffect } from 'react';
+import { selectTicket } from '../lib/liveStore';
 import TopBar from './TopBar';
 import TicketList from './TicketList';
 import SessionList from './SessionList';
@@ -8,6 +10,10 @@ import AgentDetail from './AgentDetail';
 import styles from './Dashboard.module.css';
 
 export default function Dashboard() {
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get('ticket');
+    if (id) selectTicket(id);
+  }, []);
   return (
     <div className={styles.shell}>
       <TopBar />
