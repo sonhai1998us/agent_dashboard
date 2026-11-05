@@ -56,8 +56,9 @@ export const DEFAULT_SETTINGS: Settings = {
     codex: [],
   },
   denyBash: [
-    // tuỳ chọn toàn cục của git (-C <dir>, -c k=v, --opt, --opt=v) đứng giữa `git` và lệnh con không lách được
-    String.raw`\bgit(?:\.exe)?["']?(?:\s+(?:-[cC]\s+(?:"[^"]*"|'[^']*'|\S+)|--(?:git-dir|work-tree|namespace|super-prefix|config-env)\s+\S+|--?[\w-]+(?:=\S+)?))*\s+(commit|push|pull|fetch|checkout|switch|branch|merge|rebase|reset|remote|tag|worktree|stash|cherry-pick|revert|am|clean|config)\b`,
+    // tuỳ chọn toàn cục của git (-C <dir>, -c k=v, --opt, --opt=v) đứng giữa `git` và lệnh con không lách được.
+    // Mỗi token chỉ khớp được đúng một nhánh (các nhánh rời nhau) để regex chạy tuyến tính, không backtrack luỹ thừa.
+    String.raw`\bgit(?:\.exe)?["']?(?:\s+(?:-[cC]\s+(?:"[^"]*"|'[^']*'|[^\s"']\S*)|--(?:git-dir|work-tree|namespace|super-prefix|config-env)\s+(?:"[^"]*"|'[^']*'|[^\s"']\S*)|-(?![cC]\s)\w[\w-]*(?:=\S+)?|--(?!(?:git-dir|work-tree|namespace|super-prefix|config-env)\s)\w[\w-]*(?:=\S+)?))*\s+(commit|push|pull|fetch|checkout|switch|branch|merge|rebase|reset|remote|tag|worktree|stash|cherry-pick|revert|am|clean|config)\b`,
     String.raw`\b(npm|pnpm|yarn|bun)\b(?=[^\n]*\s(i|install|add)\b)[^\n]*\s(-g|--global|--location[= ]["']?global)\b`,
     String.raw`\byarn\s+global\s+add\b`,
     String.raw`\bnpm\s+link\b`,
@@ -109,6 +110,7 @@ function mergeSettings(raw: unknown): Settings {
     for (const r of ROLES) {
       const o = raw.roleDefaults[r];
       if (!isObj(o)) continue;
+      if (r === 'controller' && o.agent !== 'claude') continue; // Controller luôn là claude (R26)
       if (AGENTS.includes(o.agent as AgentKind)) s.roleDefaults[r].agent = o.agent as AgentKind;
       if (typeof o.model === 'string' && (o.model || s.roleDefaults[r].agent === 'codex')) s.roleDefaults[r].model = o.model;
       if (EFFORTS.includes(o.effort as Effort)) s.roleDefaults[r].effort = o.effort as Effort;
@@ -156,6 +158,7 @@ export function validateSettings(
       continue;
     }
     if (!AGENTS.includes(o.agent as AgentKind)) errors.push(`roleDefaults.${r}.agent không hợp lệ`);
+    else if (r === 'controller' && o.agent !== 'claude') errors.push('roleDefaults.controller.agent: Controller luôn là claude');
     if (!EFFORTS.includes(o.effort as Effort)) errors.push(`roleDefaults.${r}.effort không hợp lệ`);
     const list = AGENTS.includes(o.agent as AgentKind) ? am[o.agent as AgentKind] : null;
     if (typeof o.model !== 'string') errors.push(`roleDefaults.${r}.model phải là chuỗi`);

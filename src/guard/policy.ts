@@ -11,6 +11,9 @@ export interface GuardPolicy {
 }
 export type GuardDecision = { allow: true } | { allow: false; reason: string; scope: boolean };
 
+/** Độ dài tối đa của lệnh Bash mà guard chịu kiểm tra. */
+export const MAX_COMMAND = 32_000;
+
 const norm = (p: string) => p.replace(/\\/g, '/').toLowerCase();
 
 /** `**` khớp mọi thứ (kể cả `/`), `*` khớp mọi thứ trừ `/`, `?` một ký tự trừ `/`. So không phân biệt hoa thường, `\` = `/`. */
@@ -100,6 +103,8 @@ export function checkTool(p: GuardPolicy, toolName: string, input: unknown, cwd:
       if (p.role === 'controller') return deny('vai controller không được chạy lệnh');
       const cmd = strField(input, 'command');
       if (cmd === undefined) return deny('lệnh bị cấm (thiếu command)');
+      // Chặn trước khi chạy regex: guard chạy đồng bộ trong server, lệnh khổng lồ không được làm treo event loop.
+      if (cmd.length > MAX_COMMAND) return deny(`lệnh quá dài (> ${MAX_COMMAND} ký tự); hãy ghi nội dung bằng Write rồi chạy file`);
       for (const re of p.denyBash) if (re.test(cmd)) return deny(`lệnh bị cấm (${re.source})`);
       if (p.role === 'designer' || p.role === 'qc') {
         if (CHAIN.test(cmd) || !p.checkCommands.some((re) => re.test(cmd))) return deny(`vai ${p.role} chỉ chạy lệnh kiểm tra`);

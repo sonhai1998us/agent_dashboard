@@ -145,3 +145,18 @@ test('validateSettings: codex cho phép model rỗng (CLI mặc định), claude
   c.settings.roleDefaults.dev.model = '';
   expect(errorsOf(c).some((x) => x.includes('roleDefaults.dev.model'))).toBe(true);
 });
+
+test('Controller luôn là claude: validateSettings từ chối codex, config.json lưu codex bị bỏ qua', () => {
+  const a = cloneDefaults();
+  a.settings.roleDefaults.controller = { agent: 'codex', model: '', effort: 'high' };
+  expect(errorsOf(a).some((x) => x.includes('roleDefaults.controller.agent'))).toBe(true);
+
+  const home = tmpHome();
+  fs.writeFileSync(
+    path.join(home, 'config.json'),
+    JSON.stringify({ settings: { roleDefaults: { controller: { agent: 'codex', model: 'gpt-x', effort: 'low' } } } }),
+  );
+  const s = loadConfig({ ACCTV_HOME: home }).settings;
+  expect(s.roleDefaults.controller.agent).toBe('claude');
+  expect(s.roleDefaults.controller.model).toBe(DEFAULT_SETTINGS.roleDefaults.controller.model);
+});

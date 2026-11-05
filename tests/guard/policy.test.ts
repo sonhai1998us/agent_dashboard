@@ -166,3 +166,37 @@ describe('hookCommand', () => {
     );
   });
 });
+
+describe('denyBash cannot stall the server (ReDoS)', () => {
+  const bash = (command: string) => checkTool(mk('dev'), 'Bash', { command }, root);
+  const timed = (command: string) => {
+    const t0 = performance.now();
+    const d = bash(command);
+    return { d, ms: performance.now() - t0 };
+  };
+  it.each([
+    ['many --opt before a harmless subcommand', 'git' + ' --no-pager'.repeat(2500) + ' log'],
+    ['many --a=b', 'git' + ' --a=b'.repeat(3000) + ' log'],
+    ['-C followed by dash-values', 'git' + ' -C -a'.repeat(3000) + ' log'],
+    ['-C with quoted values', 'git' + ' -C "a"'.repeat(3000) + ' log'],
+    ['--git-dir followed by dash-values', 'git' + ' --git-dir --x'.repeat(2000) + ' log'],
+  ])('%s stays fast and allowed', (_n, cmd) => {
+    const { d, ms } = timed(cmd);
+    expect(d.allow).toBe(true);
+    expect(ms).toBeLessThan(500);
+  });
+  it('still denies the forbidden subcommand after many options', () => {
+    const { d, ms } = timed('git' + ' --no-pager'.repeat(2500) + ' push');
+    expect(d.allow).toBe(false);
+    expect(ms).toBeLessThan(500);
+  });
+  it('a command over the length cap is denied without running the rules', () => {
+    const { d, ms } = timed('npm '.repeat(32000));
+    expect(d).toMatchObject({ allow: false });
+    expect((d as { reason: string }).reason).toMatch(/quá dài/);
+    expect(ms).toBeLessThan(100);
+  });
+  it('a long but normal command under the cap is still checked', () => {
+    expect(bash('echo ' + 'a'.repeat(30000)).allow).toBe(true);
+  });
+});

@@ -156,7 +156,7 @@ export default function SettingsForm() {
                 <Field label="Agent" errors={errs(`roleDefaults.${role}.agent`)}>
                   {(id) => (
                     <select id={id} value={spec.agent} onChange={(e) => setRole(role, { agent: e.target.value as AgentKind, model: e.target.value === 'codex' ? '' : (lines(form.allowed.claude)[0] ?? '').trim() })}>
-                      {AGENTS.map((a) => <option key={a} value={a}>{a}</option>)}
+                      {(role === 'controller' ? (['claude'] as AgentKind[]) : AGENTS).map((a) => <option key={a} value={a}>{a}</option>)}
                     </select>
                   )}
                 </Field>
