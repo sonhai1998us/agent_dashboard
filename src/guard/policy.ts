@@ -33,6 +33,12 @@ export function matchGlob(pattern: string, path: string): boolean {
   return new RegExp(`^${re}$`).test(norm(path));
 }
 
+/** Mục trong danh sách file: glob, hoặc (không có `*`/`?`) một file hay cả thư mục bên dưới nó. */
+export function matchEntry(entry: string, path: string): boolean {
+  if (matchGlob(entry, path)) return true;
+  return !/[*?]/.test(entry) && matchGlob(`${entry.replace(/[\\/]+$/, '')}/**`, path);
+}
+
 const WIN = process.platform === 'win32';
 const P = WIN ? nodePath.win32 : nodePath.posix;
 const cmp = (s: string) => (WIN ? s.toLowerCase() : s);
@@ -87,7 +93,7 @@ export function checkTool(p: GuardPolicy, toolName: string, input: unknown, cwd:
       const rel = relInside(p.root, abs);
       if (rel === null) return deny(`ngoài phạm vi: ${abs}`, true);
       if (rel && hasGit(rel)) return deny(`ngoài phạm vi: ${rel}`, true);
-      if (rel && p.allowedFiles.some((g) => sameRel(g, rel) || matchGlob(g, rel))) return { allow: true };
+      if (rel && p.allowedFiles.some((g) => sameRel(g, rel) || matchEntry(g, rel))) return { allow: true };
       return deny(`ngoài phạm vi: ${rel || abs}`, true);
     }
     case 'Bash': {

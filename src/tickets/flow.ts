@@ -1,4 +1,4 @@
-import { matchGlob } from '@/src/guard/policy';
+import { matchEntry } from '@/src/guard/policy';
 import type { Settings } from '@/src/core/config';
 import type { AgentKind, Effort, Plan, RoleSpec, TicketStatus, WorkRole } from './model';
 
@@ -112,7 +112,7 @@ export function validatePlan(raw: unknown, s: Settings): { ok: true; plan: Plan 
 }
 
 export function filesOverlap(a: string[], b: string[]): boolean {
-  return a.some((x) => b.some((y) => matchGlob(x, y) || matchGlob(y, x)));
+  return a.some((x) => b.some((y) => matchEntry(x, y) || matchEntry(y, x)));
 }
 
 export function slugify(title: string): string {

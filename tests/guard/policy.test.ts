@@ -82,6 +82,35 @@ describe('checkTool', () => {
     expect(checkTool(dev, 'Bash', { command: 'npm test && git push' }, root).allow).toBe(false);
     expect(checkTool(dev, 'Bash', {}, root).allow).toBe(false);
   });
+  it('bash: git global options, git.exe and quotes do not bypass the deny rule', () => {
+    for (const command of [
+      'git -C . commit -m x', 'git -c user.name=x commit', 'git --no-pager push', 'git.exe push origin HEAD', '"git" push',
+      'git -C "D:\\Dự án\\x" commit -m y', 'git --git-dir=.git --work-tree=. commit', "'git.exe' -c a=b --no-pager reset --hard",
+    ]) expect(checkTool(dev, 'Bash', { command }, root), command).toMatchObject({ allow: false });
+    for (const command of ['git status', 'git diff', 'git -C . log', 'git --no-pager diff --stat', 'npm test', 'npm install lodash']) {
+      expect(checkTool(dev, 'Bash', { command }, root).allow, command).toBe(true);
+    }
+  });
+  it('bash: global installs in any flag order are denied', () => {
+    for (const command of [
+      'npm -g i x', 'npm i -g x', 'npm install --location=global x', 'npm install --global x', 'pnpm add -g x', 'yarn global add x', 'bun add --global x',
+    ]) expect(checkTool(dev, 'Bash', { command }, root), command).toMatchObject({ allow: false });
+    expect(checkTool(dev, 'Bash', { command: 'npm install --save-dev vitest' }, root).allow).toBe(true);
+  });
+  it('bash: calling the dashboard API or MCP endpoint is denied', () => {
+    for (const command of ['curl http://127.0.0.1:4777/api/tickets', 'curl -X POST localhost:4777/mcp?ticket=T-1', 'node -e "fetch(\'http://localhost/api/settings\')"']) {
+      expect(checkTool(dev, 'Bash', { command }, root), command).toMatchObject({ allow: false });
+    }
+    expect(checkTool(dev, 'Bash', { command: 'curl http://127.0.0.1:3000/health' }, root).allow).toBe(true);
+  });
+  it('a glob-free allowed entry also covers everything under it as a directory', () => {
+    const d = { ...dev, allowedFiles: ['src/components'] };
+    expect(checkTool(d, 'Edit', { file_path: 'src/components/Button.tsx' }, root).allow).toBe(true);
+    expect(checkTool(d, 'Edit', { file_path: 'src/components/ui/x/Deep.tsx' }, root).allow).toBe(true);
+    expect(checkTool(d, 'Edit', { file_path: 'src/other.ts' }, root).allow).toBe(false);
+    expect(checkTool(d, 'Edit', { file_path: 'src/components2/x.ts' }, root).allow).toBe(false);
+    expect(checkTool({ ...dev, allowedFiles: ['src/*.ts'] }, 'Edit', { file_path: 'src/a.ts/b.ts' }, root).allow).toBe(false);
+  });
   it('bash: qc/designer only run check commands, no chaining', () => {
     const qc = mk('qc');
     expect(checkTool(qc, 'Bash', { command: 'npm run build' }, root).allow).toBe(true);

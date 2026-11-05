@@ -56,9 +56,12 @@ export const DEFAULT_SETTINGS: Settings = {
     codex: [],
   },
   denyBash: [
-    String.raw`\bgit\s+(commit|push|pull|fetch|checkout|switch|branch|merge|rebase|reset|remote|tag|worktree|stash|cherry-pick|revert|am|clean|config)\b`,
-    String.raw`\b(npm|pnpm|yarn|bun)\s+(i|install|add)\b[^\n]*\s(-g|--global)\b`,
+    // tuỳ chọn toàn cục của git (-C <dir>, -c k=v, --opt, --opt=v) đứng giữa `git` và lệnh con không lách được
+    String.raw`\bgit(?:\.exe)?["']?(?:\s+(?:-[cC]\s+(?:"[^"]*"|'[^']*'|\S+)|--(?:git-dir|work-tree|namespace|super-prefix|config-env)\s+\S+|--?[\w-]+(?:=\S+)?))*\s+(commit|push|pull|fetch|checkout|switch|branch|merge|rebase|reset|remote|tag|worktree|stash|cherry-pick|revert|am|clean|config)\b`,
+    String.raw`\b(npm|pnpm|yarn|bun)\b(?=[^\n]*\s(i|install|add)\b)[^\n]*\s(-g|--global|--location[= ]["']?global)\b`,
+    String.raw`\byarn\s+global\s+add\b`,
     String.raw`\bnpm\s+link\b`,
+    String.raw`\b(127\.0\.0\.1|localhost)(:\d+)?/(api|mcp)\b`,
     String.raw`\b(reg|setx|regedit|bcdedit|diskpart|shutdown|winget|choco|scoop|apt|apt-get|brew|sudo|runas)\b`,
     String.raw`\b(taskkill|Stop-Process|pkill|killall)\b`,
     String.raw`\bkill\s+-`,

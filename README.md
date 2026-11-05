@@ -126,6 +126,7 @@ Trên Windows chỉ tự dò các CLI dạng `.exe`. Nếu cài bằng npm (shim
 - Định dạng log của Claude Code và Codex không chính thức, có thể đổi bất cứ lúc nào và làm parser sai hoặc thiếu dữ liệu.
 - Codex runner được viết theo tài liệu nhưng **chưa được thử với CLI thật**, và không ép được phạm vi file (không có hook).
 - Lệnh Bash ghi file của dev không ép được phạm vi.
+- Guard chặn lệnh Bash gọi `127.0.0.1`/`localhost` tới `/api` hoặc `/mcp` của dashboard, nhưng agent vẫn có thể gọi tới API qua cách viết khác của địa chỉ loopback (vd. `127.1`, `127.0.0.2` kèm header `Host` tự đặt) hoặc qua một file script tự viết. Danh sách `denyBash` chỉ là lớp chặn theo mẫu, không phải sandbox.
 - Định dạng stream-json của Claude và `codex exec --json` không chính thức, có thể đổi.
 - Dashboard khởi động lại thì các subagent đang chạy bị gián đoạn.
 - Phát hiện subagent kết thúc dựa vào `SubagentHandback` / `end_turn`.

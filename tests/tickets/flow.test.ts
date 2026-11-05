@@ -121,4 +121,9 @@ describe('filesOverlap', () => {
   });
   it('chuẩn hoá \\ và hoa thường', () => expect(filesOverlap(['SRC\\A.ts'], ['src/a.ts'])).toBe(true));
   it('* không vượt qua /', () => expect(filesOverlap(['src/*.ts'], ['src/x/y.ts'])).toBe(false));
+  it('mục không có glob là cả thư mục', () => {
+    expect(filesOverlap(['src/a'], ['src/a/b.ts'])).toBe(true);
+    expect(filesOverlap(['src/a/b.ts'], ['src/a/'])).toBe(true);
+    expect(filesOverlap(['src/a'], ['src/ab.ts'])).toBe(false);
+  });
 });
