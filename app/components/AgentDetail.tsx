@@ -3,7 +3,8 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { CallRecord } from '@/src/core/model';
 import { getState, selectAgentMetrics, useLive } from '../lib/liveStore';
-import { fmtClock, fmtDuration, fmtTokens } from '../lib/format';
+import { estimateCost, fmtClock, fmtCost, fmtDuration, fmtTokens } from '../lib/format';
+import ManagedPanel from './ManagedPanel';
 import { alertPill, callRowState, toolCalls, topRepeatedError } from '../lib/detail';
 import styles from './AgentDetail.module.css';
 
@@ -20,6 +21,8 @@ export default function AgentDetail() {
   const alertsMap = useLive((s) => s.alerts);
   const selectedCallId = useLive((s) => s.selectedCallId);
   const callNonce = useLive((s) => s.selectedCallNonce);
+  const managed = useLive((s) => (s.selectedAgentId ? s.managed[s.selectedAgentId] : undefined));
+  const prices = useLive((s) => s.prices);
 
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -99,6 +102,7 @@ export default function AgentDetail() {
   };
 
   const m = metrics;
+  const cost = managed ? managed.costUsd : m ? estimateCost(agent.model, m.tokensIn, m.tokensOut, prices) : null;
   const dash = '—';
   const cells: Array<[string, string]> = [
     ['call', m ? String(m.calls) : dash],
@@ -107,6 +111,7 @@ export default function AgentDetail() {
     ['p95', m?.p95 != null ? fmtDuration(m.p95) : dash],
     ['token', m ? fmtTokens(m.tokensIn + m.tokensOut) : dash],
     ['thời gian', m ? fmtDuration(m.durationMs) : dash],
+    ['chi phí', fmtCost(cost)],
   ];
   const modelLine = [agent.model, agent.effort].filter(Boolean).join(' · ');
 
@@ -123,8 +128,8 @@ export default function AgentDetail() {
             ))}
           </div>
         )}
-        {/* Phần 2: nút Dừng sẽ nằm ở đây */}
       </header>
+      {managed && <ManagedPanel agentId={selected} />}
       <div className={styles.sub}>
         <div>{agent.role ?? '—'}</div>
         <div className={styles.cwd} title={agent.cwd ?? undefined}>{agent.cwd ?? '—'}</div>

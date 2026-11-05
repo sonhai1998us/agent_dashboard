@@ -1,4 +1,5 @@
 import type { AlertKind } from '@/src/core/model';
+import type { Settings } from '@/src/core/config';
 
 /** Nhãn tiếng Việt của loại cảnh báo (giao diện và CLI). */
 export const ALERT_LABEL: Record<AlertKind, string> = {
@@ -25,6 +26,19 @@ export function fmtTokens(n: number): string {
   if (n < 1000) return String(n);
   if (n < 1_000_000) return `${Math.round(n / 1000)}k`;
   return `${(Math.round(n / 100_000) / 10).toString()}M`;
+}
+
+export function fmtCost(usd: number | null): string {
+  if (usd == null || !Number.isFinite(usd)) return '—';
+  if (usd < 0.01) return '<$0.01';
+  return `~$${usd.toFixed(2)}`;
+}
+
+/** Ước tính USD từ token và bảng giá (USD / 1M token); model lạ → null. */
+export function estimateCost(model: string | null, tokensIn: number, tokensOut: number, prices: Settings['prices']): number | null {
+  const p = model ? prices[model] : undefined;
+  if (!p) return null;
+  return (tokensIn * p.in + tokensOut * p.out) / 1_000_000;
 }
 
 export function fmtClock(ms: number): string {

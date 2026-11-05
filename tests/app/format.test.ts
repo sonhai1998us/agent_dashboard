@@ -1,7 +1,17 @@
 import { describe, expect, test } from 'vitest';
-import { fmtClock, fmtDuration, fmtTokens } from '@/app/lib/format';
+import { estimateCost, fmtClock, fmtCost, fmtDuration, fmtTokens } from '@/app/lib/format';
 
 describe('format', () => {
+  test('fmtCost', () => {
+    expect(fmtCost(null)).toBe('—');
+    expect(fmtCost(0.004)).toBe('<$0.01');
+    expect(fmtCost(1.234)).toBe('~$1.23');
+  });
+  test('estimateCost', () => {
+    expect(estimateCost('m', 1_000_000, 500_000, { m: { in: 3, out: 15 } })).toBe(10.5);
+    expect(estimateCost('x', 1, 1, {})).toBeNull();
+    expect(estimateCost(null, 1, 1, {})).toBeNull();
+  });
   test('fmtDuration', () => {
     expect(fmtDuration(41000)).toBe('41s');
     expect(fmtDuration(207000)).toBe('3m27');
