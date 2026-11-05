@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync, readFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { gitInfo, createWorktree, snapshotCommit, diffStat, removeWorktree, gitInit, worktreePath, uniqueBranch, GIT_TIMEOUT_MS } from '@/src/git/git';
+import { gitInfo, createWorktree, snapshotCommit, diffStat, removeWorktree, gitInit, worktreePath, uniqueBranch, worktreeChanges, GIT_TIMEOUT_MS } from '@/src/git/git';
 
 const g = (dir: string, ...a: string[]) => execFileSync('git', ['-C', dir, ...a], { encoding: 'utf8' });
 
@@ -115,5 +115,24 @@ describe('git helpers', () => {
     const info = await gitInfo(d);
     expect(info.isGit).toBe(true);
     expect(info.head).toBeTruthy();
+  });
+
+  it('worktreeChanges lists modified, deleted and untracked files (nested, unicode) relative to the root', async () => {
+    const d = join(root, 'changes');
+    mkdirSync(d);
+    g(d, 'init', '-q');
+    writeFileSync(join(d, 'keep.txt'), 'k\n');
+    writeFileSync(join(d, 'gone.txt'), 'g\n');
+    writeFileSync(join(d, '.gitignore'), 'ignored/\n');
+    g(d, 'add', '-A');
+    g(d, '-c', 'user.name=T', '-c', 'user.email=t@localhost', '-c', 'commit.gpgsign=false', 'commit', '-q', '-m', 'first');
+    expect(await worktreeChanges(d)).toEqual([]);
+    writeFileSync(join(d, 'keep.txt'), 'changed\n');
+    rmSync(join(d, 'gone.txt'));
+    mkdirSync(join(d, 'src', 'mới'), { recursive: true });
+    writeFileSync(join(d, 'src', 'mới', 'tệp a.ts'), 'x');
+    mkdirSync(join(d, 'ignored'));
+    writeFileSync(join(d, 'ignored', 'x.txt'), 'x');
+    expect((await worktreeChanges(d)).sort()).toEqual(['gone.txt', 'keep.txt', 'src/mới/tệp a.ts']);
   });
 });

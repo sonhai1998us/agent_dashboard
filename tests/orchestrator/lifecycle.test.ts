@@ -467,6 +467,50 @@ describe('các trường hợp riêng', () => {
     expect(env.runs[2].spec.resume).toBe(true);
   });
 
+  it('file Dev ghi bằng Bash: changedFiles lấy từ git, file ngoài phạm vi được báo cho Controller', async () => {
+    const T = await toRunning(env);
+    const tools = env.orch.mcpTools(T);
+    const { dev1 } = ids(T);
+    await tools.spawn_agent({ role: 'dev', task: 'a', files: ['src/a.ts'] });
+    await tools.wait_agents({ ids: [dev1] });
+    env.runs[1].finish({});
+    await env.orch.idle();
+    const wt = env.tickets.getTicket(T)!.worktree!;
+    // ghi thẳng ra đĩa, không qua Edit/Write: runner không biết file nào đổi
+    writeFileSync(join(wt, 'src', 'a.ts'), 'export const a = 1;\n');
+    writeFileSync(join(wt, 'src', 'x.ts'), 'export const x = 2;\n');
+    writeFileSync(join(wt, 'evil.txt'), 'x');
+    runOf(env, dev1)!.finish({ text: 'xong', changedFiles: [] });
+    await env.orch.idle();
+    expect(env.tickets.getManaged(dev1)!.changedFiles.slice().sort()).toEqual(['evil.txt', 'src/a.ts', 'src/x.ts']);
+    expect(env.tickets.listLog(T).map((l) => l.text).some((l) => /ngoài phạm vi/.test(l) && l.includes('evil.txt') && l.includes('src/x.ts') && !l.includes('src/a.ts'))).toBe(true);
+    const last = env.runs[env.runs.length - 1];
+    expect(last.spec.role).toBe('controller');
+    expect(last.spec.prompt).toMatch(/ngoài phạm vi/);
+    expect(last.spec.prompt).toContain('evil.txt');
+  });
+
+  it('hai Dev song song: file git chia theo phạm vi từng Dev; không có file lạ thì không cảnh báo', async () => {
+    const T = await toRunning(env);
+    const tools = env.orch.mcpTools(T);
+    const { dev1, dev2 } = ids(T);
+    await tools.spawn_agent({ role: 'dev', task: 'a', files: ['src/a.ts'] });
+    await tools.spawn_agent({ role: 'dev', task: 'b', files: ['src/b.ts'] });
+    await tools.wait_agents({ ids: [dev1, dev2] });
+    env.runs[1].finish({});
+    await env.orch.idle();
+    const wt = env.tickets.getTicket(T)!.worktree!;
+    writeFileSync(join(wt, 'src', 'a.ts'), 'a');
+    writeFileSync(join(wt, 'src', 'b.ts'), 'b');
+    runOf(env, dev1)!.finish({});
+    runOf(env, dev2)!.finish({});
+    await env.orch.idle();
+    expect(env.tickets.getManaged(dev1)!.changedFiles).toEqual(['src/a.ts']);
+    expect(env.tickets.getManaged(dev2)!.changedFiles).toEqual(['src/b.ts']);
+    expect(env.tickets.listLog(T).map((l) => l.text).some((l) => /ngoài phạm vi/.test(l))).toBe(false);
+    expect(env.runs[env.runs.length - 1].spec.prompt).not.toMatch(/ngoài phạm vi/);
+  });
+
   it('wait chỉ có qc: không tăng vòng, không commit snapshot', async () => {
     const T = await toRunning(env);
     const tools = env.orch.mcpTools(T);

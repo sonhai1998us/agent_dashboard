@@ -7,11 +7,11 @@ import { isManagedId, type AgentInfo, type Alert, type NormalizedEvent } from '@
 import type { TicketStore } from '@/src/tickets/store';
 import { TERMINAL_STATES, type AgentKind, type ManagedAgent, type ManagedState, type Plan, type Role, type RoleSpec, type Ticket, type TicketStatus, type WaitSpan, type WorkRole } from '@/src/tickets/model';
 import { branchName, filesOverlap, transition, validatePlan, type TicketEvent } from '@/src/tickets/flow';
-import { checkTool, type GuardPolicy } from '@/src/guard/policy';
+import { checkTool, matchEntry, type GuardPolicy } from '@/src/guard/policy';
 import { inside } from '@/src/core/paths';
 import type { Runner, RunHandle, RunResult, RunSink, RunSpec } from '@/src/runner/types';
 import type { ToolImpl, ToolResult } from './mcp';
-import { systemPrompt, turn, workerPrompt } from './prompts';
+import { listPreview, systemPrompt, turn, workerPrompt } from './prompts';
 import { agentLog, agentReport } from './reports';
 
 export interface OrchestratorDeps {
@@ -833,14 +833,44 @@ export class Orchestrator {
     this.save(T, { pendingWait: null, round });
     const st = this.ctrl(T);
     st.waking = true;
+    let outOfScope: string[] = [];
     try {
+      if (t.worktree) outOfScope = await this.auditChanges(T, t.worktree, ids);
       if (hasDev && t.worktree) await this.snapshot(T, t.worktree, `acctv: ${T} vòng ${round}`, `Snapshot vòng ${round}`);
     } finally {
       st.waking = false;
     }
     const cur = this.mustTicket(T);
     if (cur.status !== 'running') return;
-    this.runControllerTurn(T, turn.agentsDone(ids.map((id) => this.report(id)), round, cur.maxRounds));
+    this.runControllerTurn(T, turn.agentsDone(ids.map((id) => this.report(id)), round, cur.maxRounds, outOfScope));
+  }
+
+  /**
+   * Đối chiếu thay đổi thật trong worktree (git) với phạm vi file của các Dev trong ticket.
+   * Guard chỉ chặn được Edit/Write; file ghi bằng Bash chỉ lộ ra ở đây.
+   * Ghi file git thấy vào changedFiles của Dev đang chờ (theo phạm vi; một Dev thì nhận hết), trả về file ngoài mọi phạm vi.
+   */
+  private async auditChanges(T: string, wt: string, ids: string[]): Promise<string[]> {
+    let changed: string[];
+    try {
+      changed = await this.deps.git.worktreeChanges(wt);
+    } catch (e) {
+      this.log(T, `Không đọc được thay đổi trong worktree: ${errMsg(e)}`);
+      return [];
+    }
+    if (!changed.length) return [];
+    const devs = this.deps.tickets.listManaged(T).filter((m) => m.role === 'dev');
+    const inScope = (f: string, files: string[]) => files.some((e) => matchEntry(e, f));
+    const waited = devs.filter((m) => ids.includes(m.agentId));
+    const others = devs.filter((m) => !ids.includes(m.agentId) && (LIVE.includes(m.state) || this.workers.has(m.agentId)));
+    for (const m of waited) {
+      const mine = waited.length === 1 && !others.length ? changed : changed.filter((f) => inScope(f, m.files));
+      const files = [...new Set([...m.changedFiles, ...mine])];
+      if (files.length !== m.changedFiles.length) this.saveManaged(m.agentId, { changedFiles: files });
+    }
+    const out = changed.filter((f) => !devs.some((m) => inScope(f, m.files))).sort();
+    if (out.length) this.log(T, `Thay đổi ngoài phạm vi kế hoạch (git): ${listPreview(out)}`);
+    return out;
   }
 
   private allEnded(ids: string[]): boolean {

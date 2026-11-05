@@ -69,6 +69,24 @@ export async function snapshotCommit(wt: string, message: string): Promise<strin
   return (await git(wt, ['rev-parse', 'HEAD'])).trim();
 }
 
+/**
+ * File đã đổi so với HEAD (sửa, xoá, chưa track; bỏ file bị .gitignore), đường dẫn tương đối gốc worktree, dùng `/`.
+ * Bắt được cả file agent ghi bằng Bash, thứ runner không thấy.
+ */
+export async function worktreeChanges(wt: string): Promise<string[]> {
+  const out = await git(wt, ['-c', 'core.quotepath=false', 'status', '--porcelain=v1', '-z', '-uall']);
+  const parts = out.split('\0');
+  const files = new Set<string>();
+  for (let i = 0; i < parts.length; i++) {
+    const e = parts[i];
+    if (e.length < 4) continue;
+    files.add(e.slice(3));
+    // đổi tên / chép: phần tử kế tiếp là đường dẫn cũ
+    if (e[0] === 'R' || e[0] === 'C') files.add(parts[++i]);
+  }
+  return [...files].filter(Boolean);
+}
+
 export async function diffStat(repo: string, baseRef: string, branch: string): Promise<string> {
   return git(repo, ['diff', '--stat', `${baseRef}..${branch}`]);
 }

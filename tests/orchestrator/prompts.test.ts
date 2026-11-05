@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { systemPrompt, workerPrompt, turn } from '@/src/orchestrator/prompts';
+import { systemPrompt, workerPrompt, turn, listPreview } from '@/src/orchestrator/prompts';
 import { DEFAULT_SETTINGS } from '@/src/core/config';
 import type { Plan, Role, Ticket } from '@/src/tickets/model';
 
@@ -75,5 +75,23 @@ describe('turn', () => {
     expect(s.startsWith('Các agent đã xong')).toBe(true);
     expect(s).toContain('vòng 1/3');
     expect(s).toContain('xong a');
+  });
+
+  it('agentsDone cảnh báo file ngoài phạm vi chỉ khi có', () => {
+    expect(turn.agentsDone([], 1, 3)).not.toContain('CẢNH BÁO');
+    const s = turn.agentsDone([], 1, 3, ['evil.txt', 'package-lock.json']);
+    expect(s).toContain('CẢNH BÁO');
+    expect(s).toContain('evil.txt, package-lock.json');
+  });
+
+  it('listPreview cắt ở 50 file', () => {
+    const many = Array.from({ length: 53 }, (_, i) => 'f' + i);
+    expect(listPreview(many)).toMatch(/f49 … và 3 file khác$/);
+    expect(listPreview(['a', 'b'])).toBe('a, b');
+  });
+
+  it('Dev được dặn sửa file bằng Edit/Write, không ghi file bằng Bash', () => {
+    const p = systemPrompt('dev', { worktree: 'wt', files: ['a.ts'], denyBash: [] });
+    expect(p).toMatch(/bằng Edit hoặc Write, không ghi file bằng lệnh Bash/);
   });
 });

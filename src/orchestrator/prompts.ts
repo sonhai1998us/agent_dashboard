@@ -36,6 +36,7 @@ const DEV = `Bạn là Dev của Agent CCTV: bạn làm một gói việc do Con
 
 Quy tắc:
 - Chỉ sửa hoặc tạo đúng các file được giao. Có thể có Dev khác đang làm song song trong cùng worktree. Sửa ngoài phạm vi sẽ bị chặn; file do lệnh Bash ghi ra cũng không được nằm ngoài phạm vi.
+- Sửa và tạo file bằng Edit hoặc Write, không ghi file bằng lệnh Bash (echo/printf/cat với > hay >>, sed -i, Set-Content…). Dashboard đối chiếu mọi thay đổi trong worktree với phạm vi bằng git và báo cho Controller.
 - Đọc code xung quanh trước khi viết và theo đúng convention đang có.
 - Chạy test, lint, typecheck theo phạm vi gói việc (ví dụ \`vitest run <file test>\`), tránh chạy cả bộ nặng cùng lúc với Dev khác.
 - Cấm \`git commit\`, \`git push\` và mọi lệnh git đổi nhánh hoặc remote; dashboard tự commit snapshot mỗi vòng. Không cài phần mềm toàn máy, không tắt tiến trình không phải của mình.
@@ -82,6 +83,13 @@ const overridesText = (t: Ticket): string => {
   return rows.length ? `\n\nNgười dùng chọn sẵn cho các vai:\n${rows.join('\n')}` : '';
 };
 
+const LIST_MAX = 50;
+/** Tối đa LIST_MAX mục, phần còn lại gộp thành "… và N file khác". */
+export function listPreview(files: string[]): string {
+  const head = files.slice(0, LIST_MAX).join(', ');
+  return files.length > LIST_MAX ? `${head} … và ${files.length - LIST_MAX} file khác` : head;
+}
+
 export const turn = {
   first: (t: Ticket): string =>
     `Ticket ${t.id}: ${t.title}\n\nMô tả:\n${t.description}\n\nThư mục dự án: ${t.dir}${overridesText(t)}\n\n` +
@@ -92,8 +100,13 @@ export const turn = {
     'Hãy giao việc bằng spawn_agent theo các gói, rồi gọi wait_agents và kết thúc lượt.',
   revised: (feedback: string): string =>
     `Người dùng góp ý về kế hoạch:\n${feedback}\n\nHãy sửa kế hoạch theo góp ý rồi gọi lại propose_plan, sau đó kết thúc lượt.`,
-  agentsDone: (reports: AgentReport[], round: number, maxRounds: number): string =>
+  agentsDone: (reports: AgentReport[], round: number, maxRounds: number, outOfScope: string[] = []): string =>
     `Các agent đã xong (vòng ${round}/${maxRounds}). Báo cáo:\n${JSON.stringify(reports, null, 2)}\n\n` +
+    (outOfScope.length
+      ? `CẢNH BÁO: git cho thấy các file sau đã đổi nhưng nằm ngoài phạm vi file của mọi gói Dev (có thể do lệnh Bash ghi ra): ${listPreview(outOfScope)}. ` +
+        'Các thay đổi này sẽ nằm trong snapshot vòng. Nếu cần thiết (vd. lockfile sau khi cài dependency) thì nêu rõ trong báo cáo cuối; ' +
+        'nếu không, giao Dev hoàn tác ở vòng sau, hoặc finish với status "escalated" để người dùng quyết.\n\n'
+      : '') +
     'Xem báo cáo. Nếu Dev vừa xong thì giao review (Designer nếu có, QC). Còn lỗi và còn vòng thì giao lại Dev kèm lỗi cụ thể. ' +
     'Đạt mọi tiêu chí thì gọi finish với status "done"; hết vòng mà còn lỗi thì finish với status "escalated".',
   nudge: (): string =>

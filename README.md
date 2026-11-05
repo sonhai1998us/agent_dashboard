@@ -95,7 +95,7 @@ acctv ls | watch | logs         # nhận biết ticket và agent do dashboard ch
 | Dev | trong thư mục làm việc | chỉ file trong phạm vi được giao | chỉ bị chặn bởi danh sách deny |
 | Designer, QC | trong thư mục làm việc | không | chỉ lệnh kiểm tra (`checkCommands`), không nối lệnh, không chuyển hướng, không dùng `--output` |
 
-Phạm vi file của dev được ép bằng hook guard (`[acctv-guard]`). Bash của dev chỉ bị giới hạn bởi danh sách deny nên file do lệnh Bash ghi ra không ép được phạm vi.
+Phạm vi file của dev được ép bằng hook guard (`[acctv-guard]`). Bash của dev chỉ bị giới hạn bởi danh sách deny nên file do lệnh Bash ghi ra không bị chặn; sau mỗi lần chờ agent, dashboard đối chiếu `git status` của worktree với phạm vi các gói Dev, ghi file đã đổi vào báo cáo và cảnh báo Controller (kèm log ticket) về file ngoài phạm vi.
 
 ### Codex
 
@@ -125,7 +125,7 @@ Trên Windows chỉ tự dò các CLI dạng `.exe`. Nếu cài bằng npm (shim
 
 - Định dạng log của Claude Code và Codex không chính thức, có thể đổi bất cứ lúc nào và làm parser sai hoặc thiếu dữ liệu.
 - Codex runner được viết theo tài liệu nhưng **chưa được thử với CLI thật**, và không ép được phạm vi file (không có hook).
-- Lệnh Bash ghi file của dev không ép được phạm vi.
+- Lệnh Bash ghi file của dev không bị chặn trước; chỉ được phát hiện sau (qua git) và báo cho Controller.
 - Guard chặn lệnh Bash gọi `127.0.0.1`/`localhost` tới `/api` hoặc `/mcp` của dashboard, nhưng agent vẫn có thể gọi tới API qua cách viết khác của địa chỉ loopback (vd. `127.1`, `127.0.0.2` kèm header `Host` tự đặt) hoặc qua một file script tự viết. Danh sách `denyBash` chỉ là lớp chặn theo mẫu, không phải sandbox.
 - Định dạng stream-json của Claude và `codex exec --json` không chính thức, có thể đổi.
 - Dashboard khởi động lại thì các subagent đang chạy bị gián đoạn.
