@@ -19,6 +19,44 @@ export function ticketStatusText(t: Ticket): StatusText {
   }
 }
 
+export type StatusAction = { kind: 'plan'; href: string; label: string } | { kind: 'decide'; label: string };
+
+/** Badge trạng thái bấm được khi ticket đang chờ người dùng: chờ duyệt → trang duyệt, escalated → phần cần quyết. */
+export function statusAction(t: Ticket): StatusAction | null {
+  if (t.status === 'awaiting_approval') return { kind: 'plan', href: `/tickets/${t.id}/plan`, label: 'Mở trang duyệt kế hoạch' };
+  if (t.status === 'escalated') return { kind: 'decide', label: 'Xem điều Controller cần bạn quyết' };
+  return null;
+}
+
+export interface Inline { text: string; style: 'text' | 'bold' | 'code' }
+export type ReportBlock = { kind: 'p'; parts: Inline[] } | { kind: 'li'; marker: string; parts: Inline[] };
+
+function inlines(s: string): Inline[] {
+  const out: Inline[] = [];
+  const re = /\*\*(.+?)\*\*|`([^`]+)`/g;
+  let at = 0;
+  for (let m = re.exec(s); m; m = re.exec(s)) {
+    if (m.index > at) out.push({ text: s.slice(at, m.index), style: 'text' });
+    out.push(m[1] !== undefined ? { text: m[1], style: 'bold' } : { text: m[2], style: 'code' });
+    at = m.index + m[0].length;
+  }
+  if (at < s.length) out.push({ text: s.slice(at), style: 'text' });
+  return out;
+}
+
+/** Báo cáo của Controller (markdown nhẹ) thành khối để hiển thị: đoạn, mục danh sách; **đậm** và `code` trong dòng. */
+export function reportBlocks(md: string | null): ReportBlock[] {
+  const out: ReportBlock[] = [];
+  for (const raw of (md ?? '').split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line) continue;
+    const li = /^([-*•]|\d+[.)])\s+(.*)$/.exec(line);
+    if (li) out.push({ kind: 'li', marker: /^\d/.test(li[1]) ? li[1].replace(')', '.') : '•', parts: inlines(li[2]) });
+    else out.push({ kind: 'p', parts: inlines(line) });
+  }
+  return out;
+}
+
 const MANAGED: Record<ManagedState, StatusText> = {
   queued: { icon: '◌', text: 'xếp hàng', tone: 'wait' },
   running: { icon: '●', text: 'đang chạy', tone: 'run' },

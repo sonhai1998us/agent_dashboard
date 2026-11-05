@@ -2,7 +2,7 @@ import { describe, expect, test } from 'vitest';
 import type { AgentInfo } from '@/src/core/model';
 import type { Ticket } from '@/src/tickets/model';
 import type { WaitSpan } from '@/src/tickets/model';
-import { controllerIdOf, isExternal, layoutWaits, managedStateText, replayRange, ticketStatusText } from '@/app/lib/tickets';
+import { controllerIdOf, isExternal, layoutWaits, managedStateText, replayRange, reportBlocks, statusAction, ticketStatusText } from '@/app/lib/tickets';
 
 const t = (o: Partial<Ticket>): Ticket => ({ id: 'T-1', status: 'draft', round: 0, maxRounds: 3, ...o } as Ticket);
 
@@ -69,5 +69,34 @@ describe('replayRange', () => {
   test('queued/limited/running là live', () => {
     expect(replayRange([a({}), a({ status: 'queued' })], 1000)).toEqual({ min: 10, max: 1000, live: true });
     expect(replayRange([a({ status: 'limited' })], 1000).live).toBe(true);
+  });
+});
+
+describe('statusAction: badge trạng thái dẫn tới việc cần làm', () => {
+  test('chờ duyệt → trang duyệt kế hoạch; escalated → mở phần cần quyết; còn lại → không có', () => {
+    expect(statusAction(t({ status: 'awaiting_approval', id: 'T-3' }))).toEqual({ kind: 'plan', href: '/tickets/T-3/plan', label: 'Mở trang duyệt kế hoạch' });
+    expect(statusAction(t({ status: 'escalated' }))).toEqual({ kind: 'decide', label: 'Xem điều Controller cần bạn quyết' });
+    for (const s of ['draft', 'planning', 'running', 'done', 'cancelled'] as const) expect(statusAction(t({ status: s }))).toBeNull();
+  });
+});
+
+describe('reportBlocks: markdown nhẹ của báo cáo Controller', () => {
+  test('đoạn, đậm, code, danh sách gạch và đánh số; dòng trống bị bỏ', () => {
+    const md = 'Ticket **US-5039** chưa làm.\n\n**Vì sao:**\n- Không có lệnh `twg`.\n  - lồng\n1. Cài `twg`\n2. Dán nội dung\n';
+    expect(reportBlocks(md)).toEqual([
+      { kind: 'p', parts: [{ text: 'Ticket ', style: 'text' }, { text: 'US-5039', style: 'bold' }, { text: ' chưa làm.', style: 'text' }] },
+      { kind: 'p', parts: [{ text: 'Vì sao:', style: 'bold' }] },
+      { kind: 'li', marker: '•', parts: [{ text: 'Không có lệnh ', style: 'text' }, { text: 'twg', style: 'code' }, { text: '.', style: 'text' }] },
+      { kind: 'li', marker: '•', parts: [{ text: 'lồng', style: 'text' }] },
+      { kind: 'li', marker: '1.', parts: [{ text: 'Cài ', style: 'text' }, { text: 'twg', style: 'code' }] },
+      { kind: 'li', marker: '2.', parts: [{ text: 'Dán nội dung', style: 'text' }] },
+    ]);
+  });
+  test('dấu ** hoặc ` không đóng thì giữ nguyên chữ', () => {
+    expect(reportBlocks('a **b và `c')).toEqual([{ kind: 'p', parts: [{ text: 'a **b và `c', style: 'text' }] }]);
+  });
+  test('rỗng / null → không có khối nào', () => {
+    expect(reportBlocks('')).toEqual([]);
+    expect(reportBlocks(null)).toEqual([]);
   });
 });

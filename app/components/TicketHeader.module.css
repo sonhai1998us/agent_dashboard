@@ -18,3 +18,17 @@
 .guide { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
 .ta { width: 100%; box-sizing: border-box; background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 6px; padding: 6px; font: inherit; font-size: 12px; resize: vertical; }
 .err { margin-top: 6px; color: var(--err); font-size: 12px; }
+.stLink { font: inherit; font-size: 11px; background: transparent; cursor: pointer; text-decoration: none; }
+.stLink:hover { background: var(--sel); }
+.stLink:focus-visible { outline: 2px solid var(--run); outline-offset: 1px; }
+.decide { margin-top: 8px; border: 1px solid var(--err); border-radius: 6px; padding: 8px 10px; max-height: 40vh; overflow: auto; outline: none; }
+.decide:focus-visible { box-shadow: 0 0 0 2px var(--err); }
+.decideHead { color: var(--err); font-weight: 600; font-size: 12px; margin-bottom: 4px; }
+.reportDone { margin-top: 6px; font-size: 12px; }
+.reportDone summary { cursor: pointer; color: var(--muted); }
+.reportDone[open] { max-height: 40vh; overflow: auto; }
+.reportBody { font-size: 12px; line-height: 1.5; }
+.p { margin: 4px 0; }
+.li { display: flex; gap: 6px; margin: 2px 0 2px 4px; }
+.marker { color: var(--muted); flex: none; }
+.reportBody code { font-size: 11px; background: var(--bg); border: 1px solid var(--border); border-radius: 3px; padding: 0 3px; }
