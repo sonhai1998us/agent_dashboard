@@ -2,7 +2,7 @@ import { describe, expect, test } from 'vitest';
 import type { AgentInfo } from '@/src/core/model';
 import type { Ticket } from '@/src/tickets/model';
 import type { WaitSpan } from '@/src/tickets/model';
-import { controllerIdOf, isExternal, layoutWaits, managedStateText, replayRange, reportBlocks, statusAction, ticketStatusText } from '@/app/lib/tickets';
+import { controllerIdOf, isExternal, layoutWaits, managedStateText, replayRange, reportBlocks, roleOverrides, statusAction, ticketStatusText } from '@/app/lib/tickets';
 
 const t = (o: Partial<Ticket>): Ticket => ({ id: 'T-1', status: 'draft', round: 0, maxRounds: 3, ...o } as Ticket);
 
@@ -98,5 +98,14 @@ describe('reportBlocks: markdown nhẹ của báo cáo Controller', () => {
   test('rỗng / null → không có khối nào', () => {
     expect(reportBlocks('')).toEqual([]);
     expect(reportBlocks(null)).toEqual([]);
+  });
+});
+
+describe('roleOverrides: form gửi đúng lựa chọn đang hiển thị cho mọi vai', () => {
+  test('mọi vai đều được gửi, kể cả khi trùng mặc định', () => {
+    const spec = (model: string) => ({ agent: 'claude' as const, model, effort: 'high' as const });
+    const specs = { controller: spec('claude-opus-5-5'), dev: spec('claude-sonnet-5-5'), designer: spec('claude-sonnet-5-5'), qc: spec('claude-haiku-5-5') };
+    expect(roleOverrides(specs)).toEqual(specs);
+    expect(roleOverrides(specs).dev).not.toBe(specs.dev);
   });
 });

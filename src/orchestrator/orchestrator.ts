@@ -446,9 +446,21 @@ export class Orchestrator {
     if (!t || t.status !== 'planning') return fail('Chỉ đề xuất kế hoạch khi ticket đang lập kế hoạch');
     const v = validatePlan(args.plan, this.settings);
     if (!v.ok) return fail(v.errors.join('\n'));
-    this.move(T, 'plan_proposed', { plan: v.plan });
-    this.log(T, 'Controller đề xuất kế hoạch');
-    return ok('Đã gửi kế hoạch. Người dùng đang duyệt. Hãy kết thúc lượt ngay bây giờ.');
+    // lựa chọn agent/model/effort của người dùng lúc tạo ticket là bắt buộc: ghi đè lên đề xuất của Controller
+    const plan = structuredClone(v.plan);
+    const applied: string[] = [];
+    for (const role of WORK_ROLES) {
+      const o = t.overrides[role];
+      if (!o) continue;
+      const cur = plan.roles[role];
+      const next = { ...cur, ...(o.agent ? { agent: o.agent } : {}), ...(o.model !== undefined ? { model: o.model } : {}), ...(o.effort ? { effort: o.effort } : {}) };
+      if (next.agent !== cur.agent || next.model !== cur.model || next.effort !== cur.effort) applied.push(`${role}: ${next.model || '(mặc định CLI)'}/${next.effort}`);
+      plan.roles[role] = next;
+    }
+    this.move(T, 'plan_proposed', { plan });
+    this.log(T, applied.length ? `Controller đề xuất kế hoạch (áp lựa chọn của người dùng: ${applied.join(', ')})` : 'Controller đề xuất kế hoạch');
+    const note = applied.length ? ` Đã đổi vai theo lựa chọn của người dùng: ${applied.join(', ')}.` : '';
+    return ok(`Đã gửi kế hoạch.${note} Người dùng đang duyệt. Hãy kết thúc lượt ngay bây giờ.`);
   }
 
   private spawnAgent(T: string, args: Record<string, unknown>): ToolResult {
@@ -475,7 +487,8 @@ export class Orchestrator {
       model: args.model === '' ? undefined : (args.model as string | undefined),
       effort: args.effort as RoleSpec['effort'] | undefined,
     };
-    const layers: (Partial<RoleSpec> | undefined)[] = [own, t.plan.roles[role], t.overrides[role], this.settings.roleDefaults[role]];
+    // kế hoạch đã duyệt (gồm lựa chọn và chỉnh sửa của người dùng) quyết định agent/model/effort; tham số của Controller chỉ dùng khi kế hoạch thiếu
+    const layers: (Partial<RoleSpec> | undefined)[] = [t.plan.roles[role], t.overrides[role], own, this.settings.roleDefaults[role]];
     const pick = <K extends keyof RoleSpec>(k: K): RoleSpec[K] => layers.map((l) => l?.[k]).find((v) => v !== undefined && v !== null) as RoleSpec[K];
     const agent = pick('agent');
     const model = pick('model');
@@ -506,7 +519,9 @@ export class Orchestrator {
     this.log(T, `Controller giao ${id} (${role}, ${model}/${effort})`);
     this.queue.push(id);
     this.pump();
-    return ok(`Đã tạo ${id} (${role}, ${model}/${effort}). Dùng wait_agents để chờ.`);
+    const ignored = (own.agent !== undefined && own.agent !== agent) || (own.model !== undefined && own.model !== model) || (own.effort !== undefined && own.effort !== effort);
+    const note = ignored ? ' Dùng agent/model/effort theo kế hoạch đã duyệt; tham số bạn truyền khác kế hoạch nên bị bỏ qua.' : '';
+    return ok(`Đã tạo ${id} (${role}, ${model}/${effort}).${note} Dùng wait_agents để chờ.`);
   }
 
   private waitAgents(T: string, args: Record<string, unknown>): ToolResult {

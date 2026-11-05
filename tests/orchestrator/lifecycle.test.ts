@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import * as git from '@/src/git/git';
 import { createFakeRunner } from '../helpers/fakeRunner';
 import { OrchestratorError } from '@/src/orchestrator/orchestrator';
-import { makeEnv, cleanup, validPlan, ids, runOf, openWaits, toRunning, g, type Env } from '../helpers/orchestratorEnv';
+import { makeEnv, cleanup, validPlan, codexPlan, ids, runOf, openWaits, toRunning, g, type Env } from '../helpers/orchestratorEnv';
 
 const CTRL_ALLOWED = [
   'Read', 'Glob', 'Grep', 'mcp__acctv__propose_plan', 'mcp__acctv__spawn_agent', 'mcp__acctv__wait_agents',
@@ -193,28 +193,27 @@ describe('các trường hợp riêng', () => {
     expect((await tools.spawn_agent({ role: 'dev', task: 'b', files: ['src/a.ts'] })).text).toContain(`acctv:${T}:dev-2`);
   });
 
-  it('spawn: model ngoài danh sách, codex chưa cài, ưu tiên tham số', async () => {
-    const T = await toRunning(env);
+  it('spawn: kế hoạch đã duyệt thắng tham số của Controller; codex chưa cài', async () => {
+    env.cfg.settings.allowedModels.codex = ['gpt-x'];
+    const T = await toRunning(env, codexPlan('qc'));
     const tools = env.orch.mcpTools(T);
-    const bad = await tools.spawn_agent({ role: 'dev', task: 'a', files: ['src/a.ts'], model: 'gpt-x' });
-    expect(bad.isError).toBe(true);
-    expect(bad.text).toContain('gpt-x');
-    const codex = await tools.spawn_agent({ role: 'qc', task: 'a', files: [], agent: 'codex', model: '' });
+    const own = await tools.spawn_agent({ role: 'dev', task: 'a', files: ['src/a.ts'], model: 'claude-haiku-5-5', effort: 'low' });
+    expect(own.text).toContain('(dev, claude-sonnet-5-5/high)');
+    expect(own.text).toMatch(/bỏ qua/);
+    expect(runOf(env, ids(T).dev1)!.spec).toMatchObject({ model: 'claude-sonnet-5-5', effort: 'high' });
+    const codex = await tools.spawn_agent({ role: 'qc', task: 'a', files: [] });
     expect(codex).toEqual({ isError: true, text: 'Codex CLI chưa được cài trên máy' });
-    const ok = await tools.spawn_agent({ role: 'dev', task: 'a', files: ['src/a.ts'], model: 'claude-haiku-5-5', effort: 'low' });
-    expect(ok.text).toContain('(dev, claude-haiku-5-5/low)');
-    expect(runOf(env, ids(T).dev1)!.spec).toMatchObject({ model: 'claude-haiku-5-5', effort: 'low' });
     expect(env.tickets.listManaged(T)).toHaveLength(2);
   });
 
   it('worker codex: khi biết thread id thì xoá bản codex:<thread> do watcher ghi sớm', async () => {
     const fake = createFakeRunner();
     env = makeEnv({ maxParallel: 2, runners: { codex: fake.runner } });
-    const T = await toRunning(env);
+    env.cfg.settings.allowedModels.codex = ['gpt-x'];
+    const T = await toRunning(env, codexPlan('qc'));
     env.store.applyEvent({ type: 'agent', agent: { id: 'codex:thr-9', source: 'codex', sessionId: 'thr-9' } });
     expect(env.store.getAgent('codex:thr-9')).toBeTruthy();
-    env.cfg.settings.allowedModels.codex = ['gpt-x'];
-    const r = await env.orch.mcpTools(T).spawn_agent({ role: 'qc', task: 'a', files: [], agent: 'codex', model: 'gpt-x' });
+    const r = await env.orch.mcpTools(T).spawn_agent({ role: 'qc', task: 'a', files: [] });
     expect(r.isError).toBeFalsy();
     fake.runs[0].emit([{ type: 'agent', agent: { id: ids(T).qc1, source: 'codex', sessionId: 'thr-9' } }]);
     expect(env.store.getAgent('codex:thr-9')).toBeFalsy();
@@ -637,9 +636,9 @@ describe('bản sửa sau review cuối', () => {
     cleanup(env);
     env = makeEnv({ runners: { codex: fake.runner }, delays: { rateLimitMs: [10, 10, 10] } });
     env.cfg.settings.allowedModels.codex = ['gpt-x'];
-    const T = await toRunning(env);
+    const T = await toRunning(env, codexPlan('qc'));
     const { qc1 } = ids(T);
-    await env.orch.mcpTools(T).spawn_agent({ role: 'qc', task: 'r', files: [], agent: 'codex', model: 'gpt-x' });
+    await env.orch.mcpTools(T).spawn_agent({ role: 'qc', task: 'r', files: [] });
     const r0 = fake.runs[0];
     expect(r0.spec.sessionId).toBe('sid-2');
     r0.emit([{ type: 'agent', agent: { id: qc1, source: 'codex', sessionId: 'thr-9' } }]);

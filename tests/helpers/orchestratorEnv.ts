@@ -78,6 +78,13 @@ export function cleanup(env: Env): void {
   rmSync(env.root, { recursive: true, force: true, maxRetries: 3 });
 }
 
+/** Kế hoạch mẫu; `codexQc`: vai qc chạy bằng codex (model gpt-x). */
+export const codexPlan = (role: 'dev' | 'qc' = 'qc') => {
+  const p = validPlan();
+  p.roles[role] = { ...p.roles[role], agent: 'codex', model: 'gpt-x' };
+  return p;
+};
+
 export const validPlan = () => ({
   summary: 'Thêm trang đăng nhập', difficulty: 'medium',
   packages: [
@@ -101,9 +108,9 @@ export const runOf = (env: Env, agentId: string): FakeRun | undefined => [...env
 export const openWaits = (env: Env, agentId: string) => env.tickets.listWaits(Number.MAX_SAFE_INTEGER).filter((w) => w.agentId === agentId);
 
 /** Tạo ticket, đề xuất kế hoạch hợp lệ, duyệt: trả id ticket ở trạng thái running (lượt controller sau duyệt đang chạy). */
-export async function toRunning(env: Env): Promise<string> {
+export async function toRunning(env: Env, plan: ReturnType<typeof validPlan> = validPlan()): Promise<string> {
   const t = await env.orch.createTicket({ title: 'Trang đăng nhập', description: 'Làm trang login', dir: env.repo });
-  const r = await env.orch.mcpTools(t.id).propose_plan({ plan: validPlan() });
+  const r = await env.orch.mcpTools(t.id).propose_plan({ plan });
   if (r.isError) throw new Error(r.text);
   env.runs[env.runs.length - 1].finish({});
   await env.orch.idle();

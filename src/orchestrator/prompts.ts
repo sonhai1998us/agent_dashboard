@@ -83,7 +83,7 @@ const overridesText = (t: Ticket): string => {
   const rows = Object.entries(t.overrides ?? {})
     .filter(([, v]) => v && Object.keys(v).length)
     .map(([r, v]) => `- ${r}: ${[v!.agent, v!.model, v!.effort].filter(Boolean).join(' / ')}`);
-  return rows.length ? `\n\nNgười dùng chọn sẵn cho các vai:\n${rows.join('\n')}` : '';
+  return rows.length ? `\n\nNgười dùng đã chọn cho các vai (bắt buộc: dùng đúng agent/model/effort này trong kế hoạch, chỉ được chọn số lượng):\n${rows.join('\n')}` : '';
 };
 
 const LIST_MAX = 50;

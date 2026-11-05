@@ -70,7 +70,7 @@ export const TOOL_DEFS: { name: 'propose_plan' | 'spawn_agent' | 'wait_agents' |
         packageId: { type: 'string', description: 'Id gói việc trong kế hoạch.' },
         task: { type: 'string', description: 'Việc cần làm, đủ ngữ cảnh để làm độc lập.' },
         files: { type: 'array', items: { type: 'string' }, description: 'File/thư mục agent được sửa.' },
-        model: { type: 'string', description: 'Bỏ trống để dùng model của kế hoạch.' },
+        model: { type: 'string', description: 'Không cần truyền: agent/model/effort luôn theo kế hoạch đã duyệt.' },
         effort: { type: 'string', enum: EFFORT },
         agent: { type: 'string', enum: ['claude', 'codex'] },
       },

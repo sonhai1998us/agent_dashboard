@@ -3,7 +3,7 @@ import { OrchestratorError } from '@/src/orchestrator/orchestrator';
 import { handleMcp } from '@/src/orchestrator/mcp';
 import { checkTool } from '@/src/guard/policy';
 import { createFakeRunner } from '../helpers/fakeRunner';
-import { makeEnv, cleanup, ids, runOf, toRunning, type Env } from '../helpers/orchestratorEnv';
+import { makeEnv, cleanup, codexPlan, ids, runOf, toRunning, type Env } from '../helpers/orchestratorEnv';
 
 let env: Env;
 afterEach(() => cleanup(env));
@@ -190,10 +190,10 @@ describe('guard và token MCP của worker', () => {
     cleanup(env);
     const codex = createFakeRunner();
     env = makeEnv({ runners: { codex: codex.runner } });
-    const T = await toRunning(env);
-    const tools = env.orch.mcpTools(T);
     env.cfg.settings.allowedModels.codex = ['gpt-x'];
-    const r = await tools.spawn_agent({ role: 'dev', task: 'a', files: ['src/a.ts'], agent: 'codex', model: 'gpt-x' });
+    const T = await toRunning(env, codexPlan('dev'));
+    const tools = env.orch.mcpTools(T);
+    const r = await tools.spawn_agent({ role: 'dev', task: 'a', files: ['src/a.ts'] });
     expect(r.isError).toBeFalsy();
     const run = codex.runs[codex.runs.length - 1];
     expect(run.spec.mcp).toBeNull();

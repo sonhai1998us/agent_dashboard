@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useLive } from '../../lib/liveStore';
 import { recentDirs } from '../../lib/recentDirs';
+import { roleOverrides } from '../../lib/tickets';
 import type { AgentKind, Effort, Role, RoleSpec } from '@/src/tickets/model';
 import styles from './NewTicketForm.module.css';
 
@@ -86,20 +87,8 @@ export default function NewTicketForm() {
     setSpecs({ ...specs, [role]: next });
   };
 
-  const buildOverrides = () => {
-    const out: Partial<Record<Role, Partial<RoleSpec>>> = {};
-    if (!specs || !settings) return out;
-    for (const { role } of ROLES) {
-      const d = settings.roleDefaults[role];
-      const s = specs[role];
-      const o: Partial<RoleSpec> = {};
-      if (s.agent !== d.agent) o.agent = s.agent;
-      if (s.model !== d.model) o.model = s.model;
-      if (s.effort !== d.effort) o.effort = s.effort;
-      if (Object.keys(o).length) out[role] = o;
-    }
-    return out;
-  };
+  // gửi lựa chọn đang hiển thị cho mọi vai, kể cả khi trùng mặc định: Controller phải dùng đúng
+  const buildOverrides = (): Partial<Record<Role, Partial<RoleSpec>>> => (specs && settings ? roleOverrides(specs) : {});
 
   const canSubmit = title.trim() !== '' && git?.isGit === true && !busy;
 
@@ -164,7 +153,7 @@ export default function NewTicketForm() {
         </div>
 
         <details className={styles.roles}>
-          <summary>Tuỳ chọn theo vai</summary>
+          <summary>Tuỳ chọn theo vai (Controller phải dùng đúng)</summary>
           {!specs || !settings ? <div className={styles.muted}>Đang tải cấu hình…</div> : (
             <div className={styles.grid} role="group" aria-label="Tuỳ chọn theo vai">
               {ROLES.map(({ role, label }) => {

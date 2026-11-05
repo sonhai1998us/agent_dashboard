@@ -1,5 +1,5 @@
 import { isManagedId, type AgentInfo } from '@/src/core/model';
-import type { ManagedState, Ticket, WaitSpan } from '@/src/tickets/model';
+import type { ManagedState, Role, RoleSpec, Ticket, WaitSpan } from '@/src/tickets/model';
 import { fmtDuration } from './format';
 
 export type StatusTone = 'run' | 'wait' | 'warn' | 'crit' | 'ok' | 'ended';
@@ -17,6 +17,11 @@ export function ticketStatusText(t: Ticket): StatusText {
     case 'escalated': return { icon: '■', text: 'cần bạn quyết', tone: 'crit' };
     case 'cancelled': return { icon: '○', text: 'đã huỷ', tone: 'ended' };
   }
+}
+
+/** Form tạo ticket gửi đúng lựa chọn đang hiển thị cho mọi vai (kể cả khi trùng mặc định): lựa chọn đó là bắt buộc với Controller. */
+export function roleOverrides(specs: Record<Role, RoleSpec>): Record<Role, RoleSpec> {
+  return Object.fromEntries((Object.keys(specs) as Role[]).map((r) => [r, { ...specs[r] }])) as Record<Role, RoleSpec>;
 }
 
 export type StatusAction = { kind: 'plan'; href: string; label: string } | { kind: 'decide'; label: string };
