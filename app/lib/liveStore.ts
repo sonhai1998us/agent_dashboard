@@ -210,7 +210,7 @@ export function selectTicket(id: string | null): void {
 export async function postJson<T>(path: string, body: unknown): Promise<T> {
   const r = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body ?? {}) });
   const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error((j as { error?: string }).error ?? `HTTP ${r.status}`);
+  if (!r.ok) throw Object.assign(new Error((j as { error?: string }).error ?? `HTTP ${r.status}`), { status: r.status });
   return j as T;
 }
 
