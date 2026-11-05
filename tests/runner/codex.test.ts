@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { readFileSync, mkdtempSync, mkdirSync } from 'node:fs';
+import { describe, it, expect, afterEach } from 'vitest';
+import { readFileSync, writeFileSync, mkdtempSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { buildCodexArgs, parseCodexExecLine, createCodexRunner } from '@/src/runner/codex';
@@ -72,5 +72,53 @@ describe('createCodexRunner', () => {
     const r = await h.done;
     expect(r).toMatchObject({ exitCode: 0, isError: false, text: 'Đã sửa xong src/a.ts', sessionId: '0199a213-81c0-7800-8aa1-bbab2a035a53', changedFiles: ['src/a.ts'] });
     expect(got.find((e) => e.type === 'agent')).toMatchObject({ agent: { id: 'acctv:T-1:qc-1', source: 'codex' } });
+  });
+
+  const sink = (): RunSink => ({ events: () => {}, limited: () => {} });
+  const fixture = (recs: unknown[]) => {
+    const f = path.join(mkdtempSync(path.join(tmpdir(), 'acctv-cdx-')), 'f.jsonl');
+    writeFileSync(f, recs.map((r) => JSON.stringify(r)).join('\n') + '\n');
+    process.env.FAKE_CODEX_FIXTURE = f;
+  };
+  const run = (o: Partial<RunSpec> = {}) => createCodexRunner({ command: process.execPath, prefixArgs: [fake] })(spec({ cwd: tmpdir(), ...o }), sink());
+  afterEach(() => { delete process.env.FAKE_CODEX_FIXTURE; delete process.env.FAKE_CODEX_SLEEP; });
+
+  it('error không chí mạng rồi turn.completed, exit 0 -> thành công', async () => {
+    fixture([
+      { type: 'thread.started', thread_id: 't1' },
+      { type: 'error', message: 'Reconnecting...' },
+      { type: 'item.completed', item: { id: 'i', type: 'agent_message', text: 'xong' } },
+      { type: 'turn.completed', usage: { input_tokens: 1, cached_input_tokens: 0, output_tokens: 1 } },
+    ]);
+    expect(await run().done).toMatchObject({ isError: false, text: 'xong' });
+  });
+  it('turn.failed luôn là lỗi', async () => {
+    fixture([
+      { type: 'thread.started', thread_id: 't1' },
+      { type: 'turn.failed', error: { message: 'hỏng' } },
+      { type: 'turn.completed', usage: { input_tokens: 1, cached_input_tokens: 0, output_tokens: 1 } },
+    ]);
+    expect(await run().done).toMatchObject({ isError: true, text: 'hỏng' });
+  });
+  it('file_change lỗi không vào changedFiles', async () => {
+    fixture([
+      { type: 'item.started', item: { id: 'i', type: 'file_change', changes: [{ path: 'src/b.ts', kind: 'update' }], status: 'in_progress' } },
+      { type: 'item.completed', item: { id: 'i', type: 'file_change', changes: [{ path: 'src/b.ts', kind: 'update' }], status: 'failed' } },
+    ]);
+    const got: NormalizedEvent[] = [];
+    const r = await createCodexRunner({ command: process.execPath, prefixArgs: [fake] })(spec({ cwd: tmpdir() }), { events: (e) => got.push(...e), limited: () => {} }).done;
+    expect(r.changedFiles).toEqual([]);
+    expect(got.find((e) => e.type === 'call_end')).toMatchObject({ ok: false });
+  });
+  it('spawn lỗi -> kết quả isError, không throw', async () => {
+    const h = createCodexRunner({ command: path.join(tmpdir(), 'không-có-codex.exe') })(spec({ cwd: tmpdir() }), sink());
+    expect(await h.done).toMatchObject({ isError: true });
+  });
+  it('kill() dừng script đang ngủ', async () => {
+    process.env.FAKE_CODEX_SLEEP = '30000';
+    const h = run();
+    await new Promise((r) => setTimeout(r, 500));
+    await h.kill();
+    expect(await h.done).toMatchObject({ killed: true });
   });
 });

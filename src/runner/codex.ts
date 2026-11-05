@@ -15,7 +15,7 @@ export function buildCodexArgs(spec: RunSpec): string[] {
   return a;
 }
 
-export interface CodexCtx { agentId: string; open: Map<string, number>; changedFiles?: Set<string>; turns?: number }
+export interface CodexCtx { agentId: string; open: Map<string, number>; changedFiles?: Set<string>; turns?: number; fatal?: boolean; turnDone?: boolean }
 
 const TOOL_ITEMS = new Set(['command_execution', 'mcp_tool_call', 'file_change']);
 
@@ -50,7 +50,7 @@ export function parseCodexExecLine(line: string, ctx: CodexCtx, now: number): St
         const ok = item.status !== 'failed' && (item.exit_code ?? 0) === 0;
         ctx.open.delete(callId);
         events.push({ type: 'call_end', agentId, callId, endedAt: now, ok, errorPreview: ok ? null : String(item.aggregated_output ?? item.error?.message ?? item.status ?? 'lỗi').slice(0, 200) });
-        if (item.type === 'file_change' && Array.isArray(item.changes) && ctx.changedFiles) {
+        if (ok && item.type === 'file_change' && Array.isArray(item.changes) && ctx.changedFiles) {
           for (const c of item.changes) if (c && typeof c.path === 'string') ctx.changedFiles.add(c.path);
         }
       }
@@ -62,6 +62,7 @@ export function parseCodexExecLine(line: string, ctx: CodexCtx, now: number): St
     return { events: [] };
   }
 
+  if (rec.type === 'turn.completed') ctx.turnDone = true;
   if (rec.type === 'turn.completed' && rec.usage && typeof rec.usage === 'object') {
     const u = rec.usage;
     const id = `${agentId}:llm:${ctx.turns = (ctx.turns ?? 0) + 1}`;
@@ -76,6 +77,7 @@ export function parseCodexExecLine(line: string, ctx: CodexCtx, now: number): St
 
   if (rec.type === 'turn.failed' || rec.type === 'error') {
     const text = String(rec.error?.message ?? rec.message ?? '');
+    if (rec.type === 'turn.failed') ctx.fatal = true;
     const rateLimited = RATE_LIMIT_RE.test(text);
     return { events: [], result: { isError: true, text, costUsd: null, rateLimited }, ...(rateLimited ? { limited: true } : {}) };
   }
@@ -104,6 +106,7 @@ export function createCodexRunner(opts: { command: string; prefixArgs?: string[]
       }
       if (out.events.length) sink.events(out.events);
       if (out.limited !== undefined) sink.limited(out.limited);
+      if (ctx.turnDone) { ctx.turnDone = false; if (!ctx.fatal) failure = null; }
       if (out.result) {
         if (out.result.isError) failure = { text: out.result.text, rateLimited: out.result.rateLimited };
         else message = out.result.text;
