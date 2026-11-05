@@ -103,6 +103,11 @@ export function checkTool(p: GuardPolicy, toolName: string, input: unknown, cwd:
       if (p.role === 'controller') return deny('vai controller không được chạy lệnh');
       const cmd = strField(input, 'command');
       if (cmd === undefined) return deny('lệnh bị cấm (thiếu command)');
+      // Lệnh nền giữ tiến trình `claude -p` sống sau khi agent đã xong (vd. `twg login` chờ trình duyệt) và ghi output ra ngoài worktree.
+      const bg = (input as Record<string, unknown>).run_in_background;
+      if (bg !== undefined && bg !== null && bg !== false) {
+        return deny('không chạy lệnh nền (run_in_background); hãy chạy lệnh ở tiền cảnh kèm timeout. Lệnh cần tương tác hay đăng nhập thì dừng và báo trong báo cáo.');
+      }
       // Chặn trước khi chạy regex: guard chạy đồng bộ trong server, lệnh khổng lồ không được làm treo event loop.
       if (cmd.length > MAX_COMMAND) return deny(`lệnh quá dài (> ${MAX_COMMAND} ký tự); hãy ghi nội dung bằng Write rồi chạy file`);
       for (const re of p.denyBash) if (re.test(cmd)) return deny(`lệnh bị cấm (${re.source})`);

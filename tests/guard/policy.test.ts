@@ -200,3 +200,16 @@ describe('denyBash cannot stall the server (ReDoS)', () => {
     expect(bash('echo ' + 'a'.repeat(30000)).allow).toBe(true);
   });
 });
+
+describe('Bash chạy nền bị chặn cho worker', () => {
+  it.each(['dev', 'designer', 'qc'] as const)('%s: run_in_background=true bị từ chối, lệnh thường vẫn qua', (role) => {
+    const d = checkTool(mk(role), 'Bash', { command: 'npm test', run_in_background: true }, root);
+    expect(d).toMatchObject({ allow: false, scope: false });
+    expect((d as { reason: string }).reason).toMatch(/^\[acctv-guard\] không chạy lệnh nền/);
+    expect(checkTool(mk(role), 'Bash', { command: 'npm test', run_in_background: false }, root).allow).toBe(true);
+    expect(checkTool(mk(role), 'Bash', { command: 'npm test' }, root).allow).toBe(true);
+  });
+  it('giá trị không phải true (chuỗi "true") cũng bị chặn để không lách bằng kiểu dữ liệu', () => {
+    expect(checkTool(mk('dev'), 'Bash', { command: 'npm test', run_in_background: 'true' }, root).allow).toBe(false);
+  });
+});

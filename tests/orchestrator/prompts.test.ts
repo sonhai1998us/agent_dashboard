@@ -95,3 +95,11 @@ describe('turn', () => {
     expect(p).toMatch(/bằng Edit hoặc Write, không ghi file bằng lệnh Bash/);
   });
 });
+
+describe('lệnh nền trong prompt worker', () => {
+  it('Dev và QC đều được dặn không chạy lệnh nền', () => {
+    for (const r of ['dev', 'qc', 'designer'] as const) {
+      expect(systemPrompt(r, { worktree: 'wt', files: [], denyBash: [] })).toMatch(/run_in_background bị chặn/);
+    }
+  });
+});
