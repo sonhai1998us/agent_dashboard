@@ -1,5 +1,6 @@
 import { isManagedId, type AgentInfo } from '@/src/core/model';
-import type { ManagedState, Ticket } from '@/src/tickets/model';
+import type { ManagedState, Ticket, WaitSpan } from '@/src/tickets/model';
+import { fmtDuration } from './format';
 
 export type StatusTone = 'run' | 'wait' | 'warn' | 'crit' | 'ok' | 'ended';
 export interface StatusText { icon: string; text: string; tone: StatusTone }
@@ -32,3 +33,30 @@ const MANAGED: Record<ManagedState, StatusText> = {
 export const managedStateText = (s: ManagedState): StatusText => MANAGED[s];
 
 export const isExternal = (a: AgentInfo): boolean => !isManagedId(a.id);
+
+export function layoutWaits(
+  waits: WaitSpan[], agentId: string, win: { start: number; end: number }, width: number,
+): { x: number; w: number; title: string }[] {
+  const span = win.end - win.start;
+  if (span <= 0 || width <= 0) return [];
+  const px = (t: number): number => ((Math.min(Math.max(t, win.start), win.end) - win.start) / span) * width;
+  const out: { x: number; w: number; title: string }[] = [];
+  for (const w of waits) {
+    if (w.agentId !== agentId) continue;
+    const end = w.endedAt ?? win.end;
+    if (end < win.start || w.startedAt > win.end) continue;
+    const x = px(w.startedAt);
+    out.push({
+      x, w: Math.max(2, px(end) - x),
+      title: `${w.kind === 'approval' ? 'chờ duyệt kế hoạch' : 'chờ subagent'} · ${fmtDuration(end - w.startedAt)}`,
+    });
+  }
+  return out;
+}
+
+export function replayRange(nodes: AgentInfo[], now: number): { min: number; max: number; live: boolean } {
+  const live = nodes.some((n) => n.status === 'running' || n.status === 'queued' || n.status === 'limited');
+  const min = nodes.length ? Math.min(...nodes.map((n) => n.startedAt)) : now;
+  const max = live ? now : nodes.length ? Math.max(...nodes.map((n) => n.lastEventAt)) : now;
+  return { min, max, live };
+}
