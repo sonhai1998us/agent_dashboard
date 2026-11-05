@@ -219,6 +219,19 @@ const ROUTES: Route[] = [
       return ok({ ok: true }, 202);
     },
   },
+  {
+    // người dùng trả lời request_user_action: done=true đã làm xong, false không làm được
+    method: 'POST', re: /^\/api\/agents\/([^/]+)\/user-action$/,
+    run: async ({ req, core, params: [id] }) => {
+      const b = objBody(await readJson(req));
+      if (typeof b.done !== 'boolean') throw new HttpError(400, 'done phải là true hoặc false');
+      if (b.note !== undefined && b.note !== null && (typeof b.note !== 'string' || b.note.length > 2000)) {
+        throw new HttpError(400, 'note phải là chuỗi tối đa 2000 ký tự');
+      }
+      const note = typeof b.note === 'string' ? b.note.trim() : '';
+      return ok(await core.orchestrator.answerUserAction(id, { done: b.done, note }));
+    },
+  },
   { method: 'GET', re: /^\/api\/fs\/check$/, run: async ({ url }) => ok(await gitInfo(absDir(url.searchParams.get('dir') ?? undefined))) },
   {
     method: 'POST', re: /^\/api\/fs\/git-init$/,
@@ -263,6 +276,12 @@ const ROUTES: Route[] = [
   {
     method: 'POST', re: /^\/mcp$/,
     run: async ({ req, url, core }) => {
+      // worker: ?agent=<id> với token guard của nó (chỉ request_user_action); Controller: ?ticket=<T>
+      const agent = url.searchParams.get('agent');
+      if (agent !== null) {
+        if (!core.orchestrator.checkWorkerMcpToken(agent, bearer(req))) throw new HttpError(401, 'token không hợp lệ');
+        return handleMcp(await readJson(req), core.orchestrator.workerMcpTools(agent));
+      }
       const ticket = url.searchParams.get('ticket') ?? '';
       if (!core.orchestrator.checkMcpToken(ticket, bearer(req))) throw new HttpError(401, 'token không hợp lệ');
       return handleMcp(await readJson(req), core.orchestrator.mcpTools(ticket));

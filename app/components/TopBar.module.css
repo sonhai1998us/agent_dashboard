@@ -10,3 +10,6 @@
 .newBtn { background: var(--sel); border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px; font-size: 12px; font-weight: 500; color: var(--fg); text-decoration: none; }
 .newBtn:hover { border-color: var(--run); }
 .newBtn:focus-visible { outline: 2px solid var(--run); outline-offset: 2px; }
+.needBtn { background: transparent; border: 1px solid var(--warn); color: var(--warn); border-radius: 6px; font: inherit; font-size: 12px; padding: 2px 9px; cursor: pointer; }
+.needBtn:hover { background: var(--sel); }
+.needBtn:focus-visible { outline: 2px solid var(--warn); outline-offset: 1px; }

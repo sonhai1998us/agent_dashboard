@@ -7,6 +7,7 @@ import SessionList from './SessionList';
 import AgentTimeline from './AgentTimeline';
 import TicketHeader from './TicketHeader';
 import AgentDetail from './AgentDetail';
+import UserActionDialog from './UserActionDialog';
 import styles from './Dashboard.module.css';
 
 export default function Dashboard() {
@@ -28,6 +29,7 @@ export default function Dashboard() {
         </div>
         <AgentDetail />
       </main>
+      <UserActionDialog />
     </div>
   );
 }

@@ -3,9 +3,10 @@ import { useEffect, useState, type KeyboardEvent } from 'react';
 import { postJson, useLive } from '../lib/liveStore';
 import { fmtCost } from '../lib/format';
 import { managedStateText } from '../lib/tickets';
+import { openUserActions } from '../lib/userActions';
 import styles from './ManagedPanel.module.css';
 
-const STOPPABLE = new Set(['queued', 'running', 'limited']);
+const STOPPABLE = new Set(['queued', 'running', 'limited', 'waiting']);
 const TASK_LINES = 6;
 
 export default function ManagedPanel({ agentId }: { agentId: string }) {
@@ -17,7 +18,7 @@ export default function ManagedPanel({ agentId }: { agentId: string }) {
   useEffect(() => { setMore(false); setBusy(false); setErr(null); }, [agentId]);
   if (!m) return null;
 
-  const st = managedStateText(m.state);
+  const st = m.userAction && m.state === 'waiting' ? { icon: '▲', text: 'chờ bạn', tone: 'warn' as const } : managedStateText(m.state);
   const canStop = m.role !== 'controller' && STOPPABLE.has(m.state);
   const lines = m.task.split('\n');
   const long = lines.length > TASK_LINES;
@@ -45,6 +46,12 @@ export default function ManagedPanel({ agentId }: { agentId: string }) {
       </div>
       <div className={`${styles.line} mono`}>{m.runner} · {m.model} · {m.effort}</div>
       {m.stopReason && <div className={styles.reason}><span aria-hidden="true">▲</span> {m.stopReason}</div>}
+      {m.userAction && (
+        <div className={styles.need}>
+          <span><span aria-hidden="true">▲</span> Cần bạn: {m.userAction.title}</span>
+          <button type="button" className={styles.link} onClick={() => openUserActions(agentId)}>Mở</button>
+        </div>
+      )}
       <h4 className={styles.h}>Gói việc</h4>
       <div className={styles.task}>{shown}</div>
       {long && (

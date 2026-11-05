@@ -25,7 +25,7 @@ const ticket = (over: Partial<Ticket> = {}): Ticket => ({
 const managed = (over: Partial<ManagedAgent> = {}): ManagedAgent => ({
   agentId: 'acctv:T-1:dev-1', ticketId: 'T-1', role: 'dev', ordinal: 1, packageId: 'p1', task: 'do', files: ['a.ts'],
   runner: 'claude', model: 'claude-sonnet-5-5', effort: 'high', sessionId: 'sid-d', state: 'running', stopReason: null,
-  resultText: null, changedFiles: ['a.ts'], costUsd: 0.5, createdAt: 1000, endedAt: null, ...over,
+  resultText: null, changedFiles: ['a.ts'], costUsd: 0.5, createdAt: 1000, endedAt: null, userAction: null, ...over,
 });
 
 test('Ticket round-trip đủ plan, overrides, pendingWait', () => {
@@ -79,4 +79,19 @@ test('log / listLog theo thứ tự thời gian', () => {
   const ts = new TicketStore(new Store(':memory:'));
   ts.log('T-1', 'a'); ts.log('T-1', 'b'); ts.log('T-2', 'c');
   expect(ts.listLog('T-1').map((l) => l.text)).toEqual(['a', 'b']);
+});
+
+test('managed: userAction lưu và đọc lại; DB cũ không có cột thì được thêm', () => {
+  const ua = { id: 'u1', title: 'Đăng nhập', message: 'm', url: 'https://x', command: 'twg login', createdAt: 5 };
+  const s = new Store(':memory:');
+  s.database.exec(`CREATE TABLE managed_agents (agent_id TEXT PRIMARY KEY, ticket_id TEXT NOT NULL, role TEXT NOT NULL,
+    ordinal INTEGER NOT NULL, package_id TEXT, task TEXT NOT NULL, files TEXT NOT NULL, runner TEXT NOT NULL, model TEXT NOT NULL,
+    effort TEXT NOT NULL, session_id TEXT NOT NULL, state TEXT NOT NULL, stop_reason TEXT, result_text TEXT,
+    changed_files TEXT NOT NULL, cost_usd REAL, created_at INTEGER NOT NULL, ended_at INTEGER)`);
+  const ts = new TicketStore(s);
+  ts.upsertManaged(managed({ userAction: ua }));
+  expect(ts.getManaged('acctv:T-1:dev-1')!.userAction).toEqual(ua);
+  ts.updateManaged('acctv:T-1:dev-1', { userAction: null });
+  expect(ts.getManaged('acctv:T-1:dev-1')!.userAction).toBeNull();
+  s.close();
 });

@@ -28,8 +28,15 @@ describe('handleMcp', () => {
     expect((await handleMcp(rpc('ping'), {})).json).toEqual({ jsonrpc: '2.0', id: 1, result: {} });
   });
 
-  it('tools/list has the 5 tools with Vietnamese wait hint', async () => {
-    const r = await handleMcp(rpc('tools/list'), {});
+  it('tools/list only lists the tools the caller has (worker: request_user_action)', async () => {
+    const r = await handleMcp(rpc('tools/list'), { request_user_action: async () => ({ text: '' }) });
+    expect((r.json as any).result.tools.map((t: any) => t.name)).toEqual(['request_user_action']);
+  });
+
+  it('tools/list has the 5 Controller tools with Vietnamese wait hint', async () => {
+    const noop = async () => ({ text: '' });
+    const ctrl = Object.fromEntries(['propose_plan', 'spawn_agent', 'wait_agents', 'get_agent_log', 'finish'].map((n) => [n, noop]));
+    const r = await handleMcp(rpc('tools/list'), ctrl);
     const tools = (r.json as any).result.tools;
     expect(tools.map((t: any) => t.name).sort()).toEqual(['finish', 'get_agent_log', 'propose_plan', 'spawn_agent', 'wait_agents']);
     for (const n of ['propose_plan', 'wait_agents']) {

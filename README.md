@@ -111,6 +111,16 @@ Trên Windows chỉ tự dò các CLI dạng `.exe`. Nếu cài bằng npm (shim
 - Agent bị rate limit sẽ chờ rồi thử lại sau 60s, 120s, 300s; quá số lần đó thì báo lỗi.
 - Lặp lệnh từ `loopCritical` với agent do dashboard chạy thì tự dừng (`auto-stop: loop`); phiên ngoài ticket không bao giờ bị tự dừng.
 
+### Agent cần bạn (đăng nhập, mở link…)
+
+Khi một Dev/QC/Designer (Claude) cần bạn làm việc nó không tự làm được, ví dụ đăng nhập một CLI qua trình duyệt, nó gọi tool `request_user_action`. Dashboard hiện hộp thoại "Agent cần bạn" gồm hướng dẫn, link (chỉ http/https, mở ở tab mới) và lệnh để bạn chép rồi chạy trong terminal của mình.
+
+- **Đã xong, tiếp tục**: agent chạy tiếp trong cùng phiên, kèm ghi chú của bạn nếu có.
+- **Không làm được**: agent hoàn tất phần làm được rồi báo phần còn thiếu.
+- **Để sau**: ẩn hộp thoại. Mở lại bằng nút "cần bạn" trên thanh trên, hoặc nút "Mở" trong panel của agent.
+
+Trong lúc chờ, agent không chiếm slot chạy song song. Bạn vẫn dừng được agent ("Dừng → trả Controller"). Tab trình duyệt hiện số yêu cầu đang chờ. Worker Codex chưa có tool này.
+
 ### Biến môi trường chỉ để thử
 
 `ACCTV_CLAUDE_CMD` (JSON `{"command": "...", "prefixArgs": ["..."]}`) thay CLI claude thật bằng runner giả. Chỉ dùng khi thử nghiệm, không dùng khi chạy thật.

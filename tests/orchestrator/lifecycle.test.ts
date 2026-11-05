@@ -87,8 +87,10 @@ describe('vòng đời ticket', () => {
     expect((await tools.spawn_agent({ role: 'qc', packageId: 'p3', task: 'Review', files: [] })).isError).toBeFalsy();
     expect(runs).toHaveLength(4);
     expect(runOf(env, dev1)!.spec).toMatchObject({
-      role: 'dev', cwd: wt, resume: false, mcp: null, addDirs: [], label: 'Dev-1', parentId: ctrl,
-      tools: ['Read', 'Glob', 'Grep', 'Edit', 'Write', 'Bash'], allowedTools: ['Read', 'Glob', 'Grep', 'Edit', 'Write', 'Bash'],
+      role: 'dev', cwd: wt, resume: false, addDirs: [], label: 'Dev-1', parentId: ctrl,
+      mcp: { url: `http://127.0.0.1:4777/mcp?agent=${encodeURIComponent(dev1)}`, token: expect.any(String) },
+      tools: ['Read', 'Glob', 'Grep', 'Edit', 'Write', 'Bash', 'mcp__acctv__request_user_action'],
+      allowedTools: ['Read', 'Glob', 'Grep', 'Edit', 'Write', 'Bash', 'mcp__acctv__request_user_action'],
     });
     expect(runOf(env, dev1)!.spec.prompt).toContain('src/a.ts');
     expect(runOf(env, dev1)!.spec.systemPrompt.split('\n')[0]).toBe('ROLE: dev');
@@ -115,7 +117,7 @@ describe('vòng đời ticket', () => {
     expect(tickets.getManaged(dev1)).toMatchObject({ state: 'done', resultText: 'xong a', changedFiles: ['src/a.ts'], costUsd: 0.1 });
     expect(store.getAgent(dev1)!.status).toBe('ended');
     expect(runs).toHaveLength(5);
-    expect(runs[4].spec).toMatchObject({ agentId: qc1, role: 'qc', tools: ['Read', 'Glob', 'Grep', 'Bash'] });
+    expect(runs[4].spec).toMatchObject({ agentId: qc1, role: 'qc', tools: ['Read', 'Glob', 'Grep', 'Bash', 'mcp__acctv__request_user_action'] });
     expect(tickets.getManaged(qc1)!.state).toBe('running');
     runOf(env, dev2)!.finish({ text: 'xong b', isError: true });
     await orch.idle();

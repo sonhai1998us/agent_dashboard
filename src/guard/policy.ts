@@ -11,6 +11,9 @@ export interface GuardPolicy {
 }
 export type GuardDecision = { allow: true } | { allow: false; reason: string; scope: boolean };
 
+/** Tool MCP duy nhất của worker: nhờ người dùng làm việc agent không tự làm được (đăng nhập…). */
+export const USER_ACTION_TOOL = 'mcp__acctv__request_user_action';
+
 /** Độ dài tối đa của lệnh Bash mà guard chịu kiểm tra. */
 export const MAX_COMMAND = 32_000;
 
@@ -106,7 +109,7 @@ export function checkTool(p: GuardPolicy, toolName: string, input: unknown, cwd:
       // Lệnh nền giữ tiến trình `claude -p` sống sau khi agent đã xong (vd. `twg login` chờ trình duyệt) và ghi output ra ngoài worktree.
       const bg = (input as Record<string, unknown>).run_in_background;
       if (bg !== undefined && bg !== null && bg !== false) {
-        return deny('không chạy lệnh nền (run_in_background); hãy chạy lệnh ở tiền cảnh kèm timeout. Lệnh cần tương tác hay đăng nhập thì dừng và báo trong báo cáo.');
+        return deny('không chạy lệnh nền (run_in_background); hãy chạy lệnh ở tiền cảnh kèm timeout. Lệnh cần tương tác hay đăng nhập thì gọi request_user_action để nhờ người dùng.');
       }
       // Chặn trước khi chạy regex: guard chạy đồng bộ trong server, lệnh khổng lồ không được làm treo event loop.
       if (cmd.length > MAX_COMMAND) return deny(`lệnh quá dài (> ${MAX_COMMAND} ký tự); hãy ghi nội dung bằng Write rồi chạy file`);
@@ -118,6 +121,7 @@ export function checkTool(p: GuardPolicy, toolName: string, input: unknown, cwd:
     }
   }
   if (toolName.startsWith('mcp__acctv__') && p.role === 'controller') return { allow: true };
+  if (toolName === USER_ACTION_TOOL) return { allow: true };
   return deny(`tool ${toolName} không được phép cho vai ${p.role}`);
 }
 

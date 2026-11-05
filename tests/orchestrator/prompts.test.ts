@@ -103,3 +103,12 @@ describe('lệnh nền trong prompt worker', () => {
     }
   });
 });
+
+describe('request_user_action trong prompt worker', () => {
+  it('Dev, QC, Designer được dặn dùng request_user_action khi cần người dùng đăng nhập', () => {
+    for (const r of ['dev', 'qc', 'designer'] as const) {
+      expect(systemPrompt(r, { worktree: 'wt', files: [], denyBash: [] })).toMatch(/gọi tool request_user_action/);
+    }
+    expect(systemPrompt('controller', { worktree: 'wt', files: [], denyBash: [] })).not.toMatch(/request_user_action/);
+  });
+});

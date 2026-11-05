@@ -2,6 +2,7 @@
 import Link from 'next/link';
 import { useLive } from '../lib/liveStore';
 import { fmtClock, fmtDuration } from '../lib/format';
+import { openUserActions } from '../lib/userActions';
 import styles from './TopBar.module.css';
 
 export default function TopBar() {
@@ -17,6 +18,7 @@ export default function TopBar() {
 
   const alerts = metrics?.alerts ?? 0;
   const pending = useLive((s) => Object.values(s.tickets).filter((t) => t.status === 'awaiting_approval').length);
+  const needYou = useLive((s) => Object.values(s.managed).filter((m) => m.userAction && m.role !== 'controller').length);
   return (
     <header className={styles.bar}>
       <strong className={styles.brand}>Agent CCTV</strong>
@@ -25,6 +27,11 @@ export default function TopBar() {
       <Kpi value={metrics?.okRate1h == null ? '—' : `${Math.round(metrics.okRate1h * 100)}%`} label="call ok · 1h" />
       <Kpi value={metrics?.p50_1h == null ? '—' : fmtDuration(metrics.p50_1h)} label="p50 latency" />
       <Kpi value={`${pending > 0 ? '▲ ' : ''}${pending}`} label="chờ duyệt" warn={pending > 0} />
+      {needYou > 0 && (
+        <button type="button" className={styles.needBtn} onClick={() => openUserActions()} aria-label={`${needYou} agent cần bạn: mở`}>
+          <span className="mono">▲ {needYou}</span> cần bạn
+        </button>
+      )}
       <Link href="/tickets/new" className={styles.newBtn}>+ Ticket mới</Link>
       <Link href="/settings" className={styles.newBtn}>Cài đặt</Link>
       <span className={styles.spacer} />

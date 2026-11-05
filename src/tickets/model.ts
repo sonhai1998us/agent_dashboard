@@ -70,6 +70,19 @@ export interface ManagedAgent {
   costUsd: number | null;
   createdAt: number;
   endedAt: number | null;
+  /** Việc agent cần người dùng làm (đăng nhập, mở link…); agent ở trạng thái `waiting` cho tới khi người dùng trả lời. */
+  userAction: UserAction | null;
+}
+
+export interface UserAction {
+  id: string;
+  title: string;
+  message: string;
+  /** chỉ http(s) */
+  url: string | null;
+  /** lệnh người dùng tự chạy trong terminal của mình */
+  command: string | null;
+  createdAt: number;
 }
 
 export interface WaitSpan {

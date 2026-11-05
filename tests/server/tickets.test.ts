@@ -291,3 +291,44 @@ test('snapshot có tickets/managed/waits/prices; WS nhận event ticket khi tr�
   expect(snap.prices).toEqual({});
   expect(Array.isArray(snap.agents)).toBe(true);
 });
+
+test('worker MCP (?agent=) chỉ có request_user_action; trả lời qua /api/agents/:id/user-action', async () => {
+  await start();
+  await toAwaiting();
+  expect((await post('/api/tickets/T-1/approve')).status).toBe(200);
+  const ctrl = await waitFor(() => runs.filter((r) => r.spec.agentId === 'acctv:T-1:controller')[1]);
+  await mcp('T-1', ctrl.spec.mcp!.token, 'spawn_agent', { role: 'dev', task: 'Làm a', files: ['src/a.ts'] });
+  const dev = await waitFor(() => lastRun('acctv:T-1:dev-1'));
+  const id = encodeURIComponent('acctv:T-1:dev-1');
+  const devMcp = (token: string, body: unknown) => post(`/mcp?agent=${id}`, body, { ...JSON_CT, authorization: `Bearer ${token}` });
+
+  expect((await devMcp('wrong', { jsonrpc: '2.0', id: 1, method: 'ping' })).status).toBe(401);
+  expect((await devMcp(ctrl.spec.mcp!.token, { jsonrpc: '2.0', id: 1, method: 'ping' })).status).toBe(401);
+  const list = await devMcp(dev.spec.guard.token, { jsonrpc: '2.0', id: 1, method: 'tools/list' });
+  expect(list.json.result.tools.map((t: any) => t.name)).toEqual(['request_user_action']);
+  const spawn = await devMcp(dev.spec.guard.token, { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'spawn_agent', arguments: {} } });
+  expect(spawn.json.result.isError).toBe(true);
+  // Controller không dùng được token của nó với tool của worker và ngược lại
+  expect((await post(`/mcp?agent=${encodeURIComponent('acctv:T-1:controller')}`, { jsonrpc: '2.0', id: 1, method: 'ping' }, { ...JSON_CT, authorization: `Bearer ${ctrl.spec.guard.token}` })).status).toBe(401);
+
+  expect((await post(`/api/agents/${id}/user-action`, { done: true })).status).toBe(409);
+  const req = await devMcp(dev.spec.guard.token, {
+    jsonrpc: '2.0', id: 3, method: 'tools/call',
+    params: { name: 'request_user_action', arguments: { title: 'Đăng nhập twg', message: 'Chạy lệnh', command: 'twg login', url: 'https://example.com/login' } },
+  });
+  expect(req.json.result.isError).toBe(false);
+  const t = await call('GET', '/api/tickets/T-1');
+  expect(t.json.agents.find((a: any) => a.agentId === 'acctv:T-1:dev-1').userAction).toMatchObject({ title: 'Đăng nhập twg', url: 'https://example.com/login' });
+
+  expect((await post(`/api/agents/${id}/user-action`, { done: 'yes' })).status).toBe(400);
+  expect((await post(`/api/agents/${id}/user-action`, { done: true, note: 'x'.repeat(2001) })).status).toBe(400);
+  dev.finish({});
+  await waitFor(async () => (await call('GET', '/api/tickets/T-1')).json.agents.find((a: any) => a.agentId === 'acctv:T-1:dev-1').state === 'waiting');
+  const ans = await post(`/api/agents/${id}/user-action`, { done: true, note: 'đã đăng nhập' });
+  expect(ans.status).toBe(200);
+  expect(ans.json).toMatchObject({ agentId: 'acctv:T-1:dev-1', userAction: null });
+  const again = await waitFor(() => (lastRun('acctv:T-1:dev-1') !== dev ? lastRun('acctv:T-1:dev-1') : undefined));
+  expect(again.spec.resume).toBe(true);
+  expect(again.spec.prompt).toContain('đã đăng nhập');
+  expect((await post(`/api/agents/${encodeURIComponent('acctv:T-1:dev-9')}/user-action`, { done: true })).status).toBe(404);
+});

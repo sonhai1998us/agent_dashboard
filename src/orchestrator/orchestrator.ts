@@ -5,12 +5,12 @@ import type { Store } from '@/src/core/store';
 import type { Hub } from '@/src/core/hub';
 import { isManagedId, type AgentInfo, type Alert, type NormalizedEvent } from '@/src/core/model';
 import type { TicketStore } from '@/src/tickets/store';
-import { TERMINAL_STATES, type AgentKind, type ManagedAgent, type ManagedState, type Plan, type Role, type RoleSpec, type Ticket, type TicketStatus, type WaitSpan, type WorkRole } from '@/src/tickets/model';
+import { TERMINAL_STATES, type UserAction, type AgentKind, type ManagedAgent, type ManagedState, type Plan, type Role, type RoleSpec, type Ticket, type TicketStatus, type WaitSpan, type WorkRole } from '@/src/tickets/model';
 import { branchName, filesOverlap, transition, validatePlan, type TicketEvent } from '@/src/tickets/flow';
-import { checkTool, matchEntry, type GuardPolicy } from '@/src/guard/policy';
+import { checkTool, matchEntry, USER_ACTION_TOOL, type GuardPolicy } from '@/src/guard/policy';
 import { inside } from '@/src/core/paths';
 import type { Runner, RunHandle, RunResult, RunSink, RunSpec } from '@/src/runner/types';
-import type { ToolImpl, ToolResult } from './mcp';
+import { USER_ACTION_LIMITS, type ToolImpl, type ToolResult } from './mcp';
 import { listPreview, systemPrompt, turn, workerPrompt } from './prompts';
 import { agentLog, agentReport } from './reports';
 
@@ -31,7 +31,13 @@ type Timer = ReturnType<typeof setTimeout>;
 /** `timer`: đang chờ thử lại sau rate limit (lượt vẫn được coi là đang chạy). */
 interface CtrlState { handle: RunHandle | null; message: string | null; queue: string[]; nudges: number; waking: boolean; retries: number; timer: Timer | null }
 /** Giữ slot suốt các lần thử lại sau rate limit; `cost` và `files` cộng dồn qua các lần chạy (--resume không báo lại file cũ). */
-interface WorkerRun { handle: RunHandle; spec: RunSpec; retries: number; timer: Timer | null; cost: number | null; files: string[]; last: RunResult | null }
+interface WorkerRun {
+  handle: RunHandle; spec: RunSpec; retries: number; timer: Timer | null; cost: number | null; files: string[]; last: RunResult | null;
+  /** tiến trình đã thoát sau request_user_action; chờ người dùng trả lời */
+  waitingUser: boolean;
+  /** người dùng đã trả lời: lời nhắn để chạy tiếp agent (khi tiến trình thoát, hoặc ngay nếu đã thoát) */
+  resumePrompt: string | null;
+}
 
 const CTRL_TOOLS = ['Read', 'Glob', 'Grep'];
 const MCP_TOOLS = ['propose_plan', 'spawn_agent', 'wait_agents', 'get_agent_log', 'finish'].map((n) => `mcp__acctv__${n}`);
@@ -45,6 +51,9 @@ const WORK_ROLES: WorkRole[] = ['dev', 'designer', 'qc'];
 const AGENTS: AgentKind[] = ['claude', 'codex'];
 const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
 const LIVE: ManagedState[] = ['queued', 'running', 'limited'];
+/** worker còn sống, kể cả đang chờ người dùng (Controller cũng dùng `waiting` nhưng theo nghĩa khác) */
+const WORKER_LIVE: ManagedState[] = [...LIVE, 'waiting'];
+const isWorkerLive = (m: ManagedAgent): boolean => m.role !== 'controller' && WORKER_LIVE.includes(m.state);
 const ENDED_TICKET: TicketStatus[] = ['done', 'escalated', 'cancelled'];
 const NOT_APPROVED = 'Kế hoạch chưa được duyệt; chưa được khởi chạy agent';
 const NO_CLI: Record<AgentKind, string> = { claude: 'Không tìm thấy Claude CLI', codex: 'Codex CLI chưa được cài trên máy' };
@@ -142,7 +151,7 @@ export class Orchestrator {
     this.putManaged({
       agentId: controllerId(id), ticketId: id, role: 'controller', ordinal: 1, packageId: null, task: t.title, files: [],
       runner: 'claude', model: spec.model, effort: spec.effort, sessionId: t.controllerSessionId, state: 'queued',
-      stopReason: null, resultText: null, changedFiles: [], costUsd: null, createdAt: now, endedAt: null,
+      stopReason: null, resultText: null, changedFiles: [], costUsd: null, createdAt: now, endedAt: null, userAction: null,
     });
     this.log(id, `Tạo ticket: ${t.title}`);
     this.runControllerTurn(id, turn.first(planning));
@@ -201,7 +210,7 @@ export class Orchestrator {
     const m = this.deps.tickets.getManaged(agentId);
     if (!m) throw new OrchestratorError(404, `Không tìm thấy agent ${agentId}`);
     if (m.role === 'controller') throw new OrchestratorError(409, 'Controller: dùng Huỷ ticket');
-    if (!LIVE.includes(m.state)) throw new OrchestratorError(409, `Agent ${agentId} đã kết thúc`);
+    if (!isWorkerLive(m)) throw new OrchestratorError(409, `Agent ${agentId} đã kết thúc`);
     await this.stopWorker(m, reason);
   }
 
@@ -263,8 +272,8 @@ export class Orchestrator {
     this.recovered = true;
     const at = this.now();
     for (const m of this.deps.tickets.listManaged()) {
-      if (!LIVE.includes(m.state)) continue;
-      this.saveManaged(m.agentId, { state: 'interrupted', stopReason: INTERRUPTED, endedAt: at });
+      if (!LIVE.includes(m.state) && !isWorkerLive(m)) continue;
+      this.saveManaged(m.agentId, { state: 'interrupted', stopReason: INTERRUPTED, endedAt: at, userAction: null });
       this.emitAgent({ id: m.agentId, source: m.runner, sessionId: m.sessionId, status: 'ended' });
       this.log(m.ticketId, `${m.agentId} ${INTERRUPTED}`);
     }
@@ -306,8 +315,8 @@ export class Orchestrator {
     this.mcpTokens.clear();
     const at = this.now();
     for (const m of this.deps.tickets.listManaged()) {
-      if (!LIVE.includes(m.state)) continue;
-      this.saveManaged(m.agentId, { state: 'interrupted', stopReason: SHUTDOWN, endedAt: at });
+      if (!LIVE.includes(m.state) && !isWorkerLive(m)) continue;
+      this.saveManaged(m.agentId, { state: 'interrupted', stopReason: SHUTDOWN, endedAt: at, userAction: null });
       this.emitAgent({ id: m.agentId, source: m.runner, sessionId: m.sessionId, status: 'ended' });
       this.log(m.ticketId, `${m.agentId} ${SHUTDOWN}`);
     }
@@ -323,7 +332,7 @@ export class Orchestrator {
     const m = this.deps.tickets.getManaged(a.agentId);
     if (!m) return;
     if (m.role !== 'controller') {
-      if (!LIVE.includes(m.state)) return;
+      if (!isWorkerLive(m)) return;
       this.alerted.add(key);
       this.track(this.stopWorker(m, LOOP_STOP));
       return;
@@ -342,6 +351,36 @@ export class Orchestrator {
       get_agent_log: async (a) => this.getAgentLog(ticketId, a),
       finish: async (a) => this.finish(ticketId, a),
     };
+  }
+
+  /** MCP của worker: chỉ request_user_action. */
+  workerMcpTools(agentId: string): Record<string, ToolImpl> {
+    return { request_user_action: async (a) => this.requestUserAction(agentId, a) };
+  }
+
+  /** Worker dùng token guard của chính nó cho MCP. */
+  checkWorkerMcpToken(agentId: string, token: string): boolean {
+    const m = this.deps.tickets.getManaged(agentId);
+    return !!m && m.role !== 'controller' && this.checkGuardToken(agentId, token);
+  }
+
+  /** Người dùng trả lời yêu cầu của agent: chạy tiếp agent trong cùng phiên. */
+  async answerUserAction(agentId: string, a: { done: boolean; note?: string }): Promise<ManagedAgent> {
+    const m = this.deps.tickets.getManaged(agentId);
+    if (!m) throw new OrchestratorError(404, `Không tìm thấy agent ${agentId}`);
+    const run = this.workers.get(agentId);
+    if (!m.userAction || !run || !isWorkerLive(m)) throw new OrchestratorError(409, `Agent ${agentId} không có yêu cầu nào đang chờ`);
+    const ua = m.userAction;
+    const note = (a.note ?? '').trim().slice(0, USER_ACTION_LIMITS.message);
+    const extra = note ? ` Ghi chú của người dùng: ${note}` : '';
+    const prompt = a.done
+      ? `Người dùng đã làm xong: ${ua.title}.${extra} Hãy kiểm tra lại (vd. lệnh whoami/status) rồi làm tiếp gói việc từ chỗ dừng.`
+      : `Người dùng không làm được: ${ua.title}.${extra} Hãy hoàn tất phần làm được mà không cần việc này, rồi báo cáo rõ phần còn thiếu.`;
+    this.log(m.ticketId, `${a.done ? 'Người dùng đã làm' : 'Người dùng không làm được'}: ${ua.title} (${agentId})`);
+    const next = this.saveManaged(agentId, { userAction: null });
+    run.resumePrompt = prompt;
+    if (run.waitingUser) await this.resumeWorker(agentId);
+    return this.deps.tickets.getManaged(agentId) ?? next;
   }
 
   /** Chỉ kiểm token guard của agent (không quyết định, không tác dụng phụ). */
@@ -373,6 +412,34 @@ export class Orchestrator {
   }
 
   // ---------- MCP tools ----------
+
+  private requestUserAction(id: string, args: Record<string, unknown>): ToolResult {
+    const m = this.deps.tickets.getManaged(id);
+    const run = this.workers.get(id);
+    if (!m || m.role === 'controller' || !run || run.waitingUser || !['running', 'limited'].includes(m.state)) return fail('Agent không còn chạy');
+    if (m.userAction) return fail('Đã có một yêu cầu đang chờ người dùng; hãy kết thúc lượt và chờ được gọi lại');
+    const L = USER_ACTION_LIMITS;
+    const str = (k: string): string | null => {
+      const v = args[k];
+      return isStr(v) && v.trim() ? v.trim() : null;
+    };
+    const title = str('title');
+    const message = str('message');
+    const url = str('url');
+    const command = str('command');
+    if (!title || title.length > L.title) return fail(`title bắt buộc, tối đa ${L.title} ký tự`);
+    if (!message || message.length > L.message) return fail(`message bắt buộc, tối đa ${L.message} ký tự`);
+    if (url !== null) {
+      let good = false;
+      try { good = url.length <= L.url && ['http:', 'https:'].includes(new URL(url).protocol); } catch { /* không phải URL */ }
+      if (!good) return fail('url phải là link http(s) hợp lệ');
+    }
+    if (command !== null && command.length > L.command) return fail(`command tối đa ${L.command} ký tự`);
+    const ua: UserAction = { id: randomUUID(), title, message, url, command, createdAt: this.now() };
+    this.saveManaged(id, { userAction: ua });
+    this.log(m.ticketId, `${run.spec.label} cần bạn: ${title}`);
+    return ok('Đã gửi yêu cầu cho người dùng. Hãy kết thúc lượt ngay bây giờ: không gọi thêm tool, chỉ viết một câu ngắn. Khi người dùng trả lời, bạn sẽ được gọi lại trong cùng phiên để làm tiếp.');
+  }
 
   private proposePlan(T: string, args: Record<string, unknown>): ToolResult {
     const t = this.deps.tickets.getTicket(T);
@@ -429,7 +496,7 @@ export class Orchestrator {
     const m: ManagedAgent = {
       agentId: id, ticketId: T, role, ordinal, packageId: isStr(args.packageId) && args.packageId ? args.packageId : null,
       task, files, runner: agent, model, effort, sessionId: this.newSessionId(), state: 'queued', stopReason: null,
-      resultText: null, changedFiles: [], costUsd: null, createdAt: now, endedAt: null,
+      resultText: null, changedFiles: [], costUsd: null, createdAt: now, endedAt: null, userAction: null,
     };
     this.putManaged(m);
     this.emitAgent({
@@ -685,7 +752,9 @@ export class Orchestrator {
 
   /** FIFO toàn hệ thống; số worker đang chạy (kể cả limited) < maxParallel. */
   private pump(): void {
-    while (!this.closed && this.queue.length && this.workers.size < this.settings.maxParallel) this.startWorker(this.queue.shift()!);
+    // worker đang chờ người dùng không giữ slot
+    const active = (): number => [...this.workers.values()].filter((r) => !r.waitingUser).length;
+    while (!this.closed && this.queue.length && active() < this.settings.maxParallel) this.startWorker(this.queue.shift()!);
   }
 
   private startWorker(id: string): void {
@@ -707,13 +776,44 @@ export class Orchestrator {
       agentId: id, ticketId: t.id, role, agent: m.runner, label: `${ROLE_LABEL[role]}-${m.ordinal}`, parentId: controllerId(t.id),
       cwd: wt, model: m.model, effort: m.effort, prompt: workerPrompt(m, t.plan, wt),
       systemPrompt: systemPrompt(role, { worktree: wt, files: m.files, denyBash: this.settings.denyBash }),
-      sessionId: m.sessionId, resume: false, tools: [...WORKER_TOOLS[role]], allowedTools: [...WORKER_TOOLS[role]],
-      addDirs: [], runDir: this.runDir(id), mcp: null, guard: { port, token },
+      sessionId: m.sessionId, resume: false, ...this.workerTools(m.runner, role),
+      addDirs: [], runDir: this.runDir(id),
+      // claude: MCP riêng của worker (request_user_action), xác thực bằng token guard; codex chưa nối MCP
+      mcp: m.runner === 'claude' ? { url: `http://127.0.0.1:${port}/mcp?agent=${encodeURIComponent(id)}`, token } : null,
+      guard: { port, token },
     };
     this.saveManaged(id, { state: 'running' });
     this.emitAgent({ id, source: m.runner, sessionId: m.sessionId, status: 'running', lastEventAt: this.now() });
     const handle = this.launch(spec, this.sink(id));
-    this.workers.set(id, { handle, spec, retries: 0, timer: null, cost: null, files: [], last: null });
+    this.workers.set(id, { handle, spec, retries: 0, timer: null, cost: null, files: [], last: null, waitingUser: false, resumePrompt: null });
+    this.emitPid(id, spec, handle);
+    this.onEnd(spec, handle, (r) => this.onWorkerExit(id, handle, r));
+  }
+
+  private workerTools(runner: AgentKind, role: WorkRole): { tools: string[]; allowedTools: string[] } {
+    const t = runner === 'claude' ? [...WORKER_TOOLS[role], USER_ACTION_TOOL] : [...WORKER_TOOLS[role]];
+    return { tools: t, allowedTools: [...t] };
+  }
+
+  /** Chạy tiếp worker sau khi người dùng trả lời request_user_action. */
+  private async resumeWorker(id: string): Promise<void> {
+    const run = this.workers.get(id);
+    if (this.closed || !run || !run.resumePrompt) return;
+    const m = this.deps.tickets.getManaged(id);
+    const prompt = run.resumePrompt;
+    run.resumePrompt = null;
+    run.waitingUser = false;
+    if (!m || isTerminal(m.state)) return this.onWorkerDone(id, run.last!);
+    if (this.deps.tickets.getTicket(m.ticketId)?.status !== 'running') {
+      this.saveManaged(id, { state: 'stopped', stopReason: 'ticket không còn chạy' });
+      return this.onWorkerDone(id, run.last!);
+    }
+    const spec: RunSpec = { ...run.spec, resume: true, prompt };
+    this.saveManaged(id, { state: 'running' });
+    this.emitAgent({ id, source: m.runner, sessionId: m.sessionId, status: 'running', lastEventAt: this.now() });
+    const handle = this.launch(spec, this.sink(id));
+    run.handle = handle;
+    run.spec = spec;
     this.emitPid(id, spec, handle);
     this.onEnd(spec, handle, (r) => this.onWorkerExit(id, handle, r));
   }
@@ -727,6 +827,16 @@ export class Orchestrator {
     if (r.costUsd !== null) run.cost = (run.cost ?? 0) + r.costUsd;
     run.files = [...new Set([...run.files, ...relFiles(run.spec.cwd, r.changedFiles)])];
     const m = this.deps.tickets.getManaged(id);
+    // agent đã nhờ người dùng (request_user_action): đã có trả lời → chạy tiếp; chưa → chờ, nhả slot
+    if (m && !r.killed && !isTerminal(m.state) && (m.userAction || run.resumePrompt)) {
+      if (run.resumePrompt) return this.resumeWorker(id);
+      run.waitingUser = true;
+      this.saveManaged(id, { state: 'waiting' });
+      this.emitAgent({ id, source: m.runner, sessionId: m.sessionId, status: 'idle' });
+      this.log(m.ticketId, `${run.spec.label} chờ bạn: ${m.userAction!.title}`);
+      this.pump();
+      return;
+    }
     if (m && r.rateLimited && !r.killed && !isTerminal(m.state)) {
       const ms = this.delays[run.retries];
       if (ms !== undefined) {
@@ -777,17 +887,23 @@ export class Orchestrator {
       run.timer = null;
       return this.onWorkerDone(id, run.last!);
     }
+    if (run.waitingUser) {
+      // tiến trình đã thoát; không có gì để kill
+      run.waitingUser = false;
+      run.resumePrompt = null;
+      return this.onWorkerDone(id, run.last!);
+    }
     await run.handle.kill();
   }
 
   /** Worker còn sống: queued/running/limited, hoặc đã dừng nhưng tiến trình chưa thoát hẳn. */
   private liveWorkers(T: string): ManagedAgent[] {
-    return this.deps.tickets.listManaged(T).filter((m) => m.role !== 'controller' && (LIVE.includes(m.state) || this.workers.has(m.agentId)));
+    return this.deps.tickets.listManaged(T).filter((m) => m.role !== 'controller' && (isWorkerLive(m) || this.workers.has(m.agentId)));
   }
 
   private async stopLiveWorkers(T: string, reason: string): Promise<void> {
     // agent đang xếp hàng ra khỏi hàng trước, để slot được giải phóng không khởi chạy chúng
-    const live = this.liveWorkers(T).filter((m) => LIVE.includes(m.state)).sort((a, b) => Number(b.state === 'queued') - Number(a.state === 'queued'));
+    const live = this.liveWorkers(T).filter(isWorkerLive).sort((a, b) => Number(b.state === 'queued') - Number(a.state === 'queued'));
     await Promise.all(live.map((m) => this.stopWorker(m, reason)));
   }
 
@@ -816,6 +932,7 @@ export class Orchestrator {
     const state: ManagedState = isTerminal(m.state) ? m.state : r.isError ? 'failed' : 'done';
     this.saveManaged(id, {
       state, resultText: r.text, changedFiles: run ? run.files : relFiles('', r.changedFiles), costUsd: run ? run.cost : r.costUsd, endedAt: this.now(),
+      userAction: null,
     });
     this.emitAgent({ id, source: m.runner, sessionId: m.sessionId, status: 'ended' });
     this.log(m.ticketId, `${id} ${state === 'done' ? 'xong' : state === 'failed' ? 'thất bại' : state}`);

@@ -22,3 +22,4 @@
 .stop:hover:not(:disabled) { background: color-mix(in srgb, var(--err) 15%, transparent); }
 .stop:disabled { opacity: 0.6; cursor: default; }
 .err { font-size: 11px; color: var(--err); overflow-wrap: anywhere; }
+.need { display: flex; justify-content: space-between; gap: 8px; align-items: center; margin-top: 6px; padding: 4px 8px; border: 1px solid var(--warn); border-radius: 6px; color: var(--warn); font-size: 12px; }

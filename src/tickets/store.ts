@@ -38,6 +38,7 @@ function toManaged(r: Row): ManagedAgent {
     task: r.task, files: unjson(r.files) ?? [], runner: r.runner, model: r.model, effort: r.effort,
     sessionId: r.session_id, state: r.state, stopReason: r.stop_reason ?? null, resultText: r.result_text ?? null,
     changedFiles: unjson(r.changed_files) ?? [], costUsd: r.cost_usd ?? null, createdAt: r.created_at, endedAt: r.ended_at ?? null,
+    userAction: unjson(r.user_action),
   };
 }
 
@@ -49,7 +50,7 @@ const TICKET_COLS = [
 ];
 const MANAGED_COLS = [
   'agent_id', 'ticket_id', 'role', 'ordinal', 'package_id', 'task', 'files', 'runner', 'model', 'effort', 'session_id',
-  'state', 'stop_reason', 'result_text', 'changed_files', 'cost_usd', 'created_at', 'ended_at',
+  'state', 'stop_reason', 'result_text', 'changed_files', 'cost_usd', 'created_at', 'ended_at', 'user_action',
 ];
 const placeholders = (cols: string[]): string => cols.map(() => '?').join(', ');
 
@@ -59,7 +60,7 @@ const ticketVals = (t: Ticket): unknown[] => [
 ];
 const managedVals = (m: ManagedAgent): unknown[] => [
   m.agentId, m.ticketId, m.role, m.ordinal, m.packageId, m.task, JSON.stringify(m.files), m.runner, m.model, m.effort, m.sessionId,
-  m.state, m.stopReason, m.resultText, JSON.stringify(m.changedFiles), m.costUsd, m.createdAt, m.endedAt,
+  m.state, m.stopReason, m.resultText, JSON.stringify(m.changedFiles), m.costUsd, m.createdAt, m.endedAt, json(m.userAction ?? null),
 ];
 
 export class TicketStore {
@@ -68,6 +69,9 @@ export class TicketStore {
   constructor(private store: Store) {
     this.db = store.database;
     this.db.exec(SCHEMA);
+    // DB tạo trước khi có cột này
+    const cols = (this.db.prepare('PRAGMA table_info(managed_agents)').all() as Row[]).map((c) => c.name);
+    if (!cols.includes('user_action')) this.db.exec('ALTER TABLE managed_agents ADD COLUMN user_action TEXT');
   }
 
   nextTicketId(): string {

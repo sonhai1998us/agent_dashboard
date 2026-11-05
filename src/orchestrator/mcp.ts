@@ -51,7 +51,9 @@ const PLAN_SCHEMA = {
   required: ['summary', 'difficulty', 'packages', 'roles', 'acceptance'],
 };
 
-export const TOOL_DEFS: { name: 'propose_plan' | 'spawn_agent' | 'wait_agents' | 'get_agent_log' | 'finish'; description: string; inputSchema: object }[] = [
+export const USER_ACTION_LIMITS = { title: 120, message: 2000, url: 2000, command: 500 };
+
+export const TOOL_DEFS: { name: 'propose_plan' | 'spawn_agent' | 'wait_agents' | 'get_agent_log' | 'finish' | 'request_user_action'; description: string; inputSchema: object }[] = [
   {
     name: 'propose_plan',
     description: `Gửi kế hoạch cho người dùng duyệt trước khi giao việc. ${WAIT_NOTE} Chỉ sau khi được duyệt mới được gọi spawn_agent.`,
@@ -100,6 +102,23 @@ export const TOOL_DEFS: { name: 'propose_plan' | 'spawn_agent' | 'wait_agents' |
       required: ['report', 'status'],
     },
   },
+  {
+    name: 'request_user_action',
+    description:
+      'Nhờ người dùng làm việc bạn không tự làm được: đăng nhập (CLI, trình duyệt, SSO, OTP), mở một link, cấp quyền, chạy lệnh cần terminal thật. ' +
+      'Dashboard hiện hộp thoại cho người dùng kèm link và lệnh. Sau khi gọi, hãy kết thúc lượt ngay; khi người dùng trả lời, bạn được gọi lại trong cùng phiên để làm tiếp.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        title: { type: 'string', maxLength: USER_ACTION_LIMITS.title, description: 'Việc cần làm, ngắn (vd. "Đăng nhập twg").' },
+        message: { type: 'string', maxLength: USER_ACTION_LIMITS.message, description: 'Hướng dẫn từng bước cho người dùng.' },
+        url: { type: 'string', maxLength: USER_ACTION_LIMITS.url, description: 'Link http(s) người dùng cần mở, nếu có.' },
+        command: { type: 'string', maxLength: USER_ACTION_LIMITS.command, description: 'Lệnh người dùng cần tự chạy trong terminal của họ, nếu có.' },
+      },
+      required: ['title', 'message'],
+    },
+  },
 ];
 
 type Resp = Record<string, unknown>;
@@ -117,7 +136,8 @@ async function one(msg: unknown, tools: Record<string, ToolImpl>): Promise<Resp 
     case 'ping':
       return { jsonrpc: '2.0', id, result: {} };
     case 'tools/list':
-      return { jsonrpc: '2.0', id, result: { tools: TOOL_DEFS } };
+      // chỉ liệt kê tool mà phía gọi được dùng (Controller hoặc worker)
+      return { jsonrpc: '2.0', id, result: { tools: TOOL_DEFS.filter((d) => Object.prototype.hasOwnProperty.call(tools, d.name)) } };
     case 'tools/call': {
       const name = String(params.name ?? '');
       const impl = Object.prototype.hasOwnProperty.call(tools, name) ? tools[name] : undefined;
