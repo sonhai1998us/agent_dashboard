@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { existsSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import * as git from '@/src/git/git';
@@ -502,5 +502,111 @@ describe('các trường hợp riêng', () => {
     runOf(env, dev2)!.finish({});
     await env.orch.idle();
     expect(env.tickets.getManaged(qc1)!.state).toBe('running');
+  });
+});
+
+describe('bản sửa sau review cuối', () => {
+  beforeEach(() => { env = makeEnv({ delays: { rateLimitMs: [10, 10, 10] } }); });
+  const failingHook = (repo: string) => writeFileSync(join(repo, '.git', 'hooks', 'pre-commit'), '#!/bin/sh\necho hook-chan >&2\nexit 1\n', { mode: 0o755 });
+
+  it('spawn: vai có count 0 trong kế hoạch bị từ chối; đủ số lượng thì phải chờ', async () => {
+    const T = await toRunning(env);
+    const tools = env.orch.mcpTools(T);
+    expect(await tools.spawn_agent({ role: 'designer', task: 'ui', files: [] })).toEqual({ isError: true, text: 'Kế hoạch đã duyệt không có vai designer' });
+    expect((await tools.spawn_agent({ role: 'qc', task: 'r', files: [] })).isError).toBeFalsy();
+    expect(await tools.spawn_agent({ role: 'qc', task: 'r2', files: [] })).toEqual({ isError: true, text: 'Đã đủ 1 qc theo kế hoạch đã duyệt; hãy chờ wait_agents' });
+    expect((await tools.spawn_agent({ role: 'dev', task: 'a', files: ['src/a.ts'] })).isError).toBeFalsy();
+    expect((await tools.spawn_agent({ role: 'dev', task: 'b', files: ['src/b.ts'] })).isError).toBeFalsy();
+    expect((await tools.spawn_agent({ role: 'dev', task: 'c', files: ['src/c.ts'] })).text).toBe('Đã đủ 2 dev theo kế hoạch đã duyệt; hãy chờ wait_agents');
+    // đã dừng nhưng tiến trình chưa thoát vẫn tính
+    env.fake.deferKill = true;
+    await env.orch.stopAgent(ids(T).qc1, 'người dùng dừng');
+    expect((await tools.spawn_agent({ role: 'qc', task: 'r2', files: [] })).isError).toBe(true);
+    runOf(env, ids(T).qc1)!.finish({ killed: true, isError: true });
+    await env.orch.idle();
+    expect((await tools.spawn_agent({ role: 'qc', task: 'r2', files: [] })).text).toContain(`acctv:${T}:qc-2`);
+  });
+
+  it('createTicket: thư mục trong ACCTV_HOME, ~/.claude hoặc ~/.codex → 400', async () => {
+    for (const base of [env.cfg.home, env.cfg.claudeDir, env.cfg.codexDir]) {
+      const d = join(base, 'repo');
+      mkdirSync(d, { recursive: true });
+      g(d, 'init', '-q');
+      for (const dir of [d, process.platform === 'win32' ? d.toUpperCase() : d]) {
+        await expect(env.orch.createTicket({ title: 'x', description: '', dir })).rejects.toMatchObject({
+          status: 400, message: 'Không được tạo ticket trong thư mục của dashboard, Claude hoặc Codex',
+        });
+      }
+    }
+    expect(env.tickets.listTickets()).toEqual([]);
+  });
+
+  it('nhánh acctv/<T>-<slug> đã có (ACCTV_HOME mới) → thêm hậu tố -2', async () => {
+    g(env.repo, 'branch', 'acctv/T-1-trang-dang-nhap');
+    const T = await toRunning(env);
+    expect(env.tickets.getTicket(T)!).toMatchObject({ status: 'running', branch: 'acctv/T-1-trang-dang-nhap-2' });
+    expect(g(env.repo, 'branch', '--list', 'acctv/T-1-trang-dang-nhap-2')).toContain('acctv/T-1-trang-dang-nhap-2');
+  });
+
+  it('pre-commit hook lỗi: snapshot vòng ghi log lỗi, Controller vẫn được đánh thức', async () => {
+    failingHook(env.repo);
+    const T = await toRunning(env);
+    const tools = env.orch.mcpTools(T);
+    const { ctrl, dev1 } = ids(T);
+    await tools.spawn_agent({ role: 'dev', task: 'a', files: ['src/a.ts'] });
+    await tools.wait_agents({ ids: [dev1] });
+    runOf(env, ctrl)!.finish({});
+    await env.orch.idle();
+    const wt = env.tickets.getTicket(T)!.worktree!;
+    writeFileSync(join(wt, 'src', 'a.ts'), 'export const a = 1;\n');
+    runOf(env, dev1)!.finish({ text: 'xong' });
+    await env.orch.idle();
+    expect(env.tickets.listLog(T).map((l) => l.text).some((l) => l.startsWith('Snapshot vòng 1 lỗi:'))).toBe(true);
+    expect(env.tickets.getTicket(T)!.round).toBe(1);
+    expect(runOf(env, ctrl)!.spec.prompt.startsWith('Các agent đã xong')).toBe(true);
+    expect(env.tickets.getManaged(ctrl)!.state).toBe('running');
+  });
+
+  it('xoá worktree: snapshot lỗi và worktree còn thay đổi → 409, worktree giữ nguyên', async () => {
+    const T = await toRunning(env);
+    await env.orch.cancel(T);
+    await env.orch.idle();
+    const wt = env.tickets.getTicket(T)!.worktree!;
+    failingHook(env.repo);
+    writeFileSync(join(wt, 'src', 'moi.ts'), 'export const m = 1;\n');
+    await expect(env.orch.removeWorktree(T)).rejects.toMatchObject({
+      status: 409, message: 'Không commit được snapshot; worktree còn thay đổi chưa lưu. Xử lý rồi thử lại, hoặc xoá thủ công.',
+    });
+    expect(existsSync(join(wt, 'src', 'moi.ts'))).toBe(true);
+    expect(env.tickets.getTicket(T)!.worktree).toBe(wt);
+    // hết thay đổi → không cần commit, xoá được dù hook vẫn lỗi
+    g(wt, 'reset', '-q', '--hard');
+    g(wt, 'clean', '-fdq');
+    expect((await env.orch.removeWorktree(T)).worktree).toBeNull();
+    expect(existsSync(wt)).toBe(false);
+  });
+
+  it('codex worker bị giới hạn: thử lại bằng thread id thật của Codex', async () => {
+    const fake = createFakeRunner();
+    cleanup(env);
+    env = makeEnv({ runners: { codex: fake.runner }, delays: { rateLimitMs: [10, 10, 10] } });
+    env.cfg.settings.allowedModels.codex = ['gpt-x'];
+    const T = await toRunning(env);
+    const { qc1 } = ids(T);
+    await env.orch.mcpTools(T).spawn_agent({ role: 'qc', task: 'r', files: [], agent: 'codex', model: 'gpt-x' });
+    const r0 = fake.runs[0];
+    expect(r0.spec.sessionId).toBe('sid-2');
+    r0.emit([{ type: 'agent', agent: { id: qc1, source: 'codex', sessionId: 'thr-9' } }]);
+    expect(env.tickets.getManaged(qc1)!.sessionId).toBe('thr-9');
+    r0.finish({ rateLimited: true, isError: true, sessionId: 'thr-9' });
+    await env.orch.idle();
+    await vi.waitFor(() => expect(fake.runs).toHaveLength(2));
+    expect(fake.runs[1].spec).toMatchObject({ resume: true, sessionId: 'thr-9' });
+    // chỉ có RunResult (không có agent event) cũng đủ
+    fake.runs[1].finish({ rateLimited: true, isError: true, sessionId: 'thr-10' });
+    await env.orch.idle();
+    await vi.waitFor(() => expect(fake.runs).toHaveLength(3));
+    expect(fake.runs[2].spec.sessionId).toBe('thr-10');
+    expect(env.tickets.getManaged(qc1)!.sessionId).toBe('thr-10');
   });
 });

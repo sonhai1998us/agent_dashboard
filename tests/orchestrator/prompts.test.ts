@@ -59,6 +59,7 @@ describe('turn', () => {
     expect(turn.first(t)).toContain('propose_plan');
     expect(turn.approved(plan, 'D:\\wt').startsWith('Kế hoạch đã được duyệt')).toBe(true);
     expect(turn.approved(plan, 'D:\\wt')).toContain('D:\\wt');
+    expect(turn.approved(plan, 'D:\\wt')).toMatch(/chưa cài dependency: Dev đầu tiên cần cài trong worktree \(vd\. `npm ci` hoặc `npm install`\)/);
     expect(turn.revised('thêm test').startsWith('Người dùng góp ý')).toBe(true);
     expect(turn.revised('thêm test')).toContain('thêm test');
     expect(turn.restarted().startsWith('Dashboard vừa khởi động lại')).toBe(true);

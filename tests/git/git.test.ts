@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync, readFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { gitInfo, createWorktree, snapshotCommit, diffStat, removeWorktree, gitInit, worktreePath } from '@/src/git/git';
+import { gitInfo, createWorktree, snapshotCommit, diffStat, removeWorktree, gitInit, worktreePath, uniqueBranch, GIT_TIMEOUT_MS } from '@/src/git/git';
 
 const g = (dir: string, ...a: string[]) => execFileSync('git', ['-C', dir, ...a], { encoding: 'utf8' });
 
@@ -62,6 +62,47 @@ describe('git helpers', () => {
   it('errors carry stderr', async () => {
     await expect(createWorktree(repo, 'acctv/x', join(root, 'x'))).resolves.toBeTruthy();
     await expect(createWorktree(repo, 'acctv/x', join(root, 'y'))).rejects.toThrow(/already exists|acctv\/x/);
+  });
+
+  it('snapshot ignores commit.gpgsign=true in the repo config', async () => {
+    const r = join(root, 'signed');
+    mkdirSync(r);
+    g(r, 'init', '-q');
+    writeFileSync(join(r, 'a.txt'), 'a\n');
+    g(r, 'add', '-A');
+    g(r, '-c', 'user.name=T', '-c', 'user.email=t@localhost', 'commit', '-q', '-m', 'first');
+    g(r, 'config', 'commit.gpgsign', 'true');
+    g(r, 'config', 'gpg.program', join(root, 'khong-co-gpg.exe'));
+    writeFileSync(join(r, 'b.txt'), 'b\n');
+    expect(await snapshotCommit(r, 'snap')).toMatch(/^[0-9a-f]{40}$/);
+  });
+
+  it('a hanging pre-commit hook times out the snapshot instead of stalling', async () => {
+    const r = join(root, 'hooked');
+    mkdirSync(r);
+    g(r, 'init', '-q');
+    writeFileSync(join(r, 'a.txt'), 'a\n');
+    g(r, 'add', '-A');
+    g(r, '-c', 'user.name=T', '-c', 'user.email=t@localhost', 'commit', '-q', '-m', 'first');
+    writeFileSync(join(r, '.git', 'hooks', 'pre-commit'), '#!/bin/sh\nsleep 30\n', { mode: 0o755 });
+    writeFileSync(join(r, 'b.txt'), 'b\n');
+    const saved = GIT_TIMEOUT_MS.commit;
+    GIT_TIMEOUT_MS.commit = 1500;
+    try {
+      const t0 = Date.now();
+      await expect(snapshotCommit(r, 'snap')).rejects.toThrow(/git commit lỗi: quá 1\.5s/);
+      expect(Date.now() - t0).toBeLessThan(10_000);
+    } finally {
+      GIT_TIMEOUT_MS.commit = saved;
+    }
+  }, 20_000);
+
+  it('uniqueBranch suffixes -2, -3 … when the branch already exists', async () => {
+    expect(await uniqueBranch(repo, 'acctv/T-7-moi')).toBe('acctv/T-7-moi');
+    g(repo, 'branch', 'acctv/T-7-moi');
+    expect(await uniqueBranch(repo, 'acctv/T-7-moi')).toBe('acctv/T-7-moi-2');
+    g(repo, 'branch', 'acctv/T-7-moi-2');
+    expect(await uniqueBranch(repo, 'acctv/T-7-moi')).toBe('acctv/T-7-moi-3');
   });
 
   it('gitInit on a plain dir', async () => {

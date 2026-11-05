@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import type http from 'node:http';
 import path from 'node:path';
 import { saveSettings, validateSettings } from '@/src/core/config';
+import { inside } from '@/src/core/paths';
 import { agentMetrics, globalMetrics, type AgentMetrics } from '@/src/core/metrics';
 import { gitInfo, gitInit } from '@/src/git/git';
 import { handleMcp } from '@/src/orchestrator/mcp';
@@ -94,14 +95,6 @@ function absDir(v: unknown): string {
   const ok = typeof v === 'string' && !!v && (WIN ? /^[A-Za-z]:[\\/]/.test(v) : path.isAbsolute(v));
   if (!ok) throw new HttpError(400, WIN ? 'dir phải là đường dẫn tuyệt đối có ổ đĩa (vd. D:\\du-an)' : 'dir phải là đường dẫn tuyệt đối');
   return path.resolve(v as string);
-}
-
-/** dir là root hoặc nằm trong root (không phân biệt hoa thường trên Windows). */
-function inside(dir: string, root: string): boolean {
-  const norm = (p: string): string => (WIN ? path.resolve(p).toLowerCase() : path.resolve(p));
-  const d = norm(dir);
-  const r = norm(root).replace(/[\\/]+$/, '');
-  return d === r || d.startsWith(r + path.sep);
 }
 
 function overrides(v: unknown, core: Core): Ticket['overrides'] {

@@ -470,6 +470,7 @@ describe('huỷ trong lúc duyệt đang tạo worktree', () => {
   it('tạo worktree lỗi sau khi huỷ → ticket vẫn cancelled', async () => {
     let fail!: (e: Error) => void;
     const gate = new Promise<never>((_, rej) => { fail = rej; });
+    gate.catch(() => {}); // có thể bị reject trước khi approve (còn chờ uniqueBranch) gọi tới createWorktree
     const T = await setup(async () => gate);
     const approving = env.orch.approve(T);
     await env.orch.cancel(T);
@@ -559,5 +560,26 @@ describe('recover sau khi dashboard khởi động lại', () => {
     }
     expect(tickets.getManaged(ids(T).ctrl)!.state).toBe('running');
     expect(env.tickets.listLog(T).some((l) => l.text.includes('khởi động lại'))).toBe(true);
+  });
+
+  it('Controller waiting mà không còn pendingWait (dừng giữa lúc đánh thức) → lượt restarted', async () => {
+    const T = await toRunning(env);
+    const { ctrl, dev1 } = ids(T);
+    const tools = env.orch.mcpTools(T);
+    await tools.spawn_agent({ role: 'dev', task: 'a', files: ['src/a.ts'] });
+    await tools.wait_agents({ ids: [dev1] });
+    runOf(env, ctrl)!.finish({});
+    await env.orch.idle();
+    expect(env.tickets.getManaged(ctrl)!.state).toBe('waiting');
+    // checkWait đã xoá pendingWait rồi dashboard tắt trước khi lượt agentsDone kịp chạy
+    env.tickets.updateTicket(T, { pendingWait: null, round: 1 });
+    const orch2 = env.reopen();
+    const n = env.runs.length;
+    await orch2.recover();
+    await orch2.idle();
+    expect(env.runs).toHaveLength(n + 1);
+    expect(env.runs[n].spec).toMatchObject({ agentId: ctrl, resume: true });
+    expect(env.runs[n].spec.prompt.startsWith('Dashboard vừa khởi động lại')).toBe(true);
+    expect(env.tickets.getManaged(ctrl)!.state).toBe('running');
   });
 });

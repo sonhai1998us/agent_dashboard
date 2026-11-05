@@ -8,6 +8,7 @@ import type { TicketStore } from '@/src/tickets/store';
 import { TERMINAL_STATES, type AgentKind, type ManagedAgent, type ManagedState, type Plan, type Role, type RoleSpec, type Ticket, type TicketStatus, type WaitSpan, type WorkRole } from '@/src/tickets/model';
 import { branchName, filesOverlap, transition, validatePlan, type TicketEvent } from '@/src/tickets/flow';
 import { checkTool, type GuardPolicy } from '@/src/guard/policy';
+import { inside } from '@/src/core/paths';
 import type { Runner, RunHandle, RunResult, RunSink, RunSpec } from '@/src/runner/types';
 import type { ToolImpl, ToolResult } from './mcp';
 import { systemPrompt, turn, workerPrompt } from './prompts';
@@ -122,6 +123,8 @@ export class Orchestrator {
 
   async createTicket(input: { title: string; description: string; dir: string; overrides?: Ticket['overrides'] }): Promise<Ticket> {
     const dir = path.resolve(input.dir);
+    const { home, claudeDir, codexDir } = this.deps.cfg;
+    if ([home, claudeDir, codexDir].some((r) => inside(dir, r))) throw new OrchestratorError(400, 'Không được tạo ticket trong thư mục của dashboard, Claude hoặc Codex');
     if (!(await this.deps.git.gitInfo(dir)).isGit) throw new OrchestratorError(400, 'Thư mục không phải git repo');
     if (!this.deps.runners.claude) throw new OrchestratorError(400, NO_CLI.claude);
     const id = this.deps.tickets.nextTicketId();
@@ -158,10 +161,12 @@ export class Orchestrator {
     if (!plan) throw new OrchestratorError(409, 'Ticket chưa có kế hoạch');
     // chuyển trạng thái trước mọi await: lần duyệt đồng thời thứ hai nhận 409
     this.move(ticketId, 'approve', { plan });
-    const branch = branchName(ticketId, t.title);
     const wt = this.deps.git.worktreePath(this.deps.cfg.home, t.dir, ticketId);
+    let branch: string;
     let baseRef: string;
     try {
+      // ACCTV_HOME mới đánh số ticket lại từ T-1: nhánh cũ cùng tên còn trong repo → thêm hậu tố
+      branch = await this.deps.git.uniqueBranch(t.dir, branchName(ticketId, t.title));
       ({ baseRef } = await this.deps.git.createWorktree(t.dir, branch, wt));
     } catch (e) {
       // bị huỷ trong lúc chờ thì giữ cancelled
@@ -234,8 +239,11 @@ export class Orchestrator {
     if (this.liveWorkers(ticketId).length) throw new OrchestratorError(409, 'Còn agent đang chạy trong worktree');
     this.removing.add(ticketId);
     try {
-      // remove --force bỏ file chưa commit → snapshot lên nhánh trước; snapshot lỗi thì vẫn xoá
-      await this.snapshot(ticketId, wt, `acctv: ${ticketId} trước khi xoá worktree`, 'Snapshot trước khi xoá worktree');
+      // remove --force bỏ file chưa commit → snapshot lên nhánh trước; snapshot lỗi mà còn thay đổi thì không xoá
+      if (!(await this.snapshot(ticketId, wt, `acctv: ${ticketId} trước khi xoá worktree`, 'Snapshot trước khi xoá worktree'))) {
+        const dirty = await this.deps.git.gitInfo(wt).then((i) => i.dirty, () => true);
+        if (dirty) throw new OrchestratorError(409, 'Không commit được snapshot; worktree còn thay đổi chưa lưu. Xử lý rồi thử lại, hoặc xoá thủ công.');
+      }
       try {
         await this.deps.git.removeWorktree(t.dir, wt);
       } catch (e) {
@@ -270,7 +278,8 @@ export class Orchestrator {
         this.ctrlWaiting(t.id, 'approval');
       }
       else if (t.pendingWait) await this.checkWait(t.id);
-      else if (this.deps.tickets.getManaged(controllerId(t.id))?.state !== 'waiting') this.restartTurn(t.id);
+      // không còn gì để chờ (kể cả Controller waiting khi dừng giữa lúc xoá pendingWait và lượt agentsDone) → gọi lại Controller
+      else this.restartTurn(t.id);
     }
   }
 
@@ -383,6 +392,9 @@ export class Orchestrator {
     if (role === 'dev' && t.round >= t.maxRounds) {
       return fail(`Đã hết ${t.maxRounds} vòng; hãy gọi finish với status "escalated" và nêu lỗi còn lại`);
     }
+    const count = t.plan.roles[role]?.count ?? 0;
+    if (count <= 0) return fail(`Kế hoạch đã duyệt không có vai ${role}`);
+    if (this.liveWorkers(T).filter((m) => m.role === role).length >= count) return fail(`Đã đủ ${count} ${role} theo kế hoạch đã duyệt; hãy chờ wait_agents`);
     const task = isStr(args.task) ? args.task.trim() : '';
     if (!task) return fail('task không được rỗng');
     if (!Array.isArray(args.files) || !args.files.every(isStr)) return fail('files phải là mảng chuỗi');
@@ -711,6 +723,7 @@ export class Orchestrator {
     const run = this.workers.get(id);
     if (!run || run.handle !== handle) return;
     run.last = r;
+    if (run.spec.agent === 'codex' && r.sessionId) this.adoptSession(id, r.sessionId);
     if (r.costUsd !== null) run.cost = (run.cost ?? 0) + r.costUsd;
     run.files = [...new Set([...run.files, ...relFiles(run.spec.cwd, r.changedFiles)])];
     const m = this.deps.tickets.getManaged(id);
@@ -778,6 +791,14 @@ export class Orchestrator {
     await Promise.all(live.map((m) => this.stopWorker(m, reason)));
   }
 
+  /** Codex tự đặt thread id: dùng nó cho `exec resume <thread_id>` và ghi lại vào managed. */
+  private adoptSession(id: string, sessionId: string): void {
+    const run = this.workers.get(id);
+    if (run && run.spec.sessionId !== sessionId) run.spec = { ...run.spec, sessionId };
+    const m = this.deps.tickets.getManaged(id);
+    if (m && m.role !== 'controller' && m.sessionId !== sessionId) this.saveManaged(id, { sessionId });
+  }
+
   private setLimited(id: string, on: boolean): void {
     const m = this.deps.tickets.getManaged(id);
     if (!m) return;
@@ -829,12 +850,15 @@ export class Orchestrator {
     });
   }
 
-  private async snapshot(T: string, wt: string, message: string, label: string): Promise<void> {
+  /** false khi commit lỗi (hook, quá thời gian…); lỗi chỉ được ghi log. */
+  private async snapshot(T: string, wt: string, message: string, label: string): Promise<boolean> {
     try {
       const sha = await this.deps.git.snapshotCommit(wt, message);
       this.log(T, sha ? `${label}: ${sha.slice(0, 7)}` : `${label}: không có thay đổi`);
+      return true;
     } catch (e) {
       this.log(T, `${label} lỗi: ${errMsg(e)}`);
+      return false;
     }
   }
 
@@ -868,7 +892,11 @@ export class Orchestrator {
         if (this.closed) return;
         try {
           this.deps.ingest(evs);
-          for (const e of evs) if (e.type === 'agent' && e.agent.source === 'codex' && e.agent.id === agentId) this.deps.store.dropAgent(`codex:${e.agent.sessionId}`);
+          for (const e of evs) {
+            if (e.type !== 'agent' || e.agent.source !== 'codex' || e.agent.id !== agentId) continue;
+            this.deps.store.dropAgent(`codex:${e.agent.sessionId}`);
+            this.adoptSession(agentId, e.agent.sessionId);
+          }
         } catch (e) {
           console.warn(`[acctv] ingest ${agentId} lỗi: ${errMsg(e)}`);
         }

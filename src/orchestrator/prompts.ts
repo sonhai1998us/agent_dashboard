@@ -88,6 +88,7 @@ export const turn = {
     'Hãy đọc code liên quan, lập kế hoạch rồi gọi propose_plan. Sau đó kết thúc lượt.',
   approved: (plan: Plan, worktree: string): string =>
     `Kế hoạch đã được duyệt. Worktree của ticket: ${worktree}\n\nKế hoạch được duyệt (người dùng có thể đã sửa):\n${JSON.stringify(plan, null, 2)}\n\n` +
+    'Worktree mới tạo chưa cài dependency: Dev đầu tiên cần cài trong worktree (vd. `npm ci` hoặc `npm install`) trước khi các Dev song song chạy build/test.\n\n' +
     'Hãy giao việc bằng spawn_agent theo các gói, rồi gọi wait_agents và kết thúc lượt.',
   revised: (feedback: string): string =>
     `Người dùng góp ý về kế hoạch:\n${feedback}\n\nHãy sửa kế hoạch theo góp ý rồi gọi lại propose_plan, sau đó kết thúc lượt.`,
