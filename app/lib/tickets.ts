@@ -35,7 +35,7 @@ export const managedStateText = (s: ManagedState): StatusText => MANAGED[s];
 export const isExternal = (a: AgentInfo): boolean => !isManagedId(a.id);
 
 export function layoutWaits(
-  waits: WaitSpan[], agentId: string, win: { start: number; end: number }, width: number,
+  waits: WaitSpan[], agentId: string, win: { start: number; end: number }, width: number, now: number = win.end,
 ): { x: number; w: number; title: string }[] {
   const span = win.end - win.start;
   if (span <= 0 || width <= 0) return [];
@@ -48,14 +48,14 @@ export function layoutWaits(
     const x = px(w.startedAt);
     out.push({
       x, w: Math.max(2, px(end) - x),
-      title: `${w.kind === 'approval' ? 'chờ duyệt kế hoạch' : 'chờ subagent'} · ${fmtDuration(end - w.startedAt)}`,
+      title: `${w.kind === 'approval' ? 'chờ duyệt kế hoạch' : 'chờ subagent'} · ${fmtDuration((w.endedAt ?? now) - w.startedAt)}`,
     });
   }
   return out;
 }
 
 export function replayRange(nodes: AgentInfo[], now: number): { min: number; max: number; live: boolean } {
-  const live = nodes.some((n) => n.status === 'running' || n.status === 'queued' || n.status === 'limited');
+  const live = nodes.some((n) => n.status !== 'ended');
   const min = nodes.length ? Math.min(...nodes.map((n) => n.startedAt)) : now;
   const max = live ? now : nodes.length ? Math.max(...nodes.map((n) => n.lastEventAt)) : now;
   return { min, max, live };

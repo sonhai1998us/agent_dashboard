@@ -49,6 +49,9 @@ describe('layoutWaits', () => {
     ], 'a', win, 600);
     expect(r).toEqual([{ x: 60, w: 60, title: 'chờ subagent · 1m00' }]);
   });
+  test('span mở: tooltip tính theo now', () => {
+    expect(layoutWaits([w({ startedAt: 300_000, endedAt: null })], 'a', win, 200, 900_000)[0].title).toBe('chờ duyệt kế hoạch · 10m00');
+  });
   test('chờ duyệt kế hoạch', () => {
     expect(layoutWaits([w({ startedAt: 0, endedAt: 30_000 })], 'a', win, 600)[0].title).toBe('chờ duyệt kế hoạch · 30s');
   });
@@ -58,6 +61,9 @@ describe('replayRange', () => {
   const a = (o: Partial<AgentInfo>): AgentInfo => ({ id: 'x', status: 'ended', startedAt: 10, lastEventAt: 50, ...o } as AgentInfo);
   test('tất cả đã kết thúc: không live, max = lastEventAt lớn nhất', () => {
     expect(replayRange([a({ startedAt: 20, lastEventAt: 50 }), a({ startedAt: 10, lastEventAt: 90 })], 1000)).toEqual({ min: 10, max: 90, live: false });
+  });
+  test('node idle vẫn live, max = now', () => {
+    expect(replayRange([a({ status: 'idle' as AgentInfo['status'] })], 1000)).toEqual({ min: 10, max: 1000, live: true });
   });
   test('queued/limited/running là live', () => {
     expect(replayRange([a({}), a({ status: 'queued' })], 1000)).toEqual({ min: 10, max: 1000, live: true });

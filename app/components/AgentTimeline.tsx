@@ -104,8 +104,8 @@ export default function AgentTimeline() {
     [nodes, frame, win, width],
   );
   const laneWaits = useMemo(
-    () => nodes.map((n) => layoutWaits(frame.waits, n.agent.id, win, width)),
-    [nodes, frame.waits, win, width],
+    () => nodes.map((n) => layoutWaits(frame.waits, n.agent.id, win, width, frame.now)),
+    [nodes, frame.waits, frame.now, win, width],
   );
 
   const showTip = useCallback((text: string, el: Element, mouse?: { x: number; y: number }) => {
