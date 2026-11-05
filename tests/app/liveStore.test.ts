@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import type { AgentInfo, Alert, CallRecord } from '@/src/core/model';
+import type { Ticket } from '@/src/tickets/model';
 import { initialState, reduce, selectAgentMetrics, staleCallAgents, type LiveState } from '@/app/lib/liveStore';
 
 const call = (id: string, startedAt: number, o: Partial<CallRecord> = {}): CallRecord => ({
@@ -156,5 +157,44 @@ describe('nối lại: tải lại calls', () => {
     expect(staleCallAgents(s)).toEqual(['b']);
     s = reduce(s, { type: 'calls', agentId: 'b', calls: [], gen: 0 }); // phản hồi trễ của thế hệ cũ
     expect(staleCallAgents(s)).toEqual(['b']);
+  });
+});
+
+const ticket = (o: Partial<Ticket> = {}): Ticket => ({ id: 'T-1', title: 't', status: 'draft', round: 0, maxRounds: 3, updatedAt: 10, ...o } as Ticket);
+const snap = (generatedAt: number, tickets: Ticket[]) => ({
+  type: 'snapshot' as const, generatedAt, agents: [], alerts: [], tickets, managed: [], waits: [],
+  metrics: { running: 0, alerts: 0, okRate1h: null, p50_1h: null }, agentMetrics: {},
+});
+
+describe('reduce: tickets', () => {
+  test('ticket cũ hơn không ghi đè', () => {
+    let s = reduce(initialState(), { type: 'ticket', ticket: ticket({ status: 'running', updatedAt: 20 }) });
+    s = reduce(s, { type: 'ticket', ticket: ticket({ status: 'draft', updatedAt: 10 }) });
+    expect(s.tickets['T-1'].status).toBe('running');
+    s = reduce(s, { type: 'ticket', ticket: ticket({ status: 'done', updatedAt: 30 }) });
+    expect(s.tickets['T-1'].status).toBe('done');
+  });
+  test('snapshot giữ ticket mới hơn trong state', () => {
+    let s = reduce(initialState(), { type: 'ticket', ticket: ticket({ status: 'running', updatedAt: 20 }) });
+    s = reduce(s, snap(100, [ticket({ status: 'draft', updatedAt: 10 }), ticket({ id: 'T-2', updatedAt: 5 })]));
+    expect(s.tickets['T-1'].status).toBe('running');
+    expect(s.tickets['T-2']).toBeDefined();
+  });
+  test('managed và wait được thay theo id', () => {
+    let s = reduce(initialState(), { type: 'managed', managed: { agentId: 'acctv:T-1:dev-1', state: 'running' } as never });
+    s = reduce(s, { type: 'managed', managed: { agentId: 'acctv:T-1:dev-1', state: 'done' } as never });
+    s = reduce(s, { type: 'wait', wait: { id: 'w1', agentId: 'acctv:T-1:controller' } as never });
+    expect(s.managed['acctv:T-1:dev-1'].state).toBe('done');
+    expect(s.waits.w1).toBeDefined();
+  });
+  test('selectTicket chọn controller; select agent ngoài ticket bỏ chọn ticket', () => {
+    let s = reduce(initialState(), { type: 'selectTicket', id: 'T-1' });
+    expect(s.selectedTicketId).toBe('T-1');
+    expect(s.selectedAgentId).toBe('acctv:T-1:controller');
+    s = reduce(s, { type: 'select', id: 'acctv:T-1:dev-1' });
+    expect(s.selectedTicketId).toBe('T-1');
+    s = reduce(s, { type: 'select', id: 'claude:x' });
+    expect(s.selectedTicketId).toBeNull();
+    expect(reduce(s, { type: 'selectTicket', id: null }).selectedAgentId).toBe('claude:x');
   });
 });

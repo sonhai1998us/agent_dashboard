@@ -59,3 +59,31 @@ test('renderList ghi loại cảnh báo bằng tiếng Việt', () => {
   expect(renderList([a], [alert({ agentId: a.id, kind: 'long_tool' })], false)).not.toContain('long_tool');
   expect(renderList([a], [alert({ agentId: a.id, kind: 'stuck' })], false)).toContain('▲ kẹt');
 });
+
+import { parseAgentRef, renderPlan } from '@/cli/render';
+import { validPlan } from '@/tests/helpers/orchestratorEnv';
+
+test('parseAgentRef', () => {
+  expect(parseAgentRef('T-12/dev-1')).toBe('acctv:T-12:dev-1');
+  expect(parseAgentRef('T-12')).toBe('acctv:T-12:controller');
+  expect(parseAgentRef('abc123')).toBeNull();
+  expect(parseAgentRef('T-12/')).toBeNull();
+});
+
+test('renderPlan không màu', () => {
+  const out = renderPlan({ id: 'T-1', title: 'Đăng nhập', status: 'awaiting_approval', plan: validPlan(), round: 0, maxRounds: 3 } as any, false);
+  expect(out).toContain('Dev ×2 · claude · claude-sonnet-5-5 · high');
+  expect(out).toContain('src/a.ts');
+  expect(out).toContain('src/b.ts');
+  expect(out).toContain('[p1] dev · A');
+  expect(out).toContain('Đăng nhập được');
+  expect(out).not.toContain('Designer');
+});
+
+import { renderTickets } from '@/cli/render';
+
+test('renderTickets: vòng không vượt quá maxRounds', () => {
+  const out = renderTickets([{ id: 'T-1', title: 'Đăng nhập', status: 'running', round: 3, maxRounds: 3 } as any], false);
+  expect(out).toContain('đang chạy · vòng 3/3');
+  expect(out).not.toContain('4/3');
+});

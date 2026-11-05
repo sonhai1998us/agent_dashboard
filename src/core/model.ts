@@ -1,5 +1,9 @@
+import type { ManagedAgent, Ticket, WaitSpan } from '@/src/tickets/model';
+
 export type Source = 'claude' | 'codex';
-export type AgentStatus = 'running' | 'idle' | 'ended';
+export type AgentStatus = 'running' | 'idle' | 'ended' | 'queued' | 'limited';
+
+export const isManagedId = (id: string): boolean => id.startsWith('acctv:');
 
 export interface AgentInfo {
   id: string; // 'claude:<sessionId>' | 'claude:<sessionId>:<agentId>' | 'codex:<threadId>'
@@ -40,7 +44,7 @@ export interface CallRecord {
   tokensOut: number | null;
 }
 
-export type AlertKind = 'stuck' | 'long_tool' | 'loop' | 'error_burst';
+export type AlertKind = 'stuck' | 'long_tool' | 'loop' | 'error_burst' | 'guard';
 
 export interface Alert {
   id: string;
@@ -62,4 +66,7 @@ export type NormalizedEvent =
 export type HubEvent =
   | { type: 'agent'; agent: AgentInfo }
   | { type: 'call'; call: CallRecord }
-  | { type: 'alert'; alert: Alert };
+  | { type: 'alert'; alert: Alert }
+  | { type: 'ticket'; ticket: Ticket }
+  | { type: 'managed'; managed: ManagedAgent }
+  | { type: 'wait'; wait: WaitSpan };

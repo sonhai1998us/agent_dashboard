@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { themeBootScript } from './lib/theme';
 import { Fira_Code, Fira_Sans } from 'next/font/google';
 import './globals.css';
 
@@ -13,7 +14,8 @@ export const metadata: Metadata = { title: 'Agent CCTV', description: 'Theo dõi
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="vi" className={`${firaSans.variable} ${firaCode.variable}`}>
+    <html lang="vi" className={`${firaSans.variable} ${firaCode.variable}`} suppressHydrationWarning>
+      <head><script dangerouslySetInnerHTML={{ __html: themeBootScript() }} /></head>
       <body>{children}</body>
     </html>
   );

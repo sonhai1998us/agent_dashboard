@@ -1,0 +1,68 @@
+{
+  "controller": [
+    {
+      "when": "Kế hoạch đã được duyệt",
+      "steps": [
+        { "hook": { "tool_name": "Read", "tool_input": { "file_path": "README.md" } } },
+        { "mcp": "spawn_agent", "args": { "role": "dev", "packageId": "p1", "task": "Viết form đăng nhập trong src/login.ts", "files": ["src/login.ts"] } },
+        { "mcp": "spawn_agent", "args": { "role": "dev", "packageId": "p2", "task": "Viết API xác thực trong src/auth.ts", "files": ["src/auth.ts"] } },
+        { "mcp": "wait_agents", "args": { "ids": ["acctv:{ticket}:dev-1", "acctv:{ticket}:dev-2"] } }
+      ]
+    },
+    {
+      "when": "\"role\": \"qc\"",
+      "steps": [
+        { "mcp": "finish", "args": { "status": "done", "report": "Đã thêm form đăng nhập (src/login.ts) và API xác thực (src/auth.ts). QC review đạt." } }
+      ]
+    },
+    {
+      "when": "Các agent đã xong",
+      "steps": [
+        { "mcp": "spawn_agent", "args": { "role": "qc", "packageId": "p3", "task": "Review form đăng nhập và API xác thực", "files": [] } },
+        { "mcp": "wait_agents", "args": { "ids": ["acctv:{ticket}:qc-1"] } }
+      ]
+    },
+    {
+      "steps": [
+        { "hook": { "tool_name": "Glob", "tool_input": { "pattern": "src/**/*.ts" } } },
+        { "sleep": 1500 },
+        {
+          "mcp": "propose_plan",
+          "args": {
+            "plan": {
+              "summary": "Thêm trang đăng nhập: form ở src/login.ts, API xác thực ở src/auth.ts, rồi QC review.",
+              "difficulty": "medium",
+              "packages": [
+                { "id": "p1", "role": "dev", "title": "Form đăng nhập", "task": "Viết form đăng nhập trong src/login.ts", "files": ["src/login.ts"] },
+                { "id": "p2", "role": "dev", "title": "API xác thực", "task": "Viết API xác thực trong src/auth.ts", "files": ["src/auth.ts"] },
+                { "id": "p3", "role": "qc", "title": "Review", "task": "Review form đăng nhập và API xác thực", "files": [] }
+              ],
+              "roles": {
+                "dev": { "agent": "claude", "model": "claude-sonnet-5-5", "effort": "high", "count": 2 },
+                "designer": { "agent": "claude", "model": "claude-sonnet-5-5", "effort": "high", "count": 0 },
+                "qc": { "agent": "claude", "model": "claude-sonnet-5-5", "effort": "high", "count": 1 }
+              },
+              "acceptance": ["Đăng nhập đúng mật khẩu thì vào được", "Sai mật khẩu thì báo lỗi"]
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "dev": [
+    {
+      "steps": [
+        { "hook": { "tool_name": "Read", "tool_input": { "file_path": "README.md" } } },
+        { "sleep": 20000 }
+      ]
+    }
+  ],
+  "qc": [
+    {
+      "steps": [
+        { "hook": { "tool_name": "Bash", "tool_input": { "command": "git status" } } },
+        { "sleep": 20000 }
+      ]
+    }
+  ]
+}

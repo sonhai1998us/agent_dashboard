@@ -1,5 +1,5 @@
 import { test, expect } from 'vitest';
-import { detectStuck, detectLongTool, detectLoop, detectErrorBurst } from '@/src/detect/rules';
+import { detectStuck, detectLongTool, detectLoop, detectErrorBurst, detectGuard } from '@/src/detect/rules';
 import { DEFAULT_THRESHOLDS as T } from '@/src/core/config';
 import type { AgentInfo, CallRecord } from '@/src/core/model';
 
@@ -62,4 +62,18 @@ test('lỗi dồn dập: 5 lỗi liên tiếp → critical; 4 lỗi + 1 ok → n
   expect(detectErrorBurst(agent(), [bad(), call('Read', 'r'), bad(), bad(), bad(), bad()], T)).toBeNull();
   const open = call('Bash', 'x', { endedAt: null, ok: null });
   expect(detectErrorBurst(agent(), [bad(), bad(), bad(), bad(), bad(), open], T)!.message).toBe('5 call lỗi liên tiếp');
+});
+
+const blocked = (reason: string) => call('Edit', `f${n}`, { ok: false, errorPreview: `[acctv-guard] ${reason}` });
+
+test('guard: 2 call bị chặn (1 ngoài phạm vi) → warn; 3 ngoài phạm vi → critical; 0 → null', () => {
+  const calls = [call('Read', 'a'), blocked('lệnh bị cấm'), blocked('ngoài phạm vi: x.ts')];
+  const a = detectGuard(agent(), calls)!;
+  expect(a.kind).toBe('guard'); expect(a.level).toBe('warn'); expect(a.id).toBe('claude:s1:guard');
+  expect(a.message).toBe('bị chặn ×2 · ngoài phạm vi ×1');
+  expect(a.since).toBe(calls[1].startedAt);
+  const c = detectGuard(agent(), [blocked('ngoài phạm vi: a'), blocked('ngoài phạm vi: b'), blocked('ngoài phạm vi: c')])!;
+  expect(c.level).toBe('critical'); expect(c.message).toBe('bị chặn ×3 · ngoài phạm vi ×3');
+  expect(detectGuard(agent(), [blocked('lệnh bị cấm')])!.message).toBe('bị chặn ×1');
+  expect(detectGuard(agent(), [call('Read', 'a'), call('Bash', 'x', { ok: false, errorPreview: 'boom' })])).toBeNull();
 });

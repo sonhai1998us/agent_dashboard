@@ -1,5 +1,7 @@
 import type { AgentInfo, Alert, CallRecord } from '@/src/core/model';
 import { ALERT_LABEL, fmtClock, fmtDuration } from '@/app/lib/format';
+import type { Ticket } from '@/src/tickets/model';
+import { ticketStatusText } from '@/app/lib/tickets';
 import { buildRoots, flattenTree } from '@/app/lib/tree';
 
 const ESC = '\x1b[';
@@ -13,6 +15,8 @@ const bold = (on: boolean, s: string) => paint(on, '1', s);
 export function statusIcon(a: AgentInfo, color: boolean): string {
   if (a.status === 'running') return green(color, '●');
   if (a.status === 'idle') return '○';
+  if (a.status === 'queued') return '◌';
+  if (a.status === 'limited') return yellow(color, '⏸');
   return dim(color, '○');
 }
 
@@ -115,4 +119,39 @@ export function renderWatch(
 
 export function renderLogs(calls: CallRecord[], width: number, color: boolean): string {
   return calls.map((c) => callLine(c, width, color)).join('\n');
+}
+
+/** 'T-12/dev-1' → id agent do dashboard chạy; 'T-12' → controller; còn lại null. */
+export function parseAgentRef(ref: string): string | null {
+  const m = /^(T-\d+)(?:\/([a-z]+-\d+|controller))?$/.exec(ref);
+  return m ? `acctv:${m[1]}:${m[2] ?? 'controller'}` : null;
+}
+
+export function renderTickets(tickets: Ticket[], color: boolean): string {
+  if (tickets.length === 0) return 'Chưa có ticket nào.';
+  return tickets.map((t) => {
+    const st = ticketStatusText(t);
+    const icon = st.tone === 'run' ? green(color, st.icon) : st.tone === 'warn' ? yellow(color, st.icon) : st.tone === 'crit' ? red(color, st.icon) : st.tone === 'ended' ? dim(color, st.icon) : st.icon;
+    return `${icon}  ${t.id.padEnd(5)}  ${st.text}  ${t.title}`;
+  }).join('\n');
+}
+
+const ROLE_LABEL = { dev: 'Dev', designer: 'Designer', qc: 'QC' } as const;
+
+export function renderPlan(t: Ticket, color: boolean): string {
+  const plan = t.plan;
+  if (!plan) return `${t.id} chưa có kế hoạch (trạng thái: ${ticketStatusText(t).text})`;
+  const lines = [bold(color, `${t.id} · ${t.title}`), '', plan.summary, `Độ khó: ${plan.difficulty}`, '', bold(color, 'Vai')];
+  for (const r of ['dev', 'designer', 'qc'] as const) {
+    const s = plan.roles[r];
+    if (s.count > 0) lines.push(`  ${ROLE_LABEL[r]} ×${s.count} · ${s.agent} · ${s.model} · ${s.effort}`);
+  }
+  lines.push('', bold(color, 'Các gói'));
+  for (const p of plan.packages) {
+    lines.push(`  [${p.id}] ${p.role} · ${p.title}`);
+    for (const f of p.files) lines.push(`      ${f}`);
+  }
+  lines.push('', bold(color, 'Tiêu chí nghiệm thu'));
+  for (const a of plan.acceptance) lines.push(`  - ${a}`);
+  return lines.join('\n');
 }

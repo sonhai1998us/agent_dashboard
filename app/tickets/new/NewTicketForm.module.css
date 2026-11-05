@@ -1,0 +1,33 @@
+.page { min-height: 100vh; padding: 24px 14px; display: flex; justify-content: center; }
+.form { width: 100%; max-width: 640px; background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 18px 20px; display: flex; flex-direction: column; gap: 14px; align-self: flex-start; }
+.head { display: flex; flex-direction: column; gap: 6px; }
+.back { color: var(--muted); font-size: 12px; text-decoration: none; width: fit-content; }
+.back:hover { color: var(--fg); }
+.h1 { margin: 0; font-size: 18px; font-weight: 600; }
+.field { display: flex; flex-direction: column; gap: 4px; }
+.field > label { font-size: 12px; font-weight: 500; }
+.req { color: var(--muted); font-weight: 400; }
+.form input, .form textarea, .form select { background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font: inherit; }
+.form textarea { resize: vertical; }
+.form input:focus-visible, .form textarea:focus-visible, .form select:focus-visible, .form summary:focus-visible, .linkBtn:focus-visible, .primary:focus-visible, .cancel:focus-visible, .back:focus-visible { outline: 2px solid var(--run); outline-offset: 2px; }
+.status { min-height: 18px; font-size: 12px; }
+.ok { color: var(--ok); }
+.warn { color: var(--warn); }
+.bad { color: var(--err); }
+.muted { color: var(--muted); font-size: 12px; }
+.linkBtn { background: none; border: 1px solid var(--warn); color: var(--warn); border-radius: 6px; padding: 2px 8px; font: inherit; font-size: 12px; cursor: pointer; margin-left: 6px; }
+.linkBtn:hover { background: var(--sel); }
+.roles { border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; }
+.roles summary { cursor: pointer; font-size: 12px; font-weight: 500; }
+.grid { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.roleRow { display: grid; grid-template-columns: 90px repeat(3, 1fr); gap: 8px; align-items: end; }
+.roleName { font-weight: 500; padding-bottom: 6px; }
+.sub { display: flex; flex-direction: column; gap: 2px; font-size: 11px; color: var(--muted); min-width: 0; }
+.sub select { width: 100%; font-size: 12px; }
+.err { color: var(--err); border: 1px solid var(--err); border-radius: 6px; padding: 6px 10px; }
+.actions { display: flex; align-items: center; gap: 12px; }
+.primary { background: var(--run); color: var(--on-run); border: 1px solid var(--run); border-radius: 6px; padding: 7px 14px; font: inherit; font-weight: 600; cursor: pointer; }
+.primary:disabled { background: var(--sel); border-color: var(--border); color: var(--muted); cursor: not-allowed; }
+.cancel { color: var(--muted); text-decoration: none; }
+.cancel:hover { color: var(--fg); }
+@media (max-width: 560px) { .roleRow { grid-template-columns: 1fr 1fr; } .roleName { grid-column: 1 / -1; padding: 0; } }

@@ -2,6 +2,7 @@
 import { useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import type { AgentInfo, Alert, Source } from '@/src/core/model';
 import { selectAgent, useLive } from '../lib/liveStore';
+import { isExternal } from '../lib/tickets';
 import { buildRoots } from '../lib/tree';
 import styles from './SessionList.module.css';
 
@@ -18,6 +19,8 @@ export function statusOf(a: AgentInfo, alerts: Alert[]): { tone: Tone; icon: str
   if (mine.some((x) => x.level === 'critical')) return { tone: 'crit', icon: '■', text: 'nghiêm trọng' };
   if (mine.length > 0) return { tone: 'warn', icon: '▲', text: 'cảnh báo' };
   if (a.status === 'running') return { tone: 'run', icon: '●', text: 'đang chạy' };
+  if (a.status === 'queued') return { tone: 'wait', icon: '◌', text: 'xếp hàng' };
+  if (a.status === 'limited') return { tone: 'warn', icon: '⏸', text: 'bị giới hạn' };
   if (a.status === 'ended') return { tone: 'ended', icon: '○', text: 'đã kết thúc' };
   return { tone: 'wait', icon: '○', text: 'rảnh' };
 }
@@ -32,7 +35,7 @@ export default function SessionList() {
 
   const rows = useMemo(() => {
     const alerts = Object.values(alertsMap);
-    return buildRoots(Object.values(agentsMap))
+    return buildRoots(Object.values(agentsMap).filter(isExternal))
       .map((r) => r.session)
       .filter((a) => (source === 'all' || a.source === source) && (!onlyRunning || a.status === 'running'))
       .map((a) => ({ a, st: statusOf(a, alerts) }));
@@ -49,8 +52,8 @@ export default function SessionList() {
   };
 
   return (
-    <nav className={styles.box} aria-label="Phiên">
-      <h2 className={styles.h}>Phiên</h2>
+    <nav className={styles.box} aria-label="Phiên ngoài ticket">
+      <h2 className={styles.h}>Phiên ngoài ticket</h2>
       <div className={styles.filters}>
         <label className={styles.f}>
           <span className={styles.sr}>Lọc theo nguồn</span>

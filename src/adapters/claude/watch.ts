@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Config } from '@/src/core/config';
-import type { AgentStatus, HubEvent } from '@/src/core/model';
+import { isManagedId, type AgentStatus, type HubEvent } from '@/src/core/model';
 import type { Store } from '@/src/core/store';
 import { applyClaudeMeta, claudeCtxForPath, parseClaudeLine, type ClaudeFileCtx, type ClaudeSubagentMeta } from './parse';
 import { createTailCore, RESCAN_ACTIVE_MS, type Watcher, type WatcherOptions } from '../watchBase';
@@ -21,6 +21,13 @@ function readMeta(file: string): ClaudeSubagentMeta | undefined {
 
 function metaMtime(file: string): number | undefined {
   try { return fs.statSync(metaPathOf(file)).mtimeMs; } catch { return undefined; }
+}
+
+/** `<sid>` of projects/<proj>/<sid>.jsonl or projects/<proj>/<sid>/subagents/agent-<id>.jsonl */
+function sessionIdOfPath(file: string): string {
+  const parts = file.split(/[\\/]+/);
+  const i = parts.lastIndexOf('subagents');
+  return i >= 1 ? parts[i - 1] : (parts[parts.length - 1] ?? '').replace(/\.jsonl$/i, '');
 }
 
 function pidAlive(pid: number): boolean {
@@ -50,7 +57,7 @@ export function createClaudeWatcher(
   const core = createTailCore<ClaudeFileCtx>({
     name: 'claude',
     root: path.join(cfg.claudeDir, 'projects'),
-    match: (f) => f.toLowerCase().endsWith('.jsonl'),
+    match: (f) => f.toLowerCase().endsWith('.jsonl') && !store.isManagedSession(sessionIdOfPath(f)),
     makeCtx: (f, resumed) => {
       const c = claudeCtxForPath(f, cfg.claudeDir, readMeta(f), { resumed });
       ctxByAgent.set(c.agentId, c);
@@ -114,7 +121,7 @@ export function createClaudeWatcher(
       }
       const out: HubEvent[] = [];
       for (const a of store.listAgents()) {
-        if (a.source !== 'claude') continue;
+        if (a.source !== 'claude' || isManagedId(a.id)) continue;
         const live = alive.get(a.sessionId);
         let status: AgentStatus;
         let pid: number | undefined;

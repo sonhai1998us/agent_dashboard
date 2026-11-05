@@ -5,7 +5,10 @@ import { WebSocket } from 'ws';
 import { loadConfig } from '@/src/core/config';
 import type { AgentInfo, Alert, CallRecord, HubEvent } from '@/src/core/model';
 import type { AgentMetrics } from '@/src/core/metrics';
-import { renderList, renderLogs, renderWatch } from './render';
+import { isManagedId } from '@/src/core/model';
+import type { Ticket } from '@/src/tickets/model';
+import { ticketStatusText } from '@/app/lib/tickets';
+import { parseAgentRef, renderList, renderLogs, renderPlan, renderTickets, renderWatch } from './render';
 
 export interface CliIo {
   stdout: { write(s: string): unknown };
@@ -26,15 +29,22 @@ const NOT_RUNNING = 'Server chưa chạy. Bật bằng: acctv serve';
 const USAGE = `Dùng: acctv <lệnh> [tuỳ chọn]
 
   serve [--port N] [--dev]      Bật server + giao diện
-  ls [--running]                Liệt kê agent
-  watch <id-prefix>             Theo dõi trực tiếp một agent
-  logs <id-prefix> [-n 50]      In các call gần nhất của agent
+  new "<tiêu đề>" --dir <path> [--desc <mô tả>]
+                                Tạo ticket mới (Controller lập kế hoạch)
+  ls [--running]                Liệt kê ticket và phiên ngoài ticket
+  plan <T>                      Xem kế hoạch của ticket (vd: plan T-3)
+  approve <T>                   Duyệt kế hoạch
+  revise <T> "<góp ý>"          Yêu cầu Controller sửa kế hoạch
+  stop <T>/<agent>              Dừng một agent (vd: stop T-3/dev-1)
+  watch <id-prefix | T>         Theo dõi trực tiếp một agent hoặc Controller của ticket
+  logs <id-prefix | T/agent> [-n 50]
+                                In các call gần nhất của agent
 
 Mọi lệnh nhận --port N (mặc định 4777).`;
 
 class CliError extends Error {}
 
-interface Parsed { positional: string[]; port?: number; dev: boolean; running: boolean; n: number; help: boolean; }
+interface Parsed { positional: string[]; port?: number; dev: boolean; running: boolean; n: number; help: boolean; dir?: string; desc?: string; }
 
 function parseArgs(args: string[]): Parsed {
   const out: Parsed = { positional: [], dev: false, running: false, n: 50, help: false };
@@ -46,7 +56,11 @@ function parseArgs(args: string[]): Parsed {
     const a = args[i];
     if (a === '--port') out.port = intArg('--port', args[++i]);
     else if (a === '-n') out.n = intArg('-n', args[++i]);
-    else if (a === '--dev') out.dev = true;
+    else if (a === '--dir' || a === '--desc') {
+      const v = args[++i];
+      if (v === undefined) throw new CliError(`${a} cần một giá trị`);
+      if (a === '--dir') out.dir = path.resolve(v); else out.desc = v;
+    } else if (a === '--dev') out.dev = true;
     else if (a === '--running') out.running = true;
     else if (a === '-h' || a === '--help') out.help = true;
     else if (a.startsWith('-')) throw new CliError(`Tuỳ chọn không hợp lệ: ${a}`);
@@ -66,9 +80,31 @@ class Api {
     } catch {
       throw new CliError(NOT_RUNNING);
     }
-    if (!res.ok) throw new CliError(`Server trả lỗi ${res.status} cho ${p}`);
-    return (await res.json()) as T;
+    return this.parse<T>(res, p);
   }
+
+  async post<T>(p: string, body: unknown = {}): Promise<T> {
+    let res: Response;
+    try {
+      res = await fetch(this.base + p, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    } catch {
+      throw new CliError(NOT_RUNNING);
+    }
+    return this.parse<T>(res, p);
+  }
+
+  private async parse<T>(res: Response, p: string): Promise<T> {
+    const text = await res.text();
+    let json: any = null;
+    try { json = text ? JSON.parse(text) : null; } catch { /* không phải JSON */ }
+    if (!res.ok) {
+      const msg = typeof json?.error === 'string' ? json.error : Array.isArray(json?.errors) ? json.errors.join('; ') : '';
+      throw new CliError(msg ? `${msg} (${res.status})` : `Server trả lỗi ${res.status} cho ${p}`);
+    }
+    return json as T;
+  }
+
+  tickets(): Promise<Ticket[]> { return this.get<Ticket[]>('/api/tickets'); }
 
   snapshot(): Promise<Snapshot> { return this.get<Snapshot>('/api/snapshot'); }
   calls(id: string, limit: number): Promise<CallRecord[]> {
@@ -96,6 +132,12 @@ function matchAgents(agents: AgentInfo[], prefix: string): AgentInfo[] {
 
 function resolveAgent(snap: Snapshot, prefix: string | undefined, io: CliIo): AgentInfo | null {
   if (!prefix) { io.stderr.write('Thiếu id-prefix.\n' + USAGE + '\n'); return null; }
+  const ref = parseAgentRef(prefix);
+  if (ref) {
+    const a = snap.agents.find((x) => x.id === ref);
+    if (!a) io.stderr.write(`Không tìm thấy agent ${ref}.\n`);
+    return a ?? null;
+  }
   const m = matchAgents(snap.agents, prefix);
   if (m.length === 0) { io.stderr.write(`Không tìm thấy agent nào khớp "${prefix}".\n`); return null; }
   if (m.length > 1) {
@@ -143,7 +185,59 @@ async function cmdLs(api: Api, p: Parsed, io: CliIo): Promise<number> {
     const m = snap.agentMetrics[a.id];
     if (m) counts[a.id] = m.calls;
   }
-  io.stdout.write(renderList(agents, snap.alerts, io.color, counts) + '\n');
+  const tickets = await api.tickets();
+  const external = agents.filter((a) => !isManagedId(a.id));
+  io.stdout.write(`Ticket\n${renderTickets(tickets, io.color)}\n\nPhiên ngoài ticket\n${renderList(external, snap.alerts, io.color, counts)}\n`);
+  return 0;
+}
+
+function ticketArg(p: Parsed, io: CliIo): string | null {
+  const t = p.positional[1];
+  if (!t || !/^T-\d+$/.test(t)) { io.stderr.write(`${t ? `Id ticket không hợp lệ: ${t}` : 'Thiếu id ticket (vd: T-3).'}\n`); return null; }
+  return t;
+}
+
+async function cmdNew(api: Api, p: Parsed, io: CliIo): Promise<number> {
+  const title = p.positional[1];
+  if (!title || !p.dir) { io.stderr.write('Dùng: acctv new "<tiêu đề>" --dir <path> [--desc <mô tả>]\n'); return 1; }
+  const t = await api.post<Ticket>('/api/tickets', { title, description: p.desc ?? '', dir: p.dir });
+  io.stdout.write(`${t.id} đã tạo · ${ticketStatusText(t).text}\n`);
+  return 0;
+}
+
+async function cmdPlan(api: Api, p: Parsed, io: CliIo): Promise<number> {
+  const id = ticketArg(p, io);
+  if (!id) return 1;
+  const { ticket } = await api.get<{ ticket: Ticket }>(`/api/tickets/${id}`);
+  io.stdout.write(renderPlan(ticket, io.color) + '\n');
+  return 0;
+}
+
+async function cmdApprove(api: Api, p: Parsed, io: CliIo): Promise<number> {
+  const id = ticketArg(p, io);
+  if (!id) return 1;
+  const t = await api.post<Ticket>(`/api/tickets/${id}/approve`);
+  io.stdout.write(`${id} đã duyệt · ${ticketStatusText(t).text}\n`);
+  return 0;
+}
+
+async function cmdRevise(api: Api, p: Parsed, io: CliIo): Promise<number> {
+  const id = ticketArg(p, io);
+  if (!id) return 1;
+  const feedback = p.positional[2];
+  if (!feedback) { io.stderr.write('Thiếu góp ý. Dùng: acctv revise <T> "<góp ý>"\n'); return 1; }
+  const t = await api.post<Ticket>(`/api/tickets/${id}/revise`, { feedback });
+  io.stdout.write(`${id} đã gửi góp ý · ${ticketStatusText(t).text}\n`);
+  return 0;
+}
+
+async function cmdStop(api: Api, p: Parsed, io: CliIo): Promise<number> {
+  const ref = p.positional[1];
+  const id = ref ? parseAgentRef(ref) : null;
+  if (!id) { io.stderr.write('Dùng: acctv stop <T>/<agent> (vd: stop T-3/dev-1)\n'); return 1; }
+  await api.post(`/api/agents/${encodeURIComponent(id)}/stop`);
+  const slot = id.split(':')[2];
+  io.stdout.write(`Đã dừng ${slot[0].toUpperCase()}${slot.slice(1)}, kết quả trả về Controller\n`);
   return 0;
 }
 
@@ -313,6 +407,11 @@ export async function main(argv: string[], io: CliIo): Promise<number> {
     if (cmd === 'serve') return await cmdServe(p, io);
     const api = new Api(p.port ?? loadConfig().port);
     if (cmd === 'ls') return await cmdLs(api, p, io);
+    if (cmd === 'new') return await cmdNew(api, p, io);
+    if (cmd === 'plan') return await cmdPlan(api, p, io);
+    if (cmd === 'approve') return await cmdApprove(api, p, io);
+    if (cmd === 'revise') return await cmdRevise(api, p, io);
+    if (cmd === 'stop') return await cmdStop(api, p, io);
     if (cmd === 'logs') return await cmdLogs(api, p, io);
     if (cmd === 'watch') return await cmdWatch(api, p, io);
     io.stderr.write(`Lệnh không biết: ${cmd}\n${USAGE}\n`);

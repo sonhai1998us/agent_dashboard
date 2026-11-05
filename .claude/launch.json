@@ -1,6 +1,7 @@
 {
   "version": "0.0.1",
   "configurations": [
-    { "name": "acctv-dev", "runtimeExecutable": "npm", "runtimeArgs": ["run", "dev"], "port": 4777 }
+    { "name": "acctv-dev", "runtimeExecutable": "npm", "runtimeArgs": ["run", "dev"], "port": 4777 },
+    { "name": "acctv-demo", "runtimeExecutable": "node", "runtimeArgs": ["--disable-warning=ExperimentalWarning", "--import", "tsx", "server/demo.ts"], "port": 4778 }
   ]
 }

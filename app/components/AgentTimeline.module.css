@@ -55,3 +55,10 @@
 @media (max-width: 1023px) {
   .axis, .lane { grid-template-columns: 180px minmax(0, 1fr); }
 }
+
+.replay { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.replayLbl { font-size: 11px; color: var(--warn); flex: none; }
+.range { flex: 1; min-width: 0; accent-color: var(--run); }
+.wait { fill: var(--wait); fill-opacity: .55; }
+.waitTxt { fill: var(--fg); font-size: 9px; pointer-events: none; }
+.sw[data-s='grey'] { background: var(--wait); }

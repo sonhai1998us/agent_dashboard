@@ -84,6 +84,10 @@ export class Store {
     }
   }
 
+  get database(): DatabaseSync {
+    return this.db;
+  }
+
   transaction<T>(fn: () => T): T {
     this.db.exec('BEGIN');
     try {
@@ -162,10 +166,25 @@ export class Store {
     this.db.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(key, value);
   }
 
-  /** Drops all ingested data (agents, calls, alerts, offsets) so logs are re-parsed from scratch. */
+  /** Drops ingested data (agents, calls, alerts, offsets) so logs are re-parsed from scratch; dashboard-run agents are kept. */
   clearIngested(): void {
     this.transaction(() => {
-      for (const t of ['agents', 'calls', 'alerts', 'offsets']) this.db.exec(`DELETE FROM ${t}`);
+      for (const [t, col] of [['agents', 'id'], ['calls', 'agent_id'], ['alerts', 'agent_id']]) {
+        this.db.exec(`DELETE FROM ${t} WHERE ${col} NOT LIKE 'acctv:%'`);
+      }
+      this.db.exec('DELETE FROM offsets');
+    });
+  }
+
+  isManagedSession(sessionId: string): boolean {
+    return !!this.db.prepare("SELECT 1 FROM agents WHERE session_id = ? AND id LIKE 'acctv:%' LIMIT 1").get(sessionId);
+  }
+
+  dropAgent(id: string): void {
+    this.transaction(() => {
+      for (const [t, col] of [['calls', 'agent_id'], ['alerts', 'agent_id'], ['agents', 'id']]) {
+        this.db.prepare(`DELETE FROM ${t} WHERE ${col} = ?`).run(id);
+      }
     });
   }
 

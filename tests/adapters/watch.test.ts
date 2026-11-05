@@ -527,3 +527,41 @@ test('subagent kết thúc nhờ meta finished, bản ghi transcript mới sau �
   fs.appendFileSync(sub, recLine({ type: 'user', message: { role: 'user', content: 'thêm việc' } }));
   await waitFor(() => store.getAgent('claude:sess-main:again2')?.status === 'running');
 });
+
+const managedCtl = { type: 'agent' as const, agent: { id: 'acctv:T-1:controller', source: 'claude' as const, sessionId: 'sess-m', label: 'controller', startedAt: Date.now(), lastEventAt: Date.now(), status: 'running' as const } };
+
+test('phiên do dashboard chạy: watcher Claude bỏ qua transcript của nó', async () => {
+  store.applyEvent(managedCtl);
+  fs.writeFileSync(path.join(cfg.claudeDir, 'projects', 'proj', 'sess-m.jsonl'), fxClaude('main.jsonl'));
+  const subDir = path.join(cfg.claudeDir, 'projects', 'proj', 'sess-m', 'subagents');
+  fs.mkdirSync(subDir, { recursive: true });
+  fs.writeFileSync(path.join(subDir, 'agent-ab12.jsonl'), fxClaude('sub.jsonl'));
+  fs.writeFileSync(mainFile(), fxClaude('main.jsonl'));
+  const w = claudeWatcher();
+  await w.start(); await w.backfilled();
+  expect(store.getAgent('claude:sess-m')).toBeUndefined();
+  expect(store.getAgent('claude:sess-m:ab12')).toBeUndefined();
+  expect(store.getAgent('claude:sess-main')).toBeTruthy();
+});
+
+test('liveness không đổi status của agent acctv:*', async () => {
+  store.applyEvent(managedCtl);
+  fs.writeFileSync(path.join(cfg.claudeDir, 'sessions', `${process.pid}.json`), JSON.stringify({ pid: process.pid, sessionId: 'sess-m', status: 'idle' }));
+  const w = createClaudeWatcher(cfg, store, () => {}, { livenessMs: 50 });
+  closers.push(() => w.stop());
+  await w.start(); await w.backfilled();
+  await new Promise((r) => setTimeout(r, 300));
+  expect(store.getAgent('acctv:T-1:controller')?.status).toBe('running');
+  expect(store.getAgent('acctv:T-1:controller')?.pid).toBeNull();
+});
+
+test('phiên do dashboard chạy: watcher Codex bỏ qua file có thread id đó', async () => {
+  const tid = '019e5947-01fe-7393-b890-65ac89a98961';
+  store.applyEvent({ type: 'agent', agent: { id: 'acctv:T-1:dev-1', source: 'codex', sessionId: tid, label: 'dev', startedAt: 1, lastEventAt: 1 } });
+  const f = path.join(cfg.codexDir, 'sessions', '2026', '11', '02', `rollout-2026-11-02T09-18-10-${tid}.jsonl`);
+  fs.writeFileSync(f, JSON.stringify({ timestamp: '2026-11-02T09:18:10Z', type: 'session_meta', payload: { id: tid, cwd: 'x' } }) + '\n');
+  const w = createCodexWatcher(cfg, store, () => {}, { livenessMs: 100000 });
+  closers.push(() => w.stop());
+  await w.start(); await w.backfilled();
+  expect(store.listAgents().map((a) => a.id)).toEqual(['acctv:T-1:dev-1']);
+});

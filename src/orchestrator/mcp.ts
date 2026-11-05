@@ -1,0 +1,145 @@
+export interface ToolResult { text: string; isError?: boolean }
+export type ToolImpl = (args: Record<string, unknown>) => Promise<ToolResult>;
+
+const EFFORT = ['low', 'medium', 'high', 'xhigh', 'max'];
+const WAIT_NOTE = 'Có thể trả về "đang chờ": khi đó hãy kết thúc lượt ngay, không gọi thêm tool nào và không viết gì thêm; hệ thống sẽ đánh thức lại bạn.';
+
+const roleSpec = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    agent: { type: 'string', enum: ['claude', 'codex'] },
+    model: { type: 'string' },
+    effort: { type: 'string', enum: EFFORT },
+    count: { type: 'integer', minimum: 0 },
+  },
+  required: ['agent', 'model', 'effort', 'count'],
+};
+
+const PLAN_SCHEMA = {
+  type: 'object',
+  description: 'Kế hoạch của ticket.',
+  additionalProperties: false,
+  properties: {
+    summary: { type: 'string', description: 'Tóm tắt hướng làm.' },
+    difficulty: { type: 'string', enum: ['easy', 'medium', 'hard'] },
+    packages: {
+      type: 'array',
+      description: 'Các gói việc; gói chạy song song không được trùng file.',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          id: { type: 'string' },
+          role: { type: 'string', enum: ['dev', 'designer', 'qc'] },
+          title: { type: 'string' },
+          task: { type: 'string' },
+          files: { type: 'array', items: { type: 'string' }, description: 'File/thư mục gói này được sửa.' },
+        },
+        required: ['id', 'role', 'title', 'task', 'files'],
+      },
+    },
+    roles: {
+      type: 'object',
+      description: 'Cấu hình cho từng vai.',
+      additionalProperties: false,
+      properties: { dev: roleSpec, designer: roleSpec, qc: roleSpec },
+      required: ['dev', 'designer', 'qc'],
+    },
+    acceptance: { type: 'array', items: { type: 'string' }, description: 'Tiêu chí nghiệm thu.' },
+  },
+  required: ['summary', 'difficulty', 'packages', 'roles', 'acceptance'],
+};
+
+export const TOOL_DEFS: { name: 'propose_plan' | 'spawn_agent' | 'wait_agents' | 'get_agent_log' | 'finish'; description: string; inputSchema: object }[] = [
+  {
+    name: 'propose_plan',
+    description: `Gửi kế hoạch cho người dùng duyệt trước khi giao việc. ${WAIT_NOTE} Chỉ sau khi được duyệt mới được gọi spawn_agent.`,
+    inputSchema: { type: 'object', additionalProperties: false, properties: { plan: PLAN_SCHEMA }, required: ['plan'] },
+  },
+  {
+    name: 'spawn_agent',
+    description: 'Giao một gói việc cho subagent (dev, designer hoặc qc). files là phạm vi được sửa; sửa ngoài phạm vi sẽ bị chặn. Trả về id agent để dùng với wait_agents và get_agent_log.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        role: { type: 'string', enum: ['dev', 'designer', 'qc'] },
+        packageId: { type: 'string', description: 'Id gói việc trong kế hoạch.' },
+        task: { type: 'string', description: 'Việc cần làm, đủ ngữ cảnh để làm độc lập.' },
+        files: { type: 'array', items: { type: 'string' }, description: 'File/thư mục agent được sửa.' },
+        model: { type: 'string', description: 'Bỏ trống để dùng model của kế hoạch.' },
+        effort: { type: 'string', enum: EFFORT },
+        agent: { type: 'string', enum: ['claude', 'codex'] },
+      },
+      required: ['role', 'task', 'files'],
+    },
+  },
+  {
+    name: 'wait_agents',
+    description: `Chờ các subagent chạy xong. ${WAIT_NOTE} Khi tất cả đã xong, kết quả của từng agent được trả về.`,
+    inputSchema: { type: 'object', additionalProperties: false, properties: { ids: { type: 'array', items: { type: 'string' } } }, required: ['ids'] },
+  },
+  {
+    name: 'get_agent_log',
+    description: 'Xem các bước gần đây của một subagent (tool đã gọi, lỗi) để kiểm tra nó làm gì.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: { id: { type: 'string' }, limit: { type: 'integer', minimum: 1, maximum: 200 } },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'finish',
+    description: 'Kết thúc ticket với báo cáo cuối. status=done khi đạt tiêu chí nghiệm thu, escalated khi cần người dùng can thiệp.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: { report: { type: 'string' }, status: { type: 'string', enum: ['done', 'escalated'] } },
+      required: ['report', 'status'],
+    },
+  },
+];
+
+type Resp = Record<string, unknown>;
+const err = (id: unknown, code: number, message: string): Resp => ({ jsonrpc: '2.0', id: id ?? null, error: { code, message } });
+
+async function one(msg: unknown, tools: Record<string, ToolImpl>): Promise<Resp | null> {
+  if (!msg || typeof msg !== 'object' || Array.isArray(msg)) return err(null, -32600, 'Request không hợp lệ');
+  const m = msg as { id?: unknown; method?: unknown; params?: Record<string, unknown> };
+  if (m.id === undefined || m.id === null) return null;
+  const id = m.id;
+  const params = m.params && typeof m.params === 'object' ? m.params : {};
+  switch (m.method) {
+    case 'initialize':
+      return { jsonrpc: '2.0', id, result: { protocolVersion: (params.protocolVersion as string) ?? '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: 'acctv', version: '0.2.0' } } };
+    case 'ping':
+      return { jsonrpc: '2.0', id, result: {} };
+    case 'tools/list':
+      return { jsonrpc: '2.0', id, result: { tools: TOOL_DEFS } };
+    case 'tools/call': {
+      const name = String(params.name ?? '');
+      const impl = Object.prototype.hasOwnProperty.call(tools, name) ? tools[name] : undefined;
+      if (!impl) return { jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: `Tool không tồn tại: ${name}` }], isError: true } };
+      try {
+        const r = await impl((params.arguments as Record<string, unknown>) ?? {});
+        return { jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: r.text }], isError: !!r.isError } };
+      } catch (e) {
+        return { jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: e instanceof Error ? e.message : String(e) }], isError: true } };
+      }
+    }
+    default:
+      return err(id, -32601, `Method không tồn tại: ${String(m.method)}`);
+  }
+}
+
+export async function handleMcp(body: unknown, tools: Record<string, ToolImpl>): Promise<{ status: 200 | 202; json?: unknown }> {
+  if (Array.isArray(body)) {
+    if (!body.length) return { status: 200, json: err(null, -32600, 'Request không hợp lệ') };
+    const out = (await Promise.all(body.map(b => one(b, tools)))).filter((x): x is Resp => x !== null);
+    return out.length ? { status: 200, json: out } : { status: 202 };
+  }
+  const r = await one(body, tools);
+  return r ? { status: 200, json: r } : { status: 202 };
+}

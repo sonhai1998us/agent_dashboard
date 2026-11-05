@@ -9,7 +9,7 @@
 .row { display: flex; gap: 6px; align-items: flex-start; width: 100%; text-align: left; background: transparent; border: 0; border-radius: 4px; padding: 4px 6px; cursor: pointer; color: var(--fg); }
 .row:hover { background: var(--sel); }
 .sel { background: var(--sel); }
-.dim .ico, .dim .label { opacity: .55; }
+.dim .label { color: var(--muted); }
 .ico { width: 12px; flex: none; line-height: 1.4; }
 .ico[data-tone='run'] { color: var(--run); }
 .ico[data-tone='wait'], .ico[data-tone='ended'] { color: var(--wait); }
