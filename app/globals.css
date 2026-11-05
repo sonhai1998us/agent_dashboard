@@ -5,10 +5,10 @@
   --fg: #F8FAFC;
   --muted: #94A3B8;
   --ok: #22C55E;
-  --err: #EF4444;
-  --run: #3B82F6;
+  --err: #F87171;
+  --run: #60A5FA;
   --warn: #FBBF24;
-  --wait: #64748B;
+  --wait: #8A99AF;
   --sel: #16203a;
   --on-run: #0F172A;
   color-scheme: dark;
@@ -20,11 +20,11 @@
   --border: #CBD5E1;
   --fg: #0F172A;
   --muted: #475569;
-  --ok: #15803D;
+  --ok: #166534;
   --err: #B91C1C;
   --run: #1D4ED8;
-  --warn: #A16207;
-  --wait: #64748B;
+  --warn: #854D0E;
+  --wait: #4B5563;
   --sel: #E2E8F0;
   --on-run: #FFFFFF;
   color-scheme: light;

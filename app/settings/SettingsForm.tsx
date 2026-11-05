@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { readThemePref, saveThemePref, type ThemePref } from '../lib/theme';
 import type { Settings, Thresholds } from '@/src/core/config';
 import type { AgentKind, Effort, Role, RoleSpec } from '@/src/tickets/model';
+import { errorsFor } from '../lib/settingsErrors';
 import styles from './SettingsForm.module.css';
 
 const ROLES: { role: Role; label: string }[] = [
@@ -80,12 +81,6 @@ function toBody(f: Form) {
     },
     thresholds,
   };
-}
-
-/** Lỗi server bắt đầu bằng tên trường (có thể kèm tiền tố `settings.` hoặc chỉ số `[n]`). */
-export function errorsFor(errors: string[], key: string): string[] {
-  const re = new RegExp(`^(settings\\.)?${key.replace(/\./g, '\\.')}(?![\\w.])`);
-  return errors.filter((e) => re.test(e));
 }
 
 const ALL_KEYS = [

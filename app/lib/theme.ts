@@ -12,7 +12,7 @@ export function isThemePref(v: unknown): v is ThemePref {
 
 /** Chạy trước khi vẽ để không nháy sai giao diện. */
 export function themeBootScript(): string {
-  return `(function(){var t='dark';try{var p=localStorage.getItem('${THEME_KEY}');var l=window.matchMedia('(prefers-color-scheme: light)').matches;t=p==='light'||p==='dark'?p:(l?'light':'dark')}catch(e){}document.documentElement.dataset.theme=t})();`;
+  return `(function(){var p=null,l=false;try{p=localStorage.getItem('${THEME_KEY}')}catch(e){}try{l=window.matchMedia('(prefers-color-scheme: light)').matches}catch(e){}document.documentElement.dataset.theme=p==='light'||p==='dark'?p:(l?'light':'dark')})();`;
 }
 
 export function applyTheme(pref: ThemePref): void {

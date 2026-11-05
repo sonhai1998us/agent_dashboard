@@ -15,3 +15,11 @@ test('themeBootScript đọc localStorage trong try/catch và đặt data-theme'
   expect(s).toContain('try');
   expect(s).toContain('dataset.theme');
 });
+
+test('themeBootScript: localStorage ném lỗi vẫn theo matchMedia (system → light)', () => {
+  const doc = { documentElement: { dataset: {} as Record<string, string> } };
+  const win = { matchMedia: () => ({ matches: true }) };
+  const ls = { getItem: () => { throw new Error('blocked'); } };
+  new Function('document', 'window', 'localStorage', themeBootScript())(doc, win, ls);
+  expect(doc.documentElement.dataset.theme).toBe('light');
+});
