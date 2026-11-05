@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { existsSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import * as git from '@/src/git/git';
+import { createFakeRunner } from '../helpers/fakeRunner';
 import { OrchestratorError } from '@/src/orchestrator/orchestrator';
 import { makeEnv, cleanup, validPlan, ids, runOf, openWaits, toRunning, g, type Env } from '../helpers/orchestratorEnv';
 
@@ -202,6 +203,20 @@ describe('các trường hợp riêng', () => {
     expect(ok.text).toContain('(dev, claude-haiku-5-5/low)');
     expect(runOf(env, ids(T).dev1)!.spec).toMatchObject({ model: 'claude-haiku-5-5', effort: 'low' });
     expect(env.tickets.listManaged(T)).toHaveLength(2);
+  });
+
+  it('worker codex: khi biết thread id thì xoá bản codex:<thread> do watcher ghi sớm', async () => {
+    const fake = createFakeRunner();
+    env = makeEnv({ maxParallel: 2, runners: { codex: fake.runner } });
+    const T = await toRunning(env);
+    env.store.applyEvent({ type: 'agent', agent: { id: 'codex:thr-9', source: 'codex', sessionId: 'thr-9' } });
+    expect(env.store.getAgent('codex:thr-9')).toBeTruthy();
+    env.cfg.settings.allowedModels.codex = ['gpt-x'];
+    const r = await env.orch.mcpTools(T).spawn_agent({ role: 'qc', task: 'a', files: [], agent: 'codex', model: 'gpt-x' });
+    expect(r.isError).toBeFalsy();
+    fake.runs[0].emit([{ type: 'agent', agent: { id: ids(T).qc1, source: 'codex', sessionId: 'thr-9' } }]);
+    expect(env.store.getAgent('codex:thr-9')).toBeFalsy();
+    expect(env.store.getAgent(ids(T).qc1)).toBeTruthy();
   });
 
   it('Controller kết thúc 3 lượt liên tiếp mà không gọi tool → escalated', async () => {

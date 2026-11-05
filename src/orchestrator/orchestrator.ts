@@ -868,6 +868,7 @@ export class Orchestrator {
         if (this.closed) return;
         try {
           this.deps.ingest(evs);
+          for (const e of evs) if (e.type === 'agent' && e.agent.source === 'codex' && e.agent.id === agentId) this.deps.store.dropAgent(`codex:${e.agent.sessionId}`);
         } catch (e) {
           console.warn(`[acctv] ingest ${agentId} lỗi: ${errMsg(e)}`);
         }

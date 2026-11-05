@@ -16,6 +16,7 @@ import { Orchestrator } from '@/src/orchestrator/orchestrator';
 import * as git from '@/src/git/git';
 import type { Runner } from '@/src/runner/types';
 import { createClaudeRunner } from '@/src/runner/claude';
+import { createCodexRunner } from '@/src/runner/codex';
 import { findExecutable } from '@/src/runner/detect';
 
 export type Runners = Partial<Record<AgentKind, Runner>>;
@@ -66,6 +67,8 @@ export function cliRunners(cfg: Config, env: Record<string, string | undefined> 
     const exe = findExecutable('claude', cfg.settings.claudePath);
     if (exe) out.claude = createClaudeRunner({ command: exe, guardScript: GUARD_SCRIPT });
   }
+  const codex = findExecutable('codex', cfg.settings.codexPath);
+  if (codex) out.codex = createCodexRunner({ command: codex });
   return out;
 }
 

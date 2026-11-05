@@ -1,0 +1,76 @@
+import { describe, it, expect } from 'vitest';
+import { readFileSync, mkdtempSync, mkdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { buildCodexArgs, parseCodexExecLine, createCodexRunner } from '@/src/runner/codex';
+import type { RunSpec, RunSink } from '@/src/runner/types';
+import type { NormalizedEvent } from '@/src/core/model';
+
+const lines = readFileSync('tests/fixtures/codex/exec.jsonl', 'utf8').split('\n').filter(Boolean);
+const fake = path.resolve('tests/fixtures/fake-codex.mjs');
+
+const spec = (o: Partial<RunSpec> = {}): RunSpec => ({
+  agentId: 'acctv:T-1:qc-1', ticketId: 'T-1', role: 'qc', agent: 'codex', label: 'qc', parentId: null,
+  cwd: 'D:\\Dự án\\my app', model: 'gpt-5-codex', effort: 'high', prompt: 'làm đi', systemPrompt: '', sessionId: 'thr-1', resume: false,
+  tools: [], allowedTools: [], addDirs: [], runDir: '', mcp: null, guard: { port: 1, token: 't' }, ...o,
+});
+
+describe('parseCodexExecLine', () => {
+  it('ánh xạ fixture', () => {
+    const ctx = { agentId: 'a', open: new Map<string, number>(), changedFiles: new Set<string>() };
+    const evs: NormalizedEvent[] = [];
+    let sid: string | undefined;
+    let text = '';
+    lines.forEach((l, i) => {
+      const o = parseCodexExecLine(l, ctx, 1000 + i);
+      evs.push(...o.events);
+      if (o.sessionId) sid = o.sessionId;
+      if (o.result) text = o.result.text;
+    });
+    expect(sid).toBe('0199a213-81c0-7800-8aa1-bbab2a035a53');
+    const starts = evs.flatMap((e) => (e.type === 'call_start' ? [e.call] : []));
+    const ends = evs.flatMap((e) => (e.type === 'call_end' ? [e] : []));
+    expect(starts.filter((c) => c.name === 'Bash')).toHaveLength(2);
+    expect(starts.filter((c) => c.name === 'Edit')).toHaveLength(1);
+    const llm = starts.filter((c) => c.kind === 'llm');
+    expect(llm).toHaveLength(1);
+    expect([llm[0].tokensIn, llm[0].tokensOut]).toEqual([150, 20]);
+    const bash = starts.filter((c) => c.name === 'Bash').map((c) => ends.find((e) => e.callId === c.id)!.ok);
+    expect(bash).toEqual([true, false]);
+    expect([...ctx.changedFiles]).toEqual(['src/a.ts']);
+    expect(ctx.open.size).toBe(0);
+    expect(text).toBe('Đã sửa xong src/a.ts');
+  });
+  it('turn.failed và rate limit', () => {
+    const ctx = { agentId: 'a', open: new Map<string, number>() };
+    const o = parseCodexExecLine('{"type":"turn.failed","error":{"message":"429 rate limit"}}', ctx, 1);
+    expect(o.result).toMatchObject({ isError: true, rateLimited: true });
+    expect(o.limited).toBe(true);
+    expect(parseCodexExecLine('rác', ctx, 1).events).toEqual([{ type: 'parse_error', agentId: 'a' }]);
+  });
+});
+
+describe('buildCodexArgs', () => {
+  it('resume, sandbox theo vai, không cờ nguy hiểm', () => {
+    const a = buildCodexArgs(spec({ resume: true, sessionId: 'abc', addDirs: ['D:\\x'] }));
+    expect(a.slice(0, 3)).toEqual(['exec', 'resume', 'abc']);
+    expect(a.join(' ')).toContain('--sandbox read-only');
+    expect(a.at(-1)).toBe('-');
+    expect(a.some((x) => /dangerously|bypass/i.test(x))).toBe(false);
+    expect(buildCodexArgs(spec({ role: 'dev' }))).toContain('workspace-write');
+    expect(buildCodexArgs(spec({ role: 'dev' })).slice(0, 2)).toEqual(['exec', '--json']);
+  });
+});
+
+describe('createCodexRunner', () => {
+  it('chạy script giả, ra agent_message và đăng ký thread id', async () => {
+    const cwd = mkdtempSync(path.join(tmpdir(), 'acctv-cdx-'));
+    mkdirSync(path.join(cwd, 'x y'));
+    const got: NormalizedEvent[] = [];
+    const sink: RunSink = { events: (e) => got.push(...e), limited: () => {} };
+    const h = createCodexRunner({ command: process.execPath, prefixArgs: [fake] })(spec({ cwd: path.join(cwd, 'x y') }), sink);
+    const r = await h.done;
+    expect(r).toMatchObject({ exitCode: 0, isError: false, text: 'Đã sửa xong src/a.ts', sessionId: '0199a213-81c0-7800-8aa1-bbab2a035a53', changedFiles: ['src/a.ts'] });
+    expect(got.find((e) => e.type === 'agent')).toMatchObject({ agent: { id: 'acctv:T-1:qc-1', source: 'codex' } });
+  });
+});
