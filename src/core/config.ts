@@ -107,7 +107,7 @@ function mergeSettings(raw: unknown): Settings {
       const o = raw.roleDefaults[r];
       if (!isObj(o)) continue;
       if (AGENTS.includes(o.agent as AgentKind)) s.roleDefaults[r].agent = o.agent as AgentKind;
-      if (typeof o.model === 'string' && o.model) s.roleDefaults[r].model = o.model;
+      if (typeof o.model === 'string' && (o.model || s.roleDefaults[r].agent === 'codex')) s.roleDefaults[r].model = o.model;
       if (EFFORTS.includes(o.effort as Effort)) s.roleDefaults[r].effort = o.effort as Effort;
     }
   }
@@ -155,8 +155,10 @@ export function validateSettings(
     if (!AGENTS.includes(o.agent as AgentKind)) errors.push(`roleDefaults.${r}.agent không hợp lệ`);
     if (!EFFORTS.includes(o.effort as Effort)) errors.push(`roleDefaults.${r}.effort không hợp lệ`);
     const list = AGENTS.includes(o.agent as AgentKind) ? am[o.agent as AgentKind] : null;
-    if (typeof o.model !== 'string' || !o.model) errors.push(`roleDefaults.${r}.model không được rỗng`);
-    else if (isStrArr(list) && !list.includes(o.model)) errors.push(`roleDefaults.${r}.model "${o.model}" không nằm trong allowedModels.${String(o.agent)}`);
+    if (typeof o.model !== 'string') errors.push(`roleDefaults.${r}.model phải là chuỗi`);
+    else if (!o.model) {
+      if (o.agent !== 'codex') errors.push(`roleDefaults.${r}.model không được rỗng`);
+    } else if (isStrArr(list) && !list.includes(o.model)) errors.push(`roleDefaults.${r}.model "${o.model}" không nằm trong allowedModels.${String(o.agent)}`);
   }
   for (const k of Object.keys(DEFAULT_THRESHOLDS) as (keyof Thresholds)[]) {
     const v = t[k];

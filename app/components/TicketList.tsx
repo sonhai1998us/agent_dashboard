@@ -39,7 +39,7 @@ export default function TicketList() {
             >
               <span className={styles.l1}><span className={styles.title}>{t.title}</span></span>
               <span className={styles.meta}>
-                <span className={`${styles.id} mono`}>{t.id}</span>
+                <span className="mono">{t.id}</span>
                 <span className={styles.st} data-tone={st.tone}>{st.icon} {st.text}</span>
               </span>
             </button>

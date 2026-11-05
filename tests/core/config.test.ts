@@ -129,3 +129,19 @@ test('validateSettings trả object mới chỉ gồm trường đã biết (key
   expect(r.settings.roleDefaults.dev).not.toBe(raw.settings.roleDefaults.dev);
   expect(r.settings.denyBash).not.toBe(raw.settings.denyBash);
 });
+
+test('validateSettings: codex cho phép model rỗng (CLI mặc định), claude thì không', () => {
+  const a = cloneDefaults();
+  a.settings.roleDefaults.dev = { agent: 'codex', model: '', effort: 'high' };
+  expect(validateSettings(a).ok).toBe(true);
+
+  const b = cloneDefaults();
+  b.settings.roleDefaults.dev = { agent: 'codex', model: 'gpt-x', effort: 'high' };
+  expect(errorsOf(b).some((x) => x.includes('roleDefaults.dev.model'))).toBe(true);
+  b.settings.allowedModels.codex = ['gpt-x'];
+  expect(validateSettings(b).ok).toBe(true);
+
+  const c = cloneDefaults();
+  c.settings.roleDefaults.dev.model = '';
+  expect(errorsOf(c).some((x) => x.includes('roleDefaults.dev.model'))).toBe(true);
+});

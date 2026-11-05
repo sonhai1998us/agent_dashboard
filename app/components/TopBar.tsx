@@ -26,6 +26,7 @@ export default function TopBar() {
       <Kpi value={metrics?.p50_1h == null ? '—' : fmtDuration(metrics.p50_1h)} label="p50 latency" />
       <Kpi value={`${pending > 0 ? '▲ ' : ''}${pending}`} label="chờ duyệt" warn={pending > 0} />
       <Link href="/tickets/new" className={styles.newBtn}>+ Ticket mới</Link>
+      <Link href="/settings" className={styles.newBtn}>Cài đặt</Link>
       <span className={styles.spacer} />
       <span className={`${styles.conn} ${conn === 'disconnected' ? styles.connBad : ''}`} role="status" aria-live="polite">
         {label}
