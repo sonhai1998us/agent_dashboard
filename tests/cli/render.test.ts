@@ -79,3 +79,11 @@ test('renderPlan không màu', () => {
   expect(out).toContain('Đăng nhập được');
   expect(out).not.toContain('Designer');
 });
+
+import { renderTickets } from '@/cli/render';
+
+test('renderTickets: vòng không vượt quá maxRounds', () => {
+  const out = renderTickets([{ id: 'T-1', title: 'Đăng nhập', status: 'running', round: 3, maxRounds: 3 } as any], false);
+  expect(out).toContain('đang chạy · vòng 3/3');
+  expect(out).not.toContain('4/3');
+});

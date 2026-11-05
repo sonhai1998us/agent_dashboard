@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import type { Plan } from '@/src/tickets/model';
-import { applyPlanEdit, planDiff } from '@/app/lib/planEdit';
+import { applyPlanEdit, planDiff, planEdited } from '@/app/lib/planEdit';
 
 const spec = { agent: 'claude' as const, model: 'claude-sonnet-5-5', effort: 'high' as const };
 const plan = (): Plan => ({
@@ -41,5 +41,17 @@ describe('planDiff', () => {
   test('file added', () => {
     const after = applyPlanEdit(plan(), { type: 'pkgFiles', id: 'p1', text: 'a.ts\nsrc/x.ts' });
     expect(planDiff(plan(), after)).toEqual(['gói p1: thêm src/x.ts']);
+  });
+});
+
+describe('planEdited', () => {
+  test('không sửa gì → false', () => expect(planEdited(plan(), plan())).toBe(false));
+  test('đổi thứ tự hoặc lặp file (planDiff không thấy) vẫn là đã sửa', () => {
+    const reordered = { ...plan(), packages: [...plan().packages].reverse() };
+    expect(planDiff(plan(), reordered)).toEqual([]);
+    expect(planEdited(plan(), reordered)).toBe(true);
+    const dup = applyPlanEdit(plan(), { type: 'pkgFiles', id: 'p1', text: 'a.ts\na.ts' });
+    expect(planDiff(plan(), dup)).toEqual([]);
+    expect(planEdited(plan(), dup)).toBe(true);
   });
 });

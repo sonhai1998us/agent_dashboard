@@ -68,6 +68,7 @@ describe('git helpers', () => {
     const r = join(root, 'signed');
     mkdirSync(r);
     g(r, 'init', '-q');
+    g(r, 'config', 'core.autocrlf', 'false');
     writeFileSync(join(r, 'a.txt'), 'a\n');
     g(r, 'add', '-A');
     g(r, '-c', 'user.name=T', '-c', 'user.email=t@localhost', 'commit', '-q', '-m', 'first');
@@ -81,6 +82,7 @@ describe('git helpers', () => {
     const r = join(root, 'hooked');
     mkdirSync(r);
     g(r, 'init', '-q');
+    g(r, 'config', 'core.autocrlf', 'false');
     writeFileSync(join(r, 'a.txt'), 'a\n');
     g(r, 'add', '-A');
     g(r, '-c', 'user.name=T', '-c', 'user.email=t@localhost', 'commit', '-q', '-m', 'first');

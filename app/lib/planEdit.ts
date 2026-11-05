@@ -27,6 +27,9 @@ export function applyPlanEdit(p: Plan, e: PlanEdit): Plan {
   }
 }
 
+/** Có sửa gì không (kể cả đổi thứ tự hay file lặp mà planDiff không liệt kê). */
+export const planEdited = (before: Plan, after: Plan): boolean => JSON.stringify(before) !== JSON.stringify(after);
+
 export function planDiff(before: Plan, after: Plan): string[] {
   const out: string[] = [];
   for (const role of Object.keys(ROLE_LABEL) as WorkRole[]) {

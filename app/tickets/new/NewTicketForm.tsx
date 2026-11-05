@@ -175,9 +175,10 @@ export default function NewTicketForm() {
                     <span className={styles.roleName}>{label}</span>
                     <label className={styles.sub}>
                       <span>Agent</span>
+                      {/* Controller luôn là claude (cần MCP và hook guard) */}
                       <select value={s.agent} onChange={(e) => setSpec(role, { agent: e.target.value as AgentKind })}>
                         <option value="claude">claude</option>
-                        <option value="codex" disabled={caps?.codex === false}>codex</option>
+                        {role !== 'controller' && <option value="codex" disabled={caps?.codex === false}>codex</option>}
                       </select>
                     </label>
                     <label className={styles.sub}>

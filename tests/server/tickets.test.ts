@@ -108,7 +108,10 @@ test('POST /api/tickets: 201 planning; 415; Origin lạ 403; không phải repo 
   const badOv = await post('/api/tickets', { title: 'x', dir: repo, overrides: { dev: { model: 'gpt-x', effort: 'turbo' }, boss: {} } });
   expect(badOv.status).toBe(400);
   expect(badOv.json.errors.length).toBe(3);
-  const goodOv = await post('/api/tickets', { title: 'y', dir: repo, overrides: { dev: { model: 'claude-haiku-5-5' }, qc: { effort: 'low' } } });
+  const codexCtrl = await post('/api/tickets', { title: 'x', dir: repo, overrides: { controller: { agent: 'codex' } } });
+  expect(codexCtrl.status).toBe(400);
+  expect(codexCtrl.json.error).toBe('overrides.controller.agent: Controller luôn là claude');
+  const goodOv = await post('/api/tickets',{ title: 'y', dir: repo, overrides: { dev: { model: 'claude-haiku-5-5' }, qc: { effort: 'low' } } });
   expect(goodOv.status).toBe(201);
   expect(goodOv.json.overrides).toEqual({ dev: { model: 'claude-haiku-5-5' }, qc: { effort: 'low' } });
 

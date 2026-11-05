@@ -109,7 +109,8 @@ function overrides(v: unknown, core: Core): Ticket['overrides'] {
     const r = role as Role;
     const spec: NonNullable<Ticket['overrides'][Role]> = {};
     if (o.agent !== undefined) {
-      if (AGENTS.includes(o.agent as AgentKind)) spec.agent = o.agent as AgentKind;
+      if (r === 'controller' && o.agent === 'codex') errors.push('overrides.controller.agent: Controller luôn là claude');
+      else if (AGENTS.includes(o.agent as AgentKind)) spec.agent = o.agent as AgentKind;
       else errors.push(`overrides.${r}.agent: phải là claude hoặc codex`);
     }
     if (o.effort !== undefined) {

@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { postJson } from '../../../lib/liveStore';
-import { applyPlanEdit, planDiff, ROLE_LABEL, type PlanEdit } from '../../../lib/planEdit';
+import { applyPlanEdit, planDiff, planEdited, ROLE_LABEL, type PlanEdit } from '../../../lib/planEdit';
 import { ticketStatusText } from '../../../lib/tickets';
 import { filesOverlap } from '@/src/tickets/flow';
 import type { AgentKind, Effort, Plan, Ticket, WorkRole } from '@/src/tickets/model';
@@ -69,7 +69,7 @@ export default function PlanEditor({ id }: { id: string }) {
     setBusy(false);
   };
 
-  const approve = () => call('approve', diff.length ? { plan } : {});
+  const approve = () => call('approve', planEdited(orig, plan) ? { plan } : {});
   const revise = () => { if (feedback.trim()) void call('revise', { feedback: feedback.trim() }); };
   const cancel = () => { if (confirm(`Huỷ ticket ${ticket.id}?`)) void call('cancel', {}); };
 

@@ -11,6 +11,7 @@ describe('tickets helpers', () => {
   test('ticketStatusText: running hiện vòng', () => {
     const r = ticketStatusText(t({ status: 'running', round: 1, maxRounds: 3 }));
     expect(r.text).toBe('đang chạy · vòng 2/3');
+    expect(ticketStatusText(t({ status: 'running', round: 3, maxRounds: 3 })).text).toBe('đang chạy · vòng 3/3');
     expect(r.icon).toBe('●');
     expect(r.tone).toBe('run');
   });

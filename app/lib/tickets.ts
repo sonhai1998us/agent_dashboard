@@ -12,7 +12,7 @@ export function ticketStatusText(t: Ticket): StatusText {
     case 'draft': return { icon: '○', text: 'nháp', tone: 'wait' };
     case 'planning': return { icon: '●', text: 'đang lập kế hoạch', tone: 'run' };
     case 'awaiting_approval': return { icon: '▲', text: 'chờ duyệt', tone: 'warn' };
-    case 'running': return { icon: '●', text: `đang chạy · vòng ${t.round + 1}/${t.maxRounds}`, tone: 'run' };
+    case 'running': return { icon: '●', text: `đang chạy · vòng ${Math.min(t.round + 1, t.maxRounds)}/${t.maxRounds}`, tone: 'run' };
     case 'done': return { icon: '✓', text: 'xong', tone: 'ok' };
     case 'escalated': return { icon: '■', text: 'cần bạn quyết', tone: 'crit' };
     case 'cancelled': return { icon: '○', text: 'đã huỷ', tone: 'ended' };
