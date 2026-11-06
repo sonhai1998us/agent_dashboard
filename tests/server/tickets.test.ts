@@ -271,6 +271,24 @@ test('fs/check và fs/git-init', async () => {
   expect(init.json.head).toBeTruthy();
 });
 
+test('fs/dirs: duyệt thư mục cho hộp chọn dự án', async () => {
+  await start();
+  const l = await call('GET', `/api/fs/dirs?dir=${encodeURIComponent(tmp)}`);
+  expect(l.status).toBe(200);
+  expect(l.json.path).toBe(path.resolve(tmp));
+  expect(l.json.entries).toContainEqual({ name: 'Dự án', path: repo, isGit: true });
+  const inRepo = await call('GET', `/api/fs/dirs?dir=${encodeURIComponent(repo)}`);
+  expect(inRepo.json).toMatchObject({ isGit: true, parent: path.resolve(tmp) });
+  expect(inRepo.json.entries.map((e: { name: string }) => e.name)).toEqual(['src']); // .git bị ẩn
+  const roots = await call('GET', '/api/fs/dirs');
+  expect(roots.status).toBe(200);
+  expect(roots.json.path).toBeNull();
+  expect(roots.json.entries.length).toBeGreaterThan(0);
+  expect((await call('GET', '/api/fs/dirs?dir=rel')).status).toBe(400);
+  expect((await call('GET', `/api/fs/dirs?dir=${encodeURIComponent(path.join(tmp, 'none'))}`)).status).toBe(404);
+  expect((await post('/api/fs/dirs', {})).status).toBe(405);
+});
+
 test('snapshot có tickets/managed/waits/prices; WS nhận event ticket khi trạng thái đổi', async () => {
   const s = await start();
   const ws = new WebSocket(s.url.replace('http', 'ws') + '/ws');

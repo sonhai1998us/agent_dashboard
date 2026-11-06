@@ -10,6 +10,11 @@
 .form input, .form textarea, .form select { background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font: inherit; }
 .form textarea { resize: vertical; }
 .form input:focus-visible, .form textarea:focus-visible, .form select:focus-visible, .form summary:focus-visible, .linkBtn:focus-visible, .primary:focus-visible, .cancel:focus-visible, .back:focus-visible { outline: 2px solid var(--run); outline-offset: 2px; }
+.dirRow { display: flex; gap: 6px; }
+.dirRow input { flex: 1; min-width: 0; }
+.pickBtn { flex: none; background: var(--sel); color: var(--fg); border: 1px solid var(--border); border-radius: 6px; padding: 6px 12px; font: inherit; font-size: 12px; font-weight: 500; cursor: pointer; }
+.pickBtn:hover { border-color: var(--run); }
+.pickBtn:focus-visible { outline: 2px solid var(--run); outline-offset: 2px; }
 .status { min-height: 18px; font-size: 12px; }
 .ok { color: var(--ok); }
 .warn { color: var(--warn); }

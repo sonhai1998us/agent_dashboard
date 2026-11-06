@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import type http from 'node:http';
 import path from 'node:path';
 import { saveSettings, validateSettings } from '@/src/core/config';
+import { DirError, listDirs } from '@/src/core/dirs';
 import { inside } from '@/src/core/paths';
 import { agentMetrics, globalMetrics, type AgentMetrics } from '@/src/core/metrics';
 import { gitInfo, gitInit } from '@/src/git/git';
@@ -232,7 +233,15 @@ const ROUTES: Route[] = [
       return ok(await core.orchestrator.answerUserAction(id, { done: b.done, note }));
     },
   },
-  { method: 'GET', re: /^\/api\/fs\/check$/, run: async ({ url }) => ok(await gitInfo(absDir(url.searchParams.get('dir') ?? undefined))) },
+  {
+    method: 'GET', re: /^\/api\/fs\/dirs$/,
+    run: ({ url }) => {
+      const d = url.searchParams.get('dir');
+      try { return ok(listDirs(d === null || d === '' ? null : absDir(d))); }
+      catch (e) { throw e instanceof DirError ? new HttpError(e.status, e.message) : e; }
+    },
+  },
+  { method: 'GET', re: /^\/api\/fs\/check$/,run: async ({ url }) => ok(await gitInfo(absDir(url.searchParams.get('dir') ?? undefined))) },
   {
     method: 'POST', re: /^\/api\/fs\/git-init$/,
     run: async ({ req, core }) => {

@@ -4,6 +4,8 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useLive } from '../../lib/liveStore';
 import { recentDirs } from '../../lib/recentDirs';
+import { pickerStart } from '../../lib/dirs';
+import FolderPicker from '../../components/FolderPicker';
 import { roleOverrides } from '../../lib/tickets';
 import type { AgentKind, Effort, Role, RoleSpec } from '@/src/tickets/model';
 import styles from './NewTicketForm.module.css';
@@ -39,6 +41,7 @@ export default function NewTicketForm() {
   const [specs, setSpecs] = useState<Record<Role, RoleSpec> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [picking, setPicking] = useState(false);
 
   useEffect(() => {
     json<SettingsRes>('/api/settings').then((r) => {
@@ -131,8 +134,11 @@ export default function NewTicketForm() {
 
         <div className={styles.field}>
           <label htmlFor="nt-dir">Thư mục dự án</label>
-          <input id="nt-dir" className="mono" list="nt-dirs" value={dir} onChange={(e) => setDir(e.target.value)}
-            placeholder="D:\Work\du-an" aria-describedby="nt-dir-status" autoComplete="off" spellCheck={false} />
+          <div className={styles.dirRow}>
+            <input id="nt-dir" className="mono" list="nt-dirs" value={dir} onChange={(e) => setDir(e.target.value)}
+              placeholder="Bấm Chọn thư mục… (hoặc dán đường dẫn)" aria-describedby="nt-dir-status" autoComplete="off" spellCheck={false} />
+            <button type="button" className={styles.pickBtn} onClick={() => setPicking(true)}>Chọn thư mục…</button>
+          </div>
           <datalist id="nt-dirs">{dirs.map((d) => <option key={d} value={d} />)}</datalist>
           <div id="nt-dir-status" className={styles.status} aria-live="polite">
             {dir.trim() && checking && <span className={styles.muted}>Đang kiểm tra…</span>}
@@ -151,6 +157,11 @@ export default function NewTicketForm() {
             )}
           </div>
         </div>
+
+        <FolderPicker
+          open={picking} start={pickerStart(dir, dirs)} recent={dirs}
+          onPick={(d) => { setDir(d); setPicking(false); }} onClose={() => setPicking(false)}
+        />
 
         <details className={styles.roles}>
           <summary>Tuỳ chọn theo vai (Controller phải dùng đúng)</summary>

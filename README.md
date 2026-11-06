@@ -63,7 +63,7 @@ Có thể `npm link` để dùng lệnh `acctv` trực tiếp (`acctv serve|ls|w
 
 Từ Phần 2, dashboard có thể tự chạy agent theo ticket. Luồng làm việc:
 
-1. Tạo ticket (giao diện hoặc `acctv new`). Controller (luôn là Claude) đọc mã nguồn và đề xuất kế hoạch.
+1. Tạo ticket (giao diện hoặc `acctv new`). Trên giao diện, bấm "Chọn thư mục…" để duyệt thư mục dự án trên máy (repo git được đánh dấu `git`), hoặc dán đường dẫn. Controller (luôn là Claude) đọc mã nguồn và đề xuất kế hoạch.
 2. Bạn xem kế hoạch, sửa nếu cần rồi bấm Duyệt (hoặc `acctv approve`), hoặc yêu cầu sửa (`acctv revise`).
 3. Sau khi duyệt, Controller giao việc cho các subagent dev, designer, qc, tối đa 3 agent chạy song song và 3 vòng mỗi ticket (chỉnh được trong Settings).
 4. Ticket kết thúc ở `done`, `escalated` hoặc `cancelled`.
