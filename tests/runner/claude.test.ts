@@ -89,6 +89,34 @@ describe('createClaudeRunner', () => {
     expect(alive(child)).toBe(false);
   }, 40000);
 
+  it('đã có result mà tiến trình không thoát (cháu treo): dọn cả cây, kết quả vẫn thành công', async () => {
+    const result = JSON.parse(streamLines.find((l) => l.includes('"type":"result"'))!);
+    const s = setup({ '*': [{ steps: [{ spawnChild: true }, { emit: result }, { sleep: 60000 }] }] });
+    const pidFile = path.join(s.root, 'child.pid');
+    process.env.FAKE_CLAUDE_CHILD_PID = pidFile;
+    const runner = createClaudeRunner({ command: process.execPath, prefixArgs: [fake], guardScript, reapAfterResultMs: 300 });
+    const t = Date.now();
+    const r = await runner(s.spec, s.sink).done;
+    expect(Date.now() - t).toBeLessThan(15000);
+    expect(r).toMatchObject({ isError: false, killed: false, exitCode: 0, text: 'Done', costUsd: 0.0123 });
+    const child = Number(readFileSync(pidFile, 'utf8'));
+    const t2 = Date.now();
+    while (Date.now() - t2 < 5000 && alive(child)) await new Promise((res) => setTimeout(res, 50));
+    expect(alive(child)).toBe(false);
+  }, 40000);
+
+  it('kill() trong lúc chờ dọn sau result vẫn là killed', async () => {
+    const result = JSON.parse(streamLines.find((l) => l.includes('"type":"result"'))!);
+    const s = setup({ '*': [{ steps: [{ emit: result }, { sleep: 60000 }] }] });
+    const runner = createClaudeRunner({ command: process.execPath, prefixArgs: [fake], guardScript, reapAfterResultMs: 60000 });
+    const h = runner(s.spec, s.sink);
+    const t = Date.now();
+    while (Date.now() - t < 10000 && !s.events.some((e) => e.type === 'call_end' || e.type === 'agent')) await new Promise((res) => setTimeout(res, 50));
+    await new Promise((res) => setTimeout(res, 1000));
+    await h.kill();
+    expect(await h.done).toMatchObject({ killed: true, text: 'Done' });
+  }, 30000);
+
   it('exit 3 without result is an error with stderr as text', async () => {
     const s = setup({ '*': [{ steps: [{ stderr: 'boom: không chạy được' }, { exit: 3 }] }] });
     const r = await s.runner(s.spec, s.sink).done;
