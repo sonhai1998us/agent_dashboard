@@ -7,6 +7,8 @@ export interface RunSpec {
   tools: string[]; allowedTools: string[]; addDirs: string[]; runDir: string;
   /** Claude: chạy với quyền như người dùng: không giới hạn --tools, nạp cấu hình user và MCP server của người dùng (không --strict-mcp-config). */
   inheritUser?: boolean;
+  /** Claude: nạp MCP server và connector của người dùng (không --strict-mcp-config) nhưng giữ --tools và cấu hình project. */
+  userMcp?: boolean;
   mcp: { url: string; token: string } | null; guard: { port: number; token: string };
 }
 

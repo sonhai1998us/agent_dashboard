@@ -34,7 +34,14 @@ describe('vai explorer', () => {
     expect(r.text).toContain('(explorer, claude-haiku-5-5/high)');
     const id = `acctv:${T}:explorer-1`;
     const run = runOf(env, id)!;
-    expect(run.spec.tools).toEqual(['Read', 'Glob', 'Grep', 'mcp__acctv__request_user_action']);
+    expect(run.spec.tools).toEqual(['Read', 'Glob', 'Grep', 'ToolSearch', 'mcp__acctv__request_user_action']);
+    expect(run.spec.userMcp).toBe(true);
+    expect(run.spec.inheritUser).toBeUndefined();
+    // tool đọc của MCP người dùng: guard cho phép tường minh; tool ghi bị chặn
+    const tok = run.spec.guard.token;
+    expect(env.orch.guard(id, tok, { tool_name: 'mcp__claude_ai_Figma__get_design_context', tool_input: {}, cwd: run.spec.cwd })).toEqual({ allow: true, decide: true });
+    expect(env.orch.guard(id, tok, { tool_name: 'mcp__claude_ai_Figma__use_figma', tool_input: {}, cwd: run.spec.cwd })).toMatchObject({ allow: false });
+    expect(env.orch.guard(id, tok, { tool_name: 'Read', tool_input: { file_path: join(run.spec.cwd, 'src', 'a.ts') }, cwd: run.spec.cwd })).toEqual({ allow: true });
     expect(run.spec.systemPrompt).toMatch(/^ROLE: explorer\n\nBạn là Explorer/);
     expect(env.store.getAgent(id)).toMatchObject({ label: 'Explorer-1', role: 'explorer' });
     // không có vai trong kế hoạch → không giao được
@@ -63,5 +70,21 @@ describe('vai explorer', () => {
     const plan = TOOL_DEFS.find((d) => d.name === 'propose_plan')!.inputSchema as any;
     expect(plan.properties.plan.properties.roles.required).toContain('explorer');
     expect(systemPrompt('controller', { worktree: null, files: [], denyBash: [] })).toMatch(/Explorer/);
+  });
+});
+
+describe('guard: tool MCP của người dùng cho Explorer', () => {
+  const p = () => ({ role: 'explorer' as const, root: 'R', readRoots: [], allowedFiles: [], denyBash: [], checkCommands: [] });
+  it('chỉ tool đọc, không tool ghi/commit, không MCP của dashboard', () => {
+    for (const t of ['mcp__claude_ai_Figma__get_design_context', 'mcp__claude_ai_Figma__get_metadata', 'mcp__claude_ai_Figma__get_screenshot', 'mcp__claude_ai_Figma__whoami', 'mcp__claude_ai_Figma__search_design_system', 'mcp__claude_ai_Figma__create_session', 'mcp__jira__list_issues']) {
+      expect(checkTool(p(), t, {}, 'R')).toEqual({ allow: true, explicit: true });
+    }
+    for (const t of ['mcp__claude_ai_Figma__use_figma', 'mcp__claude_ai_Figma__upload_assets', 'mcp__claude_ai_Figma__download_assets', 'mcp__claude_ai_Figma__send_code_to_figma', 'mcp__github__push_files', 'mcp__acctv__spawn_agent', 'WebFetch']) {
+      expect(checkTool(p(), t, {}, 'R').allow).toBe(false);
+    }
+    expect(checkTool(p(), 'ToolSearch', { query: 'figma' }, 'R')).toEqual({ allow: true, explicit: true });
+    // vai khác không được
+    expect(checkTool({ ...p(), role: 'dev' }, 'mcp__claude_ai_Figma__get_metadata', {}, 'R').allow).toBe(false);
+    expect(checkTool({ ...p(), role: 'qc' }, 'ToolSearch', {}, 'R').allow).toBe(false);
   });
 });

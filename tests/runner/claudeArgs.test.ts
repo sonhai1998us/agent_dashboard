@@ -41,6 +41,12 @@ describe('buildClaudeArgs', () => {
     expect(a).toContain('--mcp-config');
     expect(a[a.indexOf('--permission-mode') + 1]).toBe('dontAsk');
   });
+  it('userMcp: MCP của người dùng nhưng vẫn giới hạn --tools và cấu hình project', () => {
+    const a = buildClaudeArgs(base({ userMcp: true }), files);
+    expect(a).not.toContain('--strict-mcp-config');
+    expect(a[a.indexOf('--tools') + 1]).toBe('Read,Edit');
+    expect(a[a.indexOf('--setting-sources') + 1]).toBe('project,local');
+  });
   it('never mentions bypass or dangerously', () => {
     for (const s of [base(), base({ resume: true })]) {
       expect(buildClaudeArgs(s, files).some((x) => /bypass|dangerously/i.test(x))).toBe(false);

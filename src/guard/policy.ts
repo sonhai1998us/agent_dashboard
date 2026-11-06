@@ -11,7 +11,17 @@ export interface GuardPolicy {
   /** Controller: thư mục không được ghi (dữ liệu dashboard, ~/.claude, ~/.codex). */
   protectedRoots?: string[];
 }
-export type GuardDecision = { allow: true } | { allow: false; reason: string; scope: boolean };
+/** `explicit`: hook trả "allow" tường minh (tool không nằm trong --allowedTools, vd. tool MCP của người dùng). */
+export type GuardDecision = { allow: true; explicit?: true } | { allow: false; reason: string; scope: boolean };
+
+/** Tool MCP chỉ đọc của người dùng mà Explorer được dùng (vd. Figma get_design_context, get_metadata, whoami). */
+const MCP_READ = /^(get|list|search|read|fetch|whoami|describe|query)(_|$)|^create_session$/i;
+
+export function isUserMcpReadTool(toolName: string): boolean {
+  if (!toolName.startsWith('mcp__') || toolName.startsWith('mcp__acctv__')) return false;
+  const tool = toolName.split('__').slice(2).join('__');
+  return MCP_READ.test(tool) && !MCP_GIT_WRITE.test(tool);
+}
 
 /** Tool MCP duy nhất của worker: nhờ người dùng làm việc agent không tự làm được (đăng nhập…). */
 export const USER_ACTION_TOOL = 'mcp__acctv__request_user_action';
@@ -163,6 +173,10 @@ export function checkTool(p: GuardPolicy, toolName: string, input: unknown, cwd:
     }
   }
   if (toolName === USER_ACTION_TOOL) return { allow: true };
+  if (p.role === 'explorer') {
+    if (toolName === 'ToolSearch') return { allow: true, explicit: true };
+    if (isUserMcpReadTool(toolName)) return { allow: true, explicit: true };
+  }
   return deny(`tool ${toolName} không được phép cho vai ${p.role}`);
 }
 

@@ -9,7 +9,7 @@ export function buildClaudeArgs(spec: RunSpec, files: { systemPromptFile: string
     '--permission-mode', 'dontAsk', '--setting-sources', spec.inheritUser ? 'user,project,local' : 'project,local',
     ...(spec.inheritUser ? [] : ['--tools', spec.tools.join(',')]), '--allowedTools', spec.allowedTools.join(','),
     '--append-system-prompt-file', files.systemPromptFile, '--settings', files.settingsFile,
-    '--mcp-config', files.mcpFile, ...(spec.inheritUser ? [] : ['--strict-mcp-config']),
+    '--mcp-config', files.mcpFile, ...(spec.inheritUser || spec.userMcp ? [] : ['--strict-mcp-config']),
   ];
   for (const d of spec.addDirs) args.push('--add-dir', d);
   return args;

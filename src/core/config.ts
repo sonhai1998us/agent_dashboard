@@ -14,6 +14,8 @@ export interface Thresholds {
 
 export interface Settings {
   roleDefaults: Record<Role, RoleSpec>;
+  /** Model/effort của Controller sau khi kế hoạch được duyệt (giao việc, đọc báo cáo, kết thúc). null: dùng như lúc lập kế hoạch. */
+  controllerExec: { model: string; effort: Effort } | null;
   allowedModels: Record<AgentKind, string[]>;
   denyBash: string[];
   checkCommands: string[];
@@ -49,9 +51,10 @@ export const DEFAULT_SETTINGS: Settings = {
     controller: { agent: 'claude', model: 'claude-opus-5-5', effort: 'xhigh' },
     explorer: { agent: 'claude', model: 'claude-haiku-5-5', effort: 'high' },
     dev: { agent: 'claude', model: 'claude-sonnet-5-5', effort: 'high' },
-    designer: { agent: 'claude', model: 'claude-sonnet-5-5', effort: 'high' },
-    qc: { agent: 'claude', model: 'claude-sonnet-5-5', effort: 'high' },
+    designer: { agent: 'claude', model: 'claude-haiku-5-5', effort: 'high' },
+    qc: { agent: 'claude', model: 'claude-haiku-5-5', effort: 'high' },
   },
+  controllerExec: { model: 'claude-sonnet-5-5', effort: 'high' },
   allowedModels: {
     claude: ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-fable-5-1'],
     codex: [],
@@ -120,6 +123,10 @@ function mergeSettings(raw: unknown): Settings {
   if (isObj(raw.allowedModels)) {
     for (const k of AGENTS) if (isStrArr(raw.allowedModels[k])) s.allowedModels[k] = raw.allowedModels[k] as string[];
   }
+  if (raw.controllerExec === null) s.controllerExec = null;
+  else if (isObj(raw.controllerExec) && typeof raw.controllerExec.model === 'string' && raw.controllerExec.model && EFFORTS.includes(raw.controllerExec.effort as Effort)) {
+    s.controllerExec = { model: raw.controllerExec.model, effort: raw.controllerExec.effort as Effort };
+  }
   if (isRegexArr(raw.denyBash)) s.denyBash = raw.denyBash;
   if (isRegexArr(raw.checkCommands)) s.checkCommands = raw.checkCommands;
   if (isPosInt(raw.maxRounds)) s.maxRounds = raw.maxRounds;
@@ -147,6 +154,15 @@ export function validateSettings(
   if (!isRegexArr(s.denyBash)) errors.push('denyBash phải là mảng regex hợp lệ');
   if (!isRegexArr(s.checkCommands)) errors.push('checkCommands phải là mảng regex hợp lệ');
   if (!isPath(s.claudePath)) errors.push('claudePath phải là chuỗi hoặc null');
+  const ce = s.controllerExec;
+  if (ce !== undefined && ce !== null) {
+    if (!isObj(ce)) errors.push('controllerExec phải là {model, effort} hoặc null');
+    else {
+      const allowed = isObj(s.allowedModels) && isStrArr(s.allowedModels.claude) ? s.allowedModels.claude : [];
+      if (typeof ce.model !== 'string' || !allowed.includes(ce.model)) errors.push(`controllerExec.model: "${String(ce.model)}" không nằm trong danh sách cho phép của claude`);
+      if (!EFFORTS.includes(ce.effort as Effort)) errors.push('controllerExec.effort không hợp lệ');
+    }
+  }
   if (!isPath(s.codexPath)) errors.push('codexPath phải là chuỗi hoặc null');
   if (!isObj(s.prices) || !Object.values(s.prices).every(isPrice)) errors.push('prices phải ánh xạ model sang {in, out} ≥ 0');
   const am = isObj(s.allowedModels) ? s.allowedModels : {};
@@ -184,6 +200,8 @@ export function validateSettings(
   for (const [k, v] of Object.entries(s.prices as Record<string, { in: number; out: number }>)) prices[k] = { in: v.in, out: v.out };
   const settings: Settings = {
     roleDefaults: { controller: role('controller'), explorer: role('explorer'), dev: role('dev'), designer: role('designer'), qc: role('qc') },
+    controllerExec: ce === undefined ? structuredClone(DEFAULT_SETTINGS.controllerExec)
+      : ce === null ? null : { model: (ce as Record<string, unknown>).model as string, effort: (ce as Record<string, unknown>).effort as Effort },
     allowedModels: { claude: [...(am.claude as string[])], codex: [...(am.codex as string[])] },
     denyBash: [...(s.denyBash as string[])],
     checkCommands: [...(s.checkCommands as string[])],

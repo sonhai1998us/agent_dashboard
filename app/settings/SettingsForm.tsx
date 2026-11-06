@@ -32,6 +32,8 @@ const THEMES: { v: ThemePref; label: string }[] = [
 
 interface Form {
   roles: Record<Role, RoleSpec>;
+  /** model '' = như lúc lập kế hoạch */
+  ctrlExec: { model: string; effort: Effort };
   allowed: Record<AgentKind, string>;
   thr: Record<keyof Thresholds, string>;
   denyBash: string;
@@ -51,6 +53,7 @@ function toForm(s: Settings, t: Thresholds): Form {
   for (const { key, sec } of THRESHOLDS) thr[key] = String(sec ? t[key] / 1000 : t[key]);
   return {
     roles: structuredClone(s.roleDefaults),
+    ctrlExec: s.controllerExec ? { ...s.controllerExec } : { model: '', effort: s.roleDefaults.controller.effort },
     allowed: { claude: s.allowedModels.claude.join('\n'), codex: s.allowedModels.codex.join('\n') },
     thr,
     denyBash: s.denyBash.join('\n'),
@@ -71,6 +74,7 @@ function toBody(f: Form) {
   return {
     settings: {
       roleDefaults: f.roles,
+      controllerExec: f.ctrlExec.model ? { model: f.ctrlExec.model, effort: f.ctrlExec.effort } : null,
       allowedModels: { claude: lines(f.allowed.claude).map((x) => x.trim()), codex: lines(f.allowed.codex).map((x) => x.trim()) },
       denyBash: lines(f.denyBash),
       checkCommands: lines(f.checkCommands),
@@ -86,7 +90,7 @@ function toBody(f: Form) {
 
 const ALL_KEYS = [
   ...ROLES.flatMap((r) => ['agent', 'model', 'effort'].map((k) => `roleDefaults.${r.role}.${k}`)),
-  'allowedModels.claude', 'allowedModels.codex', 'denyBash', 'checkCommands', 'maxRounds', 'maxParallel', 'prices', 'claudePath', 'codexPath',
+  'controllerExec.model', 'controllerExec.effort', 'allowedModels.claude', 'allowedModels.codex', 'denyBash', 'checkCommands', 'maxRounds', 'maxParallel', 'prices', 'claudePath', 'codexPath',
   ...THRESHOLDS.map((t) => `thresholds.${t.key}`),
 ];
 
@@ -179,6 +183,27 @@ export default function SettingsForm() {
               </div>
             );
           })}
+          <div className={styles.roleRow}>
+            <span className={styles.roleName} title="Các lượt sau khi kế hoạch được duyệt: giao việc, đọc báo cáo, kết thúc. Lập kế hoạch vẫn dùng model của Controller ở trên.">Controller sau duyệt</span>
+            <Field label="Agent" errors={[]}>
+              {(id) => <select id={id} value="claude" disabled><option value="claude">claude</option></select>}
+            </Field>
+            <Field label="Model" errors={errs('controllerExec.model')}>
+              {(id) => (
+                <select id={id} value={form.ctrlExec.model} onChange={(e) => patch({ ctrlExec: { ...form.ctrlExec, model: e.target.value } })}>
+                  <option value="">(như lúc lập kế hoạch)</option>
+                  {modelOptions('claude', form.ctrlExec.model).filter(Boolean).map((m) => <option key={m} value={m}>{m}</option>)}
+                </select>
+              )}
+            </Field>
+            <Field label="Effort" errors={errs('controllerExec.effort')}>
+              {(id) => (
+                <select id={id} value={form.ctrlExec.effort} disabled={!form.ctrlExec.model} onChange={(e) => patch({ ctrlExec: { ...form.ctrlExec, effort: e.target.value as Effort } })}>
+                  {EFFORTS.map((x) => <option key={x} value={x}>{x}</option>)}
+                </select>
+              )}
+            </Field>
+          </div>
         </Section>
 
         <Section title="Model cho phép" hint="Mỗi dòng một model.">

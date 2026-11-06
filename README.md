@@ -68,6 +68,8 @@ Từ Phần 2, dashboard có thể tự chạy agent theo ticket. Luồng làm v
 3. Sau khi duyệt, Controller giao việc cho các subagent explorer, dev, designer, qc, tối đa 3 agent chạy song song và 3 vòng mỗi ticket (chỉnh được trong Settings).
 4. Ticket kết thúc ở `done`, `escalated` hoặc `cancelled`.
 
+Tiết kiệm token: Controller lập kế hoạch bằng model của vai controller (mặc định Opus xhigh), còn các lượt sau khi duyệt (giao việc, đọc báo cáo, kết thúc) chạy bằng `controllerExec` (mặc định Sonnet high, chỉnh ở mục "Controller sau duyệt" trong Settings, để trống thì dùng như lúc lập kế hoạch), cùng một session. Designer và QC mặc định Haiku. Explorer đọc được MCP và connector của người dùng (vd. Figma) nhưng guard chỉ cho tool đọc (`get_*`, `list_*`, `search_*`, `whoami`…), để phần đọc thiết kế và code nặng chạy trên model rẻ thay vì nằm lại trong context của Controller.
+
 Vai explorer (mặc định Haiku, effort high) chỉ đọc: tìm và đọc file liên quan tới một gói việc rồi báo lại để Controller giao Dev cụ thể hơn, đỡ tốn token của Controller. Explorer không tính vòng. Header ticket hiện tổng thời gian (từ lúc tạo tới event cuối, kèm thời gian chờ duyệt); mỗi lane trên timeline và panel gói việc hiện thời gian làm của agent. Trên màn hình rộng từ 1024px, ba cột cuộn riêng.
 
 Controller luôn là Claude. Codex chỉ dùng được cho worker dev, designer, qc.

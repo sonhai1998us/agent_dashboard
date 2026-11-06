@@ -41,7 +41,8 @@ interface WorkerRun {
 
 const MCP_TOOLS = ['propose_plan', 'spawn_agent', 'wait_agents', 'get_agent_log', 'finish'].map((n) => `mcp__acctv__${n}`);
 const WORKER_TOOLS: Record<WorkRole, string[]> = {
-  explorer: ['Read', 'Glob', 'Grep'],
+  // ToolSearch: nạp tool MCP của người dùng (vd. Figma), guard chỉ cho tool đọc
+  explorer: ['Read', 'Glob', 'Grep', 'ToolSearch'],
   dev: ['Read', 'Glob', 'Grep', 'Edit', 'Write', 'Bash'],
   designer: ['Read', 'Glob', 'Grep', 'Bash'],
   qc: ['Read', 'Glob', 'Grep', 'Bash'],
@@ -402,7 +403,7 @@ export class Orchestrator {
     const name = isStr(h.tool_name) ? h.tool_name : '';
     const d = checkTool(g.policy, name, h.tool_input, isStr(h.cwd) ? h.cwd : g.policy.root);
     if (!d.allow) return { allow: false, reason: d.reason };
-    return g.policy.role === 'controller' ? { allow: true, decide: true } : { allow: true };
+    return g.policy.role === 'controller' || d.explicit ? { allow: true, decide: true } : { allow: true };
   }
 
   async idle(): Promise<void> {
@@ -661,15 +662,18 @@ export class Orchestrator {
     this.mcpTokens.set(T, mcpToken);
     this.guards.set(id, { token, policy: this.policy('controller', t.dir, t.worktree ? [t.worktree] : [], []) });
     this.closeWaits(id);
-    this.saveManaged(id, { state: 'running', stopReason: null, endedAt: null });
+    // lập kế hoạch: model của vai controller; sau khi duyệt: settings.controllerExec (rẻ hơn), cùng session nhờ --resume
+    const run = this.controllerRunSpec(t);
+    if (run.model !== m.model || run.effort !== m.effort) this.log(T, `Controller chạy ${run.model}/${run.effort}${t.status === 'planning' ? ' (lập kế hoạch)' : ' (sau khi duyệt)'}`);
+    this.saveManaged(id, { state: 'running', stopReason: null, endedAt: null, model: run.model, effort: run.effort });
     // watcher bỏ qua transcript của agent acctv: chỉ khi đã thấy session này lúc phát hiện file → ingest trước khi chạy
     this.emitAgent({
       id, source: 'claude', sessionId: t.controllerSessionId, label: 'Controller', role: 'controller', parentId: null,
-      model: m.model, effort: m.effort, cwd: t.dir, status: 'running', lastEventAt: now, ...(firstSeen ? { startedAt: now } : {}),
+      model: run.model, effort: run.effort, cwd: t.dir, status: 'running', lastEventAt: now, ...(firstSeen ? { startedAt: now } : {}),
     });
     const spec: RunSpec = {
       agentId: id, ticketId: T, role: 'controller', agent: 'claude', label: 'Controller', parentId: null, cwd: t.dir,
-      model: m.model, effort: m.effort, prompt: message,
+      model: run.model, effort: run.effort, prompt: message,
       systemPrompt: systemPrompt('controller', { worktree: t.worktree, files: [], denyBash: this.settings.denyBash }),
       // quyền như người dùng: mọi tool, MCP server và cấu hình Claude của người dùng; guard chặn commit/push và thư mục được bảo vệ
       sessionId: t.controllerSessionId, resume, tools: [], allowedTools: [...MCP_TOOLS], inheritUser: true,
@@ -798,6 +802,8 @@ export class Orchestrator {
       addDirs: [], runDir: this.runDir(id),
       // claude: MCP riêng của worker (request_user_action), xác thực bằng token guard; codex chưa nối MCP
       mcp: m.runner === 'claude' ? { url: `http://127.0.0.1:${port}/mcp?agent=${encodeURIComponent(id)}`, token } : null,
+      // Explorer đọc thiết kế / tài liệu qua MCP và connector của người dùng (Figma…); guard chỉ cho tool đọc
+      ...(role === 'explorer' && m.runner === 'claude' ? { userMcp: true } : {}),
       guard: { port, token },
     };
     this.saveManaged(id, { state: 'running' });
@@ -1111,6 +1117,14 @@ export class Orchestrator {
     const t = this.deps.tickets.getTicket(id);
     if (!t) throw new OrchestratorError(404, `Không tìm thấy ticket ${id}`);
     return t;
+  }
+
+  /** Model/effort cho lượt Controller: lúc lập kế hoạch theo vai controller (lựa chọn của người dùng hoặc mặc định), sau khi duyệt theo controllerExec. */
+  private controllerRunSpec(t: Ticket): { model: string; effort: RoleSpec['effort'] } {
+    const plan = this.roleSpec(t, 'controller');
+    const exec = this.settings.controllerExec;
+    if (t.status === 'planning' || !exec) return { model: plan.model, effort: plan.effort };
+    return (this.settings.allowedModels.claude ?? []).includes(exec.model) ? { model: exec.model, effort: exec.effort } : { model: plan.model, effort: plan.effort };
   }
 
   private roleSpec(t: Ticket, role: Role): RoleSpec {
