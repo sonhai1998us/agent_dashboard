@@ -25,6 +25,7 @@
 .pill[data-tone='run'] { border-color: var(--run); color: var(--run); }
 .pill[data-tone='warn'] { border-color: var(--warn); color: var(--warn); }
 .pill[data-tone='crit'] { border-color: var(--err); color: var(--err); }
+.dur { color: var(--muted); font-size: 10px; flex: none; white-space: nowrap; }
 .model { color: var(--muted); font-size: 10px; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .plabel { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .notch { fill: var(--err); stroke: var(--fg); stroke-width: 1; }

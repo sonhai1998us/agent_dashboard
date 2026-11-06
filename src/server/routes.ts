@@ -14,7 +14,7 @@ import type { Core } from './core';
 const HOUR_MS = 3600_000;
 const GUARD_BODY_MAX = 32_000_000; // input của Write có thể chứa cả file
 const STOP_REASON = 'người dùng dừng';
-const ROLES: Role[] = ['controller', 'dev', 'designer', 'qc'];
+const ROLES: Role[] = ['controller', 'explorer', 'dev', 'designer', 'qc'];
 const AGENTS: AgentKind[] = ['claude', 'codex'];
 const EFFORTS: Effort[] = ['low', 'medium', 'high', 'xhigh', 'max'];
 

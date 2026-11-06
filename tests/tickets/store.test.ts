@@ -13,6 +13,7 @@ const ticket = (over: Partial<Ticket> = {}): Ticket => ({
     summary: 's', difficulty: 'easy', acceptance: ['ok'],
     packages: [{ id: 'p1', role: 'dev', title: 'x', task: 'do', files: ['a.ts'] }],
     roles: {
+      explorer: { agent: 'claude', model: 'claude-haiku-5-5', effort: 'high', count: 0 },
       dev: { agent: 'claude', model: 'claude-sonnet-5-5', effort: 'high', count: 1 },
       designer: { agent: 'claude', model: 'claude-sonnet-5-5', effort: 'high', count: 0 },
       qc: { agent: 'claude', model: 'claude-sonnet-5-5', effort: 'high', count: 1 },
@@ -94,4 +95,13 @@ test('managed: userAction lưu và đọc lại; DB cũ không có cột thì đ
   ts.updateManaged('acctv:T-1:dev-1', { userAction: null });
   expect(ts.getManaged('acctv:T-1:dev-1')!.userAction).toBeNull();
   s.close();
+});
+
+test('kế hoạch lưu trước khi có vai explorer được bổ sung explorer count 0 khi đọc', () => {
+  const ts = new TicketStore(new Store(':memory:'));
+  const t = ticket();
+  const { explorer: _drop, ...roles } = t.plan!.roles;
+  ts.createTicket({ ...t, plan: { ...t.plan!, roles: roles as never } });
+  expect(ts.getTicket('T-1')!.plan!.roles.explorer).toEqual({ agent: 'claude', model: 'claude-haiku-5-5', effort: 'high', count: 0 });
+  expect(ts.getTicket('T-1')!.plan!.roles.dev).toEqual(t.plan!.roles.dev);
 });

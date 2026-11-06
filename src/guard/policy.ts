@@ -156,7 +156,7 @@ export function checkTool(p: GuardPolicy, toolName: string, input: unknown, cwd:
       const d = shellDeny(p, input);
       if (d) return d;
       const cmd = strField(input, 'command')!;
-      if (p.role === 'designer' || p.role === 'qc') {
+      if (p.role === 'designer' || p.role === 'qc' || p.role === 'explorer') {
         if (CHAIN.test(cmd) || !p.checkCommands.some((re) => re.test(cmd))) return deny(`vai ${p.role} chỉ chạy lệnh kiểm tra`);
       }
       return { allow: true };

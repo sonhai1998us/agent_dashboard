@@ -6,7 +6,7 @@ const spec = { agent: 'claude' as const, model: 'claude-sonnet-5-5', effort: 'hi
 const plan = (): Plan => ({
   summary: 's', difficulty: 'easy',
   packages: [{ id: 'p1', role: 'dev', title: 'A', task: 't', files: ['a.ts'] }, { id: 'p3', role: 'dev', title: 'B', task: 't', files: [] }],
-  roles: { dev: { ...spec, count: 2 }, designer: { ...spec, count: 0 }, qc: { ...spec, count: 1 } },
+  roles: { explorer: { ...spec, count: 0 }, dev: { ...spec, count: 2 }, designer: { ...spec, count: 0 }, qc: { ...spec, count: 1 } },
   acceptance: ['ok'],
 });
 

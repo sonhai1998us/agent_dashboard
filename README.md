@@ -65,8 +65,10 @@ Từ Phần 2, dashboard có thể tự chạy agent theo ticket. Luồng làm v
 
 1. Tạo ticket (giao diện hoặc `acctv new`). Trên giao diện, bấm "Chọn thư mục…" để duyệt thư mục dự án trên máy (repo git được đánh dấu `git`), hoặc dán đường dẫn. Controller (luôn là Claude) đọc mã nguồn và đề xuất kế hoạch.
 2. Bạn xem kế hoạch, sửa nếu cần rồi bấm Duyệt (hoặc `acctv approve`), hoặc yêu cầu sửa (`acctv revise`).
-3. Sau khi duyệt, Controller giao việc cho các subagent dev, designer, qc, tối đa 3 agent chạy song song và 3 vòng mỗi ticket (chỉnh được trong Settings).
+3. Sau khi duyệt, Controller giao việc cho các subagent explorer, dev, designer, qc, tối đa 3 agent chạy song song và 3 vòng mỗi ticket (chỉnh được trong Settings).
 4. Ticket kết thúc ở `done`, `escalated` hoặc `cancelled`.
+
+Vai explorer (mặc định Haiku, effort high) chỉ đọc: tìm và đọc file liên quan tới một gói việc rồi báo lại để Controller giao Dev cụ thể hơn, đỡ tốn token của Controller. Explorer không tính vòng. Header ticket hiện tổng thời gian (từ lúc tạo tới event cuối, kèm thời gian chờ duyệt); mỗi lane trên timeline và panel gói việc hiện thời gian làm của agent. Trên màn hình rộng từ 1024px, ba cột cuộn riêng.
 
 Controller luôn là Claude. Codex chỉ dùng được cho worker dev, designer, qc.
 
@@ -93,6 +95,7 @@ acctv ls | watch | logs         # nhận biết ticket và agent do dashboard ch
 | --- | --- | --- | --- |
 | Controller | mọi nơi | mọi nơi, trừ `.git`, `ACCTV_HOME`, `~/.claude`, `~/.codex` | chỉ bị chặn bởi danh sách deny (gồm `git commit`/`push`) |
 | Dev | trong thư mục làm việc | chỉ file trong phạm vi được giao | chỉ bị chặn bởi danh sách deny |
+| Explorer | trong thư mục làm việc | không | không có tool Bash |
 | Designer, QC | trong thư mục làm việc | không | chỉ lệnh kiểm tra (`checkCommands`), không nối lệnh, không chuyển hướng, không dùng `--output` |
 
 Controller chạy với quyền như người dùng để đọc được ngữ cảnh khi lập kế hoạch: nạp cấu hình Claude của người dùng (`--setting-sources user,project,local`, gồm plugin và hook của người dùng), các MCP server và connector của người dùng (không `--strict-mcp-config`), dùng mọi tool kể cả CLI như `twg`. Guard cho phép tường minh mọi tool, trừ: lệnh khớp danh sách deny (gồm `git commit`, `git push`, lệnh git đổi nhánh/remote, gọi API của dashboard), lệnh nền, tool MCP có tên kiểu commit/push/merge (vd. `push_files`, `create_or_update_file`, `merge_pull_request`), `EnterWorktree`, và ghi vào `.git`, `ACCTV_HOME`, `~/.claude`, `~/.codex`. Lệnh chạy bằng shell vẫn có thể ghi file ở mọi nơi; Controller được dặn không tự sửa code mà giao Dev.

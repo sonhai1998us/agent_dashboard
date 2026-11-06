@@ -7,6 +7,7 @@ const plan: Plan = {
   summary: 'Thêm trang đăng nhập', difficulty: 'medium', acceptance: ['Đăng nhập được', 'Test xanh'],
   packages: [{ id: 'p1', role: 'dev', title: 'Form', task: 'Viết form', files: ['src/login.tsx'] }],
   roles: {
+    explorer: { agent: 'claude', model: 'claude-haiku-5-5', effort: 'high', count: 0 },
     dev: { agent: 'claude', model: 'claude-sonnet-5-5', effort: 'high', count: 1 },
     designer: { agent: 'claude', model: 'claude-sonnet-5-5', effort: 'high', count: 0 },
     qc: { agent: 'claude', model: 'claude-sonnet-5-5', effort: 'high', count: 1 },

@@ -10,7 +10,7 @@ import type { AgentKind, Effort, Plan, Ticket, WorkRole } from '@/src/tickets/mo
 import styles from './PlanEditor.module.css';
 
 const EFFORTS: Effort[] = ['low', 'medium', 'high', 'xhigh', 'max'];
-const ROLES: WorkRole[] = ['dev', 'designer', 'qc'];
+const ROLES: WorkRole[] = ['explorer', 'dev', 'designer', 'qc'];
 interface SettingsRes { settings: { allowedModels: Record<AgentKind, string[]> } }
 
 export default function PlanEditor({ id }: { id: string }) {

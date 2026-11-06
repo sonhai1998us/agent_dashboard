@@ -1,6 +1,13 @@
 import type { DatabaseSync } from 'node:sqlite';
 import type { Store } from '@/src/core/store';
-import type { ManagedAgent, Ticket, WaitSpan } from './model';
+import { DEFAULT_SETTINGS } from '@/src/core/config';
+import type { ManagedAgent, Plan, Ticket, WaitSpan } from './model';
+
+/** Kế hoạch lưu trước khi có vai explorer: thêm vai đó với count 0 để mọi chỗ đọc plan.roles đều đủ vai. */
+function withAllRoles(p: Plan | null): Plan | null {
+  if (!p || !p.roles || p.roles.explorer) return p;
+  return { ...p, roles: { ...p.roles, explorer: { ...DEFAULT_SETTINGS.roleDefaults.explorer, count: 0 } } };
+}
 
 type Row = Record<string, any>;
 
@@ -24,7 +31,7 @@ const unjson = <T>(s: string | null | undefined): T | null => (s === null || s =
 function toTicket(r: Row): Ticket {
   return {
     id: r.id, seq: r.seq, title: r.title, description: r.description, dir: r.dir, status: r.status,
-    overrides: unjson(r.overrides) ?? {}, plan: unjson(r.plan), feedback: r.feedback ?? null,
+    overrides: unjson(r.overrides) ?? {}, plan: withAllRoles(unjson(r.plan)), feedback: r.feedback ?? null,
     round: r.round, maxRounds: r.max_rounds, controllerSessionId: r.controller_session,
     branch: r.branch ?? null, worktree: r.worktree ?? null, baseRef: r.base_ref ?? null,
     pendingWait: unjson(r.pending_wait), report: r.report ?? null, diffStat: r.diff_stat ?? null,

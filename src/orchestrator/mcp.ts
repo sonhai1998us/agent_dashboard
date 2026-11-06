@@ -31,7 +31,7 @@ const PLAN_SCHEMA = {
         additionalProperties: false,
         properties: {
           id: { type: 'string' },
-          role: { type: 'string', enum: ['dev', 'designer', 'qc'] },
+          role: { type: 'string', enum: ['explorer', 'dev', 'designer', 'qc'] },
           title: { type: 'string' },
           task: { type: 'string' },
           files: { type: 'array', items: { type: 'string' }, description: 'File/thư mục gói này được sửa.' },
@@ -43,8 +43,8 @@ const PLAN_SCHEMA = {
       type: 'object',
       description: 'Cấu hình cho từng vai.',
       additionalProperties: false,
-      properties: { dev: roleSpec, designer: roleSpec, qc: roleSpec },
-      required: ['dev', 'designer', 'qc'],
+      properties: { explorer: roleSpec, dev: roleSpec, designer: roleSpec, qc: roleSpec },
+      required: ['explorer', 'dev', 'designer', 'qc'],
     },
     acceptance: { type: 'array', items: { type: 'string' }, description: 'Tiêu chí nghiệm thu.' },
   },
@@ -61,12 +61,12 @@ export const TOOL_DEFS: { name: 'propose_plan' | 'spawn_agent' | 'wait_agents' |
   },
   {
     name: 'spawn_agent',
-    description: 'Giao một gói việc cho subagent (dev, designer hoặc qc). files là phạm vi được sửa; sửa ngoài phạm vi sẽ bị chặn. Trả về id agent để dùng với wait_agents và get_agent_log.',
+    description: 'Giao một gói việc cho subagent (explorer, dev, designer hoặc qc). Explorer chỉ đọc: tìm và đọc file liên quan rồi báo lại để bạn giao Dev. files là phạm vi được sửa (explorer, designer, qc: file cần tập trung); sửa ngoài phạm vi sẽ bị chặn. Trả về id agent để dùng với wait_agents và get_agent_log.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        role: { type: 'string', enum: ['dev', 'designer', 'qc'] },
+        role: { type: 'string', enum: ['explorer', 'dev', 'designer', 'qc'] },
         packageId: { type: 'string', description: 'Id gói việc trong kế hoạch.' },
         task: { type: 'string', description: 'Việc cần làm, đủ ngữ cảnh để làm độc lập.' },
         files: { type: 'array', items: { type: 'string' }, description: 'File/thư mục agent được sửa.' },

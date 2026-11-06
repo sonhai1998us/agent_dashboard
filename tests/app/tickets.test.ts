@@ -2,7 +2,7 @@ import { describe, expect, test } from 'vitest';
 import type { AgentInfo } from '@/src/core/model';
 import type { Ticket } from '@/src/tickets/model';
 import type { WaitSpan } from '@/src/tickets/model';
-import { controllerIdOf, isExternal, layoutWaits, managedStateText, replayRange, reportBlocks, roleOverrides, statusAction, ticketStatusText } from '@/app/lib/tickets';
+import { agentWorkMs, ticketDuration, controllerIdOf, isExternal, layoutWaits, managedStateText, replayRange, reportBlocks, roleOverrides, statusAction, ticketStatusText } from '@/app/lib/tickets';
 
 const t = (o: Partial<Ticket>): Ticket => ({ id: 'T-1', status: 'draft', round: 0, maxRounds: 3, ...o } as Ticket);
 
@@ -104,8 +104,38 @@ describe('reportBlocks: markdown nhẹ của báo cáo Controller', () => {
 describe('roleOverrides: form gửi đúng lựa chọn đang hiển thị cho mọi vai', () => {
   test('mọi vai đều được gửi, kể cả khi trùng mặc định', () => {
     const spec = (model: string) => ({ agent: 'claude' as const, model, effort: 'high' as const });
-    const specs = { controller: spec('claude-opus-5-5'), dev: spec('claude-sonnet-5-5'), designer: spec('claude-sonnet-5-5'), qc: spec('claude-haiku-5-5') };
+    const specs = { controller: spec('claude-opus-5-5'), explorer: spec('claude-haiku-5-5'), dev: spec('claude-sonnet-5-5'), designer: spec('claude-sonnet-5-5'), qc: spec('claude-haiku-5-5') };
     expect(roleOverrides(specs)).toEqual(specs);
     expect(roleOverrides(specs).dev).not.toBe(specs.dev);
+  });
+});
+
+describe('thời gian ticket và subagent', () => {
+  const agent = (id: string, startedAt: number, lastEventAt: number, status: AgentInfo['status'] = 'ended') =>
+    ({ id, startedAt, lastEventAt, status }) as AgentInfo;
+  const tk = (status: Ticket['status']) => ({ id: 'T-4', status, createdAt: 1_000, updatedAt: 99_000 }) as Ticket;
+  const wait = (agentId: string, kind: WaitSpan['kind'], startedAt: number, endedAt: number | null): WaitSpan => ({ id: `${agentId}-${startedAt}`, agentId, kind, startedAt, endedAt });
+
+  test('agentWorkMs: đã xong tính tới event cuối, đang chạy tính tới now', () => {
+    expect(agentWorkMs(agent('a', 1_000, 61_000), 500_000)).toBe(60_000);
+    expect(agentWorkMs(agent('a', 1_000, 5_000, 'running'), 31_000)).toBe(30_000);
+    expect(agentWorkMs(agent('a', 9_000, 5_000, 'idle'), 1_000)).toBe(0);
+  });
+
+  test('ticketDuration: đã xong → tới event cuối của agent trong ticket; chờ duyệt cộng riêng', () => {
+    const agents = [agent('acctv:T-4:controller', 1_000, 600_000), agent('acctv:T-4:dev-1', 200_000, 500_000), agent('acctv:T-5:dev-1', 0, 9_999_999), agent('claude:x', 0, 9_999_999)];
+    const waits = [
+      wait('acctv:T-4:controller', 'approval', 60_000, 120_000),
+      wait('acctv:T-4:controller', 'agents', 200_000, 500_000),
+      wait('acctv:T-5:controller', 'approval', 0, 900_000),
+    ];
+    expect(ticketDuration(tk('done'), agents, waits, 9e12)).toEqual({ totalMs: 599_000, approvalMs: 60_000, live: false });
+  });
+
+  test('ticketDuration: đang chạy → tới now; wait duyệt còn mở tính tới now', () => {
+    const waits = [wait('acctv:T-4:controller', 'approval', 61_000, null)];
+    expect(ticketDuration(tk('awaiting_approval'), [], waits, 121_000)).toEqual({ totalMs: 120_000, approvalMs: 60_000, live: true });
+    // chưa có agent và đã huỷ: dùng updatedAt
+    expect(ticketDuration(tk('cancelled'), [], [], 9e12).totalMs).toBe(98_000);
   });
 });

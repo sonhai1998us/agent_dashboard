@@ -3,10 +3,19 @@
 .panel { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 10px; min-height: 200px; }
 .ph { color: var(--muted); font-size: 12px; }
 
-/* dưới 1024px: một cột; thứ tự DOM là trái (select), giữa, phải => cột phải nằm dưới */
-@media (max-width: 1023px) {
-  .grid { grid-template-columns: 1fr; }
-}
 .left { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .mid { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .mid > :last-child { flex: 1; }
+
+/* từ 1024px: trang vừa khung hình, mỗi cột cuộn riêng (cột giữa: ticket + timeline; cột phải: chi tiết agent) */
+@media (min-width: 1024px) {
+  .shell { height: 100vh; min-height: 0; overflow: hidden; }
+  .grid { min-height: 0; grid-template-rows: minmax(0, 1fr); }
+  .grid > * { min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+  .mid > :last-child { flex: 1 0 auto; }
+}
+
+/* dưới 1024px: một cột; thứ tự DOM là trái (select), giữa, phải => cột phải nằm dưới; cả trang cuộn chung */
+@media (max-width: 1023px) {
+  .grid { grid-template-columns: 1fr; }
+}

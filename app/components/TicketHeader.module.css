@@ -11,6 +11,7 @@
 .btn { background: transparent; border: 1px solid var(--border); border-radius: 6px; color: var(--fg); font: inherit; font-size: 12px; padding: 2px 9px; cursor: pointer; text-decoration: none; }
 .btn:hover:not(:disabled) { background: var(--sel); }
 .btn:disabled { opacity: .5; cursor: default; }
+.dur { color: var(--muted); font-size: 11px; white-space: nowrap; }
 .paths { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 4px; font-size: 11px; color: var(--muted); }
 .copy { background: transparent; border: 1px solid var(--border); border-radius: 4px; color: var(--muted); font: inherit; font-size: 10px; padding: 0 5px; cursor: pointer; }
 .copy:hover { background: var(--sel); color: var(--fg); }

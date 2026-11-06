@@ -10,7 +10,7 @@
 .sub > div { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cwd { font-family: var(--font-fira-code), ui-monospace, monospace; font-size: 10px; }
 
-.list { height: 320px; overflow-y: auto; overflow-x: hidden; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); scroll-behavior: auto; }
+.list { height: 320px; flex: none; overflow-y: auto; overflow-x: hidden; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); scroll-behavior: auto; }
 .row { position: absolute; top: 0; left: 0; width: 100%; padding: 4px 6px; border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent); font-size: 11px; cursor: pointer; }
 .row:hover { background: color-mix(in srgb, var(--sel) 60%, transparent); }
 .active { background: var(--sel); outline: 1px solid color-mix(in srgb, var(--warn) 60%, transparent); outline-offset: -1px; }
@@ -33,3 +33,6 @@
 .cell dt { font-size: 10px; color: var(--muted); }
 .cell dd { margin: 0; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .parse { font-size: 11px; color: var(--warn); }
+
+/* từ 1024px cột phải cuộn riêng: danh sách call kéo dài hết phần còn lại của cột */
+@media (min-width: 1024px) { .list { height: auto; flex: 1 0 320px; } }

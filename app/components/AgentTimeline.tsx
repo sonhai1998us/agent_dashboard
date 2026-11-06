@@ -2,11 +2,11 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import type { AgentInfo, Alert, CallRecord } from '@/src/core/model';
 import { ensureCalls, selectAgent, selectCall, useLive } from '../lib/liveStore';
-import { layoutWaits, replayRange } from '../lib/tickets';
+import { agentWorkMs, layoutWaits, replayRange } from '../lib/tickets';
 import type { WaitSpan } from '@/src/tickets/model';
 import { flattenTree } from '../lib/tree';
 import { DEFAULT_WINDOW_MIN, WINDOWS_MIN, layoutLane, waitingCallIds, type Bar, type LoopZone } from '../lib/lanes';
-import { fmtClock } from '../lib/format';
+import { fmtClock, fmtDuration } from '../lib/format';
 import { alertTag } from '../lib/detail';
 import { statusOf } from './SessionList';
 import styles from './AgentTimeline.module.css';
@@ -211,6 +211,7 @@ export default function AgentTimeline() {
                 <span className={styles.glyph} aria-hidden="true">{treeGlyph(n.depth, n.isLast)}</span>
                 <span className={styles.pill} data-tone={st.tone}><span aria-hidden="true">{st.icon}</span> <span className={styles.plabel}>{a.label}</span></span>
                 <span className={`${styles.model} mono`}>{[a.model, a.effort].filter(Boolean).join(' · ') || '—'}</span>
+                <span className={`${styles.dur} mono`} title="Thời gian làm: từ lúc được giao tới event cuối">{fmtDuration(agentWorkMs(a, frame.now))}</span>
                 {mine.length > 0 && (
                   <span className={`${styles.alert} mono`}>
                     {mine.map((x) => alertTag(x, frame.now)).join(' · ')}

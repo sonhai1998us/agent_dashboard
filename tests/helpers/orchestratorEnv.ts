@@ -93,6 +93,7 @@ export const validPlan = () => ({
     { id: 'p3', role: 'qc', title: 'Review', task: 'Review', files: [] },
   ],
   roles: {
+    explorer: { agent: 'claude', model: 'claude-haiku-5-5', effort: 'high', count: 0 },
     dev: { agent: 'claude', model: 'claude-sonnet-5-5', effort: 'high', count: 2 },
     designer: { agent: 'claude', model: 'claude-sonnet-5-5', effort: 'high', count: 0 },
     qc: { agent: 'claude', model: 'claude-sonnet-5-5', effort: 'high', count: 1 },

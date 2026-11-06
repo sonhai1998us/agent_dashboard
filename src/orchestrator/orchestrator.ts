@@ -41,12 +41,13 @@ interface WorkerRun {
 
 const MCP_TOOLS = ['propose_plan', 'spawn_agent', 'wait_agents', 'get_agent_log', 'finish'].map((n) => `mcp__acctv__${n}`);
 const WORKER_TOOLS: Record<WorkRole, string[]> = {
+  explorer: ['Read', 'Glob', 'Grep'],
   dev: ['Read', 'Glob', 'Grep', 'Edit', 'Write', 'Bash'],
   designer: ['Read', 'Glob', 'Grep', 'Bash'],
   qc: ['Read', 'Glob', 'Grep', 'Bash'],
 };
-const ROLE_LABEL: Record<WorkRole, string> = { dev: 'Dev', designer: 'Designer', qc: 'QC' };
-const WORK_ROLES: WorkRole[] = ['dev', 'designer', 'qc'];
+const ROLE_LABEL: Record<WorkRole, string> = { explorer: 'Explorer', dev: 'Dev', designer: 'Designer', qc: 'QC' };
+const WORK_ROLES: WorkRole[] = ['explorer', 'dev', 'designer', 'qc'];
 const AGENTS: AgentKind[] = ['claude', 'codex'];
 const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
 const LIVE: ManagedState[] = ['queued', 'running', 'limited'];
@@ -468,7 +469,7 @@ export class Orchestrator {
     const t = this.deps.tickets.getTicket(T);
     if (!t || t.status !== 'running' || !t.worktree || !t.plan) return fail(NOT_APPROVED);
     const role = args.role as WorkRole;
-    if (!WORK_ROLES.includes(role)) return fail('role phải là dev, designer hoặc qc');
+    if (!WORK_ROLES.includes(role)) return fail('role phải là explorer, dev, designer hoặc qc');
     if (role === 'dev' && t.round >= t.maxRounds) {
       return fail(`Đã hết ${t.maxRounds} vòng; hãy gọi finish với status "escalated" và nêu lỗi còn lại`);
     }

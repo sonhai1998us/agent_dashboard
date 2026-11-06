@@ -47,6 +47,7 @@ export const DEFAULT_THRESHOLDS: Thresholds = {
 export const DEFAULT_SETTINGS: Settings = {
   roleDefaults: {
     controller: { agent: 'claude', model: 'claude-opus-5-5', effort: 'xhigh' },
+    explorer: { agent: 'claude', model: 'claude-haiku-5-5', effort: 'high' },
     dev: { agent: 'claude', model: 'claude-sonnet-5-5', effort: 'high' },
     designer: { agent: 'claude', model: 'claude-sonnet-5-5', effort: 'high' },
     qc: { agent: 'claude', model: 'claude-sonnet-5-5', effort: 'high' },
@@ -81,7 +82,7 @@ export const DEFAULT_SETTINGS: Settings = {
   codexPath: null,
 };
 
-const ROLES: Role[] = ['controller', 'dev', 'designer', 'qc'];
+const ROLES: Role[] = ['controller', 'explorer', 'dev', 'designer', 'qc'];
 const AGENTS: AgentKind[] = ['claude', 'codex'];
 const EFFORTS: Effort[] = ['low', 'medium', 'high', 'xhigh', 'max'];
 
@@ -182,7 +183,7 @@ export function validateSettings(
   const prices: Settings['prices'] = {};
   for (const [k, v] of Object.entries(s.prices as Record<string, { in: number; out: number }>)) prices[k] = { in: v.in, out: v.out };
   const settings: Settings = {
-    roleDefaults: { controller: role('controller'), dev: role('dev'), designer: role('designer'), qc: role('qc') },
+    roleDefaults: { controller: role('controller'), explorer: role('explorer'), dev: role('dev'), designer: role('designer'), qc: role('qc') },
     allowedModels: { claude: [...(am.claude as string[])], codex: [...(am.codex as string[])] },
     denyBash: [...(s.denyBash as string[])],
     checkCommands: [...(s.checkCommands as string[])],

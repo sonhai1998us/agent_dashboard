@@ -1,5 +1,6 @@
 export type TicketStatus = 'draft' | 'planning' | 'awaiting_approval' | 'running' | 'done' | 'escalated' | 'cancelled';
-export type Role = 'controller' | 'dev' | 'designer' | 'qc';
+/** explorer: đọc và tìm file liên quan để Controller giao cho Dev (chỉ đọc). */
+export type Role = 'controller' | 'explorer' | 'dev' | 'designer' | 'qc';
 export type WorkRole = Exclude<Role, 'controller'>;
 export type AgentKind = 'claude' | 'codex';
 export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';

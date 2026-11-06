@@ -7,7 +7,7 @@ export type PlanEdit =
   | { type: 'addPkg'; role: WorkRole } | { type: 'removePkg'; id: string }
   | { type: 'acceptance'; text: string };
 
-export const ROLE_LABEL: Record<WorkRole, string> = { dev: 'Dev', designer: 'Designer', qc: 'QC' };
+export const ROLE_LABEL: Record<WorkRole, string> = { explorer: 'Explorer', dev: 'Dev', designer: 'Designer', qc: 'QC' };
 
 const lines = (text: string) => text.split('\n').map((l) => l.trim()).filter(Boolean);
 

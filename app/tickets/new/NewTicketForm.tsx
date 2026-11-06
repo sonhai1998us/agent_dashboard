@@ -15,6 +15,7 @@ interface SettingsRes { settings: { allowedModels: Record<AgentKind, string[]>; 
 
 const ROLES: { role: Role; label: string }[] = [
   { role: 'controller', label: 'Controller' },
+  { role: 'explorer', label: 'Explorer' },
   { role: 'dev', label: 'Dev' },
   { role: 'designer', label: 'Designer' },
   { role: 'qc', label: 'QC' },

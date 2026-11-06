@@ -1,8 +1,10 @@
 'use client';
-import { Fragment, useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { postJson, useLive } from '../lib/liveStore';
-import { reportBlocks, statusAction, ticketStatusText, type Inline } from '../lib/tickets';
+import { reportBlocks, statusAction, ticketDuration, ticketStatusText, type Inline } from '../lib/tickets';
+import { fmtDuration } from '../lib/format';
+import type { Ticket } from '@/src/tickets/model';
 import styles from './TicketHeader.module.css';
 
 function Parts({ parts }: { parts: Inline[] }) {
@@ -25,6 +27,24 @@ function Report({ text }: { text: string }) {
           : <p key={i} className={styles.p}><Parts parts={b.parts} /></p>,
       )}
     </div>
+  );
+}
+
+/** Tổng thời gian ticket; ticket còn chạy thì đếm mỗi giây. */
+function Duration({ t }: { t: Ticket }) {
+  const agents = useLive((s) => s.agents);
+  const waits = useLive((s) => s.waits);
+  const [now, setNow] = useState(() => Date.now());
+  const d = useMemo(() => ticketDuration(t, Object.values(agents), Object.values(waits), now), [t, agents, waits, now]);
+  useEffect(() => {
+    if (!d.live) return;
+    const h = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(h);
+  }, [d.live]);
+  return (
+    <span className={styles.dur} title="Từ lúc tạo ticket tới khi xong (gồm thời gian chờ duyệt)">
+      tổng {fmtDuration(d.totalMs)}{d.approvalMs >= 1000 ? ` · chờ duyệt ${fmtDuration(d.approvalMs)}` : ''}
+    </span>
   );
 }
 
@@ -74,6 +94,7 @@ export default function TicketHeader() {
         ) : (
           <span className={styles.st} data-tone={st.tone}>{badge}</span>
         )}
+        <Duration t={t} />
         <span className={styles.actions}>
           {t.status === 'awaiting_approval' && <Link href={`/tickets/${t.id}/plan`} className={styles.btn}>Duyệt kế hoạch</Link>}
           {t.status === 'escalated' && !guiding && (

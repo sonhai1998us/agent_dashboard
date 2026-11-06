@@ -25,10 +25,10 @@ export function transition(from: TicketStatus, ev: TicketEvent): TicketStatus | 
 }
 
 const DIFFICULTIES = ['easy', 'medium', 'hard'];
-const WORK_ROLES: WorkRole[] = ['dev', 'designer', 'qc'];
+const WORK_ROLES: WorkRole[] = ['explorer', 'dev', 'designer', 'qc'];
 const AGENTS: AgentKind[] = ['claude', 'codex'];
 const EFFORTS: Effort[] = ['low', 'medium', 'high', 'xhigh', 'max'];
-const COUNT_MAX: Record<WorkRole, number> = { dev: 6, designer: 3, qc: 3 };
+const COUNT_MAX: Record<WorkRole, number> = { explorer: 3, dev: 6, designer: 3, qc: 3 };
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const isStr = (v: unknown): v is string => typeof v === 'string';
@@ -56,7 +56,7 @@ export function validatePlan(raw: unknown, s: Settings): { ok: true; plan: Plan 
       if (!isStr(p.id) || !p.id.trim()) errors.push(`${at}.id: không được rỗng`);
       else if (seen.has(p.id)) errors.push(`${at}.id: "${p.id}" bị trùng`);
       else seen.add(p.id);
-      if (!WORK_ROLES.includes(p.role as WorkRole)) errors.push(`${at}.role: phải là dev, designer hoặc qc`);
+      if (!WORK_ROLES.includes(p.role as WorkRole)) errors.push(`${at}.role: phải là explorer, dev, designer hoặc qc`);
       const files = Array.isArray(p.files) ? p.files : [];
       if (p.files !== undefined && !Array.isArray(p.files)) errors.push(`${at}.files: phải là mảng chuỗi`);
       else {

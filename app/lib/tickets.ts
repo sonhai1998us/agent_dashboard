@@ -103,3 +103,33 @@ export function replayRange(nodes: AgentInfo[], now: number): { min: number; max
   const max = live ? now : nodes.length ? Math.max(...nodes.map((n) => n.lastEventAt)) : now;
   return { min, max, live };
 }
+
+const ENDED_TICKET: Ticket['status'][] = ['done', 'escalated', 'cancelled'];
+
+/** Thời gian làm của một agent: từ lúc được giao/bắt đầu tới event cuối; còn chạy thì tới `now`. */
+export function agentWorkMs(a: Pick<AgentInfo, 'startedAt' | 'lastEventAt' | 'status'>, now: number): number {
+  const end = a.status === 'ended' ? a.lastEventAt : now;
+  return Math.max(0, end - a.startedAt);
+}
+
+export interface TicketDuration { totalMs: number; approvalMs: number; live: boolean }
+
+/**
+ * Tổng thời gian ticket: từ lúc tạo tới event cuối của agent trong ticket (ticket đã kết thúc) hoặc tới `now`.
+ * `approvalMs`: thời gian chờ người dùng duyệt kế hoạch (nằm trong tổng).
+ */
+export function ticketDuration(t: Ticket, agents: AgentInfo[], waits: WaitSpan[], now: number): TicketDuration {
+  const prefix = `acctv:${t.id}:`;
+  const mine = agents.filter((a) => a.id.startsWith(prefix));
+  const live = !ENDED_TICKET.includes(t.status);
+  const lastEvent = mine.length ? Math.max(...mine.map((a) => a.lastEventAt)) : t.updatedAt;
+  const end = live ? now : Math.max(t.createdAt, lastEvent);
+  let approvalMs = 0;
+  for (const w of waits) {
+    if (w.kind !== 'approval' || !w.agentId.startsWith(prefix)) continue;
+    const s = Math.max(w.startedAt, t.createdAt);
+    const e = Math.min(w.endedAt ?? end, end);
+    if (e > s) approvalMs += e - s;
+  }
+  return { totalMs: Math.max(0, end - t.createdAt), approvalMs, live };
+}
