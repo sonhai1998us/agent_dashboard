@@ -140,14 +140,16 @@ describe('checkTool', () => {
     expect(checkTool(dev, 'Glob', { pattern: 'src/**/*.ts' }, root).allow).toBe(true);
   });
   it('read-only roles cannot edit', () => {
-    for (const r of ['qc', 'designer', 'controller'] as Role[]) {
+    for (const r of ['qc', 'designer'] as Role[]) {
       expect(checkTool(mk(r), 'Edit', { file_path: 'README.md' }, root)).toMatchObject({ allow: false, reason: `[acctv-guard] vai ${r} chỉ được đọc` });
     }
   });
-  it('controller: mcp allowed, bash denied; dev denied mcp and unknown tools', () => {
-    const c = mk('controller');
-    expect(checkTool(c, 'mcp__acctv__spawn_agent', {}, root).allow).toBe(true);
-    expect(checkTool(c, 'Bash', { command: 'ls' }, root).allow).toBe(false);
+  it('Glob: \\ cũng là dấu phân cách khi kiểm .. và đường dẫn tuyệt đối', () => {
+    expect(checkTool(dev, 'Glob', { pattern: '..\\..\\x' }, root).allow).toBe(false);
+    expect(checkTool(dev, 'Glob', { pattern: 'src\\..\\..\\x' }, root).allow).toBe(false);
+    expect(checkTool(dev, 'Glob', { pattern: '\\Users\\**' }, root).allow).toBe(false);
+  });
+  it('dev không dùng được mcp của dashboard hay tool lạ', () => {
     expect(checkTool(dev, 'mcp__acctv__spawn_agent', {}, root).allow).toBe(false);
     expect(checkTool(dev, 'WebFetch', {}, root)).toMatchObject({ allow: false, reason: '[acctv-guard] tool WebFetch không được phép cho vai dev' });
   });
@@ -211,5 +213,54 @@ describe('Bash chạy nền bị chặn cho worker', () => {
   });
   it('giá trị không phải true (chuỗi "true") cũng bị chặn để không lách bằng kiểu dữ liệu', () => {
     expect(checkTool(mk('dev'), 'Bash', { command: 'npm test', run_in_background: 'true' }, root).allow).toBe(false);
+  });
+});
+
+describe('checkTool: controller có quyền như người dùng', () => {
+  const home = WIN ? String.raw`C:\Users\me\.acctv` : '/home/me/.acctv';
+  const claude = WIN ? String.raw`C:\Users\me\.claude` : '/home/me/.claude';
+  const other = WIN ? String.raw`E:\khac\a.txt` : '/tmp/a.txt';
+  const c: GuardPolicy = { ...mk('controller'), protectedRoots: [home, claude] };
+  const ok = (tool: string, input: unknown) => expect(checkTool(c, tool, input, root)).toEqual({ allow: true });
+  const no = (tool: string, input: unknown, re: RegExp) => {
+    const d = checkTool(c, tool, input, root);
+    expect(d.allow).toBe(false);
+    if (!d.allow) expect(d.reason).toMatch(re);
+  };
+  it('đọc, chạy lệnh, MCP của người dùng, web, subagent', () => {
+    ok('Read', { file_path: other });
+    ok('Glob', { pattern: WIN ? String.raw`C:\**` : '/**' });
+    ok('Bash', { command: 'twg jira issue get US-5039 -o json' });
+    ok('PowerShell', { command: 'Get-ChildItem' });
+    ok('mcp__figma__get_design_context', { nodeId: '1:2' });
+    ok('mcp__acctv__propose_plan', {});
+    ok('WebFetch', { url: 'https://example.com' });
+    ok('Agent', { prompt: 'x' });
+  });
+  it('ghi file ngoài thư mục được bảo vệ', () => {
+    ok('Write', { file_path: 'notes.md' });
+    ok('Edit', { file_path: other });
+  });
+  it('cấm commit/push và lệnh trong denyBash, cả qua PowerShell', () => {
+    no('Bash', { command: 'git commit -m x' }, /lệnh bị cấm/);
+    no('Bash', { command: 'git -C ../x push origin main' }, /lệnh bị cấm/);
+    no('PowerShell', { command: 'git.exe push' }, /lệnh bị cấm/);
+    no('Bash', { command: 'curl -X POST http://127.0.0.1:4777/api/tickets/T-1/approve' }, /lệnh bị cấm/);
+    no('Bash', { command: 'twg login', run_in_background: true }, /lệnh nền/);
+    no('Bash', { command: 'x'.repeat(40_000) }, /quá dài/);
+  });
+  it('cấm ghi vào .git, dữ liệu dashboard, ~/.claude', () => {
+    no('Write', { file_path: '.git/config' }, /\.git/);
+    no('Edit', { file_path: `${home}${sep}acctv.db` }, /bảo vệ/);
+    no('Write', { file_path: `${WIN ? claude.toUpperCase() : claude}${sep}settings.json` }, /bảo vệ/);
+    no('Write', {}, /thiếu đường dẫn/);
+  });
+  it('cấm tool MCP commit/push/merge và tool đổi worktree', () => {
+    no('mcp__github__push_files', {}, /commit\/push/);
+    no('mcp__github__create_or_update_file', {}, /commit\/push/);
+    no('mcp__github__merge_pull_request', {}, /commit\/push/);
+    no('mcp__gitlab__create_commit', {}, /commit\/push/);
+    no('EnterWorktree', {}, /worktree/);
+    ok('mcp__github__get_pull_request', {});
   });
 });

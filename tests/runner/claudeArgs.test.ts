@@ -33,6 +33,14 @@ describe('buildClaudeArgs', () => {
     ]);
     expect(a).not.toContain('hi');
   });
+  it('inheritUser: cấu hình user, MCP của người dùng, không giới hạn --tools', () => {
+    const a = buildClaudeArgs(base({ inheritUser: true }), files);
+    expect(a[a.indexOf('--setting-sources') + 1]).toBe('user,project,local');
+    expect(a).not.toContain('--tools');
+    expect(a).not.toContain('--strict-mcp-config');
+    expect(a).toContain('--mcp-config');
+    expect(a[a.indexOf('--permission-mode') + 1]).toBe('dontAsk');
+  });
   it('never mentions bypass or dangerously', () => {
     for (const s of [base(), base({ resume: true })]) {
       expect(buildClaudeArgs(s, files).some((x) => /bypass|dangerously/i.test(x))).toBe(false);

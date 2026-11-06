@@ -61,6 +61,12 @@ describe('acctv-guard hook', () => {
     expect(r.stdout).toBe('');
     expect(seen.auth).toBe('Bearer tok');
   });
+  it('allow + decide: in permissionDecision allow (Controller)', async () => {
+    reply = { body: '{"allow":true,"decide":true}' };
+    const r = await run(port, input);
+    expect(r.status).toBe(0);
+    expect(JSON.parse(r.stdout).hookSpecificOutput).toMatchObject({ hookEventName: 'PreToolUse', permissionDecision: 'allow' });
+  });
   it('fails closed on non-200, garbage, or missing allow', async () => {
     for (const rp of [{ status: 401, body: '{"allow":true}' }, { body: 'nope' }, { body: '{}' }]) {
       reply = rp;

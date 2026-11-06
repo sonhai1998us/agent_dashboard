@@ -3,13 +3,18 @@ import http from 'node:http';
 
 const [port, agentId, token] = process.argv.slice(2);
 const FAIL = '[acctv-guard] dashboard không phản hồi, từ chối để an toàn';
+const ALLOW = Symbol('allow');
 let done = false;
 
+/** reason: null = cho qua (để Claude tự xét quyền), 'allow' = cho phép tường minh, chuỗi khác = từ chối kèm lý do. */
 function finish(reason) {
   if (done) return;
   done = true;
   if (reason === null) return process.exit(0);
-  const out = JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } });
+  const decision = reason === ALLOW
+    ? { hookEventName: 'PreToolUse', permissionDecision: 'allow', permissionDecisionReason: '[acctv-guard] cho phép' }
+    : { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason };
+  const out = JSON.stringify({ hookSpecificOutput: decision });
   process.stdout.write(out + '\n', () => process.exit(0));
   setTimeout(() => process.exit(0), 500).unref();
 }
@@ -42,7 +47,7 @@ process.stdin.on('end', () => {
           try {
             const j = JSON.parse(Buffer.concat(parts).toString('utf8'));
             const ok = res.statusCode === 200 && j && typeof j === 'object';
-            if (ok && j.allow === true) return finish(null);
+            if (ok && j.allow === true) return finish(j.decide === true ? ALLOW : null);
             finish(ok && typeof j.reason === 'string' && j.reason ? j.reason : FAIL);
           } catch {
             finish(FAIL);

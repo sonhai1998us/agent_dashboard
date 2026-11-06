@@ -8,6 +8,8 @@ export interface GuardPolicy {
   allowedFiles: string[];
   denyBash: RegExp[];
   checkCommands: RegExp[];
+  /** Controller: thư mục không được ghi (dữ liệu dashboard, ~/.claude, ~/.codex). */
+  protectedRoots?: string[];
 }
 export type GuardDecision = { allow: true } | { allow: false; reason: string; scope: boolean };
 
@@ -73,16 +75,64 @@ const sameRel = (a: string, b: string) => cmp(a.replace(/\\/g, '/')) === cmp(b.r
 const CHAIN = /[;&|<>`\n\r]|\$\(|--output/i;
 const hasGit = (rel: string) => rel.split('/').some((seg) => cmp(seg) === '.git');
 
+/** Lệnh shell: chặn lệnh nền, lệnh quá dài và lệnh khớp denyBash. null = cho qua. */
+function shellDeny(p: GuardPolicy, input: unknown): GuardDecision | null {
+  const cmd = strField(input, 'command');
+  if (cmd === undefined) return deny('lệnh bị cấm (thiếu command)');
+  // Lệnh nền giữ tiến trình `claude -p` sống sau khi agent đã xong (vd. `twg login` chờ trình duyệt) và ghi output ra ngoài worktree.
+  const bg = (input as Record<string, unknown>).run_in_background;
+  if (bg !== undefined && bg !== null && bg !== false) {
+    return deny(p.role === 'controller'
+      ? 'không chạy lệnh nền (run_in_background); hãy chạy lệnh ở tiền cảnh kèm timeout. Lệnh cần đăng nhập thì ghi vào kế hoạch để người dùng làm.'
+      : 'không chạy lệnh nền (run_in_background); hãy chạy lệnh ở tiền cảnh kèm timeout. Lệnh cần tương tác hay đăng nhập thì gọi request_user_action để nhờ người dùng.');
+  }
+  // Chặn trước khi chạy regex: guard chạy đồng bộ trong server, lệnh khổng lồ không được làm treo event loop.
+  if (cmd.length > MAX_COMMAND) return deny(`lệnh quá dài (> ${MAX_COMMAND} ký tự); hãy ghi nội dung bằng Write rồi chạy file`);
+  for (const re of p.denyBash) if (re.test(cmd)) return deny(`lệnh bị cấm (${re.source})`);
+  return null;
+}
+
+/** Tool không cho Controller: tạo worktree / nhánh git, và tool MCP có tên kiểu commit/push/merge (vd. GitHub MCP). */
+const CONTROLLER_DENY_TOOLS = new Set(['EnterWorktree', 'ExitWorktree']);
+const MCP_GIT_WRITE = /(^|_)(commit|push|merge)(_|$)|push_files|create_or_update_file|create_branch|delete_branch/i;
+
+/** Controller có quyền như người dùng, trừ commit/push (denyBash) và ghi vào thư mục được bảo vệ. */
+function checkController(p: GuardPolicy, toolName: string, input: unknown, resolve: (x: string) => string): GuardDecision {
+  switch (toolName) {
+    case 'Edit':
+    case 'Write':
+    case 'MultiEdit':
+    case 'NotebookEdit': {
+      const raw = strField(input, 'file_path', 'notebook_path');
+      if (!raw) return deny('thiếu đường dẫn');
+      const abs = resolve(raw);
+      if (abs.split(/[\\/]/).some((seg) => cmp(seg) === '.git')) return deny(`không sửa trực tiếp thư mục .git: ${abs}`);
+      if ((p.protectedRoots ?? []).some((r) => relInside(r, abs) !== null)) return deny(`thư mục được bảo vệ (dashboard, Claude, Codex): ${abs}`);
+      return { allow: true };
+    }
+    case 'Bash':
+    case 'PowerShell':
+      return shellDeny(p, input) ?? { allow: true };
+  }
+  if (CONTROLLER_DENY_TOOLS.has(toolName)) return deny(`tool ${toolName} không được phép cho Controller (đổi nhánh / worktree)`);
+  if (toolName.startsWith('mcp__') && !toolName.startsWith('mcp__acctv__')) {
+    const tool = toolName.split('__').slice(2).join('__');
+    if (MCP_GIT_WRITE.test(tool)) return deny(`tool ${toolName} có thể commit/push; Controller không được dùng`);
+  }
+  return { allow: true };
+}
+
 export function checkTool(p: GuardPolicy, toolName: string, input: unknown, cwd: string): GuardDecision {
   const base = typeof cwd === 'string' && cwd ? cwd : p.root;
   const resolve = (x: string) => P.resolve(base, x);
+  if (p.role === 'controller') return checkController(p, toolName, input, resolve);
   switch (toolName) {
     case 'Read':
     case 'Glob':
     case 'Grep': {
       if (toolName === 'Glob') {
         const pat = strField(input, 'pattern');
-        if (pat && (P.isAbsolute(pat) || /^[\/]/.test(pat) || /^[a-zA-Z]:/.test(pat) || pat.split(/[\/]/).includes('..'))) return deny(`ngoài thư mục làm việc: ${pat}`);
+        if (pat && (P.isAbsolute(pat) || /^[\\/]/.test(pat) || /^[a-zA-Z]:/.test(pat) || pat.split(/[\\/]/).includes('..'))) return deny(`ngoài thư mục làm việc: ${pat}`);
       }
       const target = resolve(strField(input, 'file_path', 'path') ?? base);
       const ok = [p.root, ...p.readRoots].some((r) => relInside(r, target) !== null);
@@ -103,24 +153,15 @@ export function checkTool(p: GuardPolicy, toolName: string, input: unknown, cwd:
       return deny(`ngoài phạm vi: ${rel || abs}`, true);
     }
     case 'Bash': {
-      if (p.role === 'controller') return deny('vai controller không được chạy lệnh');
-      const cmd = strField(input, 'command');
-      if (cmd === undefined) return deny('lệnh bị cấm (thiếu command)');
-      // Lệnh nền giữ tiến trình `claude -p` sống sau khi agent đã xong (vd. `twg login` chờ trình duyệt) và ghi output ra ngoài worktree.
-      const bg = (input as Record<string, unknown>).run_in_background;
-      if (bg !== undefined && bg !== null && bg !== false) {
-        return deny('không chạy lệnh nền (run_in_background); hãy chạy lệnh ở tiền cảnh kèm timeout. Lệnh cần tương tác hay đăng nhập thì gọi request_user_action để nhờ người dùng.');
-      }
-      // Chặn trước khi chạy regex: guard chạy đồng bộ trong server, lệnh khổng lồ không được làm treo event loop.
-      if (cmd.length > MAX_COMMAND) return deny(`lệnh quá dài (> ${MAX_COMMAND} ký tự); hãy ghi nội dung bằng Write rồi chạy file`);
-      for (const re of p.denyBash) if (re.test(cmd)) return deny(`lệnh bị cấm (${re.source})`);
+      const d = shellDeny(p, input);
+      if (d) return d;
+      const cmd = strField(input, 'command')!;
       if (p.role === 'designer' || p.role === 'qc') {
         if (CHAIN.test(cmd) || !p.checkCommands.some((re) => re.test(cmd))) return deny(`vai ${p.role} chỉ chạy lệnh kiểm tra`);
       }
       return { allow: true };
     }
   }
-  if (toolName.startsWith('mcp__acctv__') && p.role === 'controller') return { allow: true };
   if (toolName === USER_ACTION_TOOL) return { allow: true };
   return deny(`tool ${toolName} không được phép cho vai ${p.role}`);
 }

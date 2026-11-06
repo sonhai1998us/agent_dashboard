@@ -5,6 +5,8 @@ export interface RunSpec {
   agentId: string; ticketId: string; role: Role; agent: AgentKind; label: string; parentId: string | null;
   cwd: string; model: string; effort: Effort; prompt: string; systemPrompt: string; sessionId: string; resume: boolean;
   tools: string[]; allowedTools: string[]; addDirs: string[]; runDir: string;
+  /** Claude: chạy với quyền như người dùng: không giới hạn --tools, nạp cấu hình user và MCP server của người dùng (không --strict-mcp-config). */
+  inheritUser?: boolean;
   mcp: { url: string; token: string } | null; guard: { port: number; token: string };
 }
 

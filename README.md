@@ -91,9 +91,11 @@ acctv ls | watch | logs         # nhận biết ticket và agent do dashboard ch
 
 | Vai | Đọc | Sửa file | Bash |
 | --- | --- | --- | --- |
-| Controller | trong thư mục làm việc | không | không |
+| Controller | mọi nơi | mọi nơi, trừ `.git`, `ACCTV_HOME`, `~/.claude`, `~/.codex` | chỉ bị chặn bởi danh sách deny (gồm `git commit`/`push`) |
 | Dev | trong thư mục làm việc | chỉ file trong phạm vi được giao | chỉ bị chặn bởi danh sách deny |
 | Designer, QC | trong thư mục làm việc | không | chỉ lệnh kiểm tra (`checkCommands`), không nối lệnh, không chuyển hướng, không dùng `--output` |
+
+Controller chạy với quyền như người dùng để đọc được ngữ cảnh khi lập kế hoạch: nạp cấu hình Claude của người dùng (`--setting-sources user,project,local`, gồm plugin và hook của người dùng), các MCP server và connector của người dùng (không `--strict-mcp-config`), dùng mọi tool kể cả CLI như `twg`. Guard cho phép tường minh mọi tool, trừ: lệnh khớp danh sách deny (gồm `git commit`, `git push`, lệnh git đổi nhánh/remote, gọi API của dashboard), lệnh nền, tool MCP có tên kiểu commit/push/merge (vd. `push_files`, `create_or_update_file`, `merge_pull_request`), `EnterWorktree`, và ghi vào `.git`, `ACCTV_HOME`, `~/.claude`, `~/.codex`. Lệnh chạy bằng shell vẫn có thể ghi file ở mọi nơi; Controller được dặn không tự sửa code mà giao Dev.
 
 Phạm vi file của dev được ép bằng hook guard (`[acctv-guard]`). Bash của dev chỉ bị giới hạn bởi danh sách deny nên file do lệnh Bash ghi ra không bị chặn; sau mỗi lần chờ agent, dashboard đối chiếu `git status` của worktree với phạm vi các gói Dev, ghi file đã đổi vào báo cáo và cảnh báo Controller (kèm log ticket) về file ngoài phạm vi.
 

@@ -39,7 +39,6 @@ interface WorkerRun {
   resumePrompt: string | null;
 }
 
-const CTRL_TOOLS = ['Read', 'Glob', 'Grep'];
 const MCP_TOOLS = ['propose_plan', 'spawn_agent', 'wait_agents', 'get_agent_log', 'finish'].map((n) => `mcp__acctv__${n}`);
 const WORKER_TOOLS: Record<WorkRole, string[]> = {
   dev: ['Read', 'Glob', 'Grep', 'Edit', 'Write', 'Bash'],
@@ -394,13 +393,15 @@ export class Orchestrator {
     return !!cur && safeEq(cur, token);
   }
 
-  guard(agentId: string, token: string, hookInput: unknown): { allow: true } | { allow: false; reason: string } | null {
+  /** `decide`: hook trả "allow" tường minh (Controller dùng mọi tool như người dùng, kể cả tool MCP không có trong --allowedTools). */
+  guard(agentId: string, token: string, hookInput: unknown): { allow: true; decide?: true } | { allow: false; reason: string } | null {
     const g = this.guards.get(agentId);
     if (!g || !safeEq(g.token, token)) return null;
     const h = hookInput && typeof hookInput === 'object' ? (hookInput as Record<string, unknown>) : {};
     const name = isStr(h.tool_name) ? h.tool_name : '';
     const d = checkTool(g.policy, name, h.tool_input, isStr(h.cwd) ? h.cwd : g.policy.root);
-    return d.allow ? { allow: true } : { allow: false, reason: d.reason };
+    if (!d.allow) return { allow: false, reason: d.reason };
+    return g.policy.role === 'controller' ? { allow: true, decide: true } : { allow: true };
   }
 
   async idle(): Promise<void> {
@@ -669,7 +670,8 @@ export class Orchestrator {
       agentId: id, ticketId: T, role: 'controller', agent: 'claude', label: 'Controller', parentId: null, cwd: t.dir,
       model: m.model, effort: m.effort, prompt: message,
       systemPrompt: systemPrompt('controller', { worktree: t.worktree, files: [], denyBash: this.settings.denyBash }),
-      sessionId: t.controllerSessionId, resume, tools: [...CTRL_TOOLS], allowedTools: [...CTRL_TOOLS, ...MCP_TOOLS],
+      // quyền như người dùng: mọi tool, MCP server và cấu hình Claude của người dùng; guard chặn commit/push và thư mục được bảo vệ
+      sessionId: t.controllerSessionId, resume, tools: [], allowedTools: [...MCP_TOOLS], inheritUser: true,
       addDirs: t.worktree ? [t.worktree] : [], runDir: this.runDir(id),
       mcp: { url: `http://127.0.0.1:${port}/mcp?ticket=${encodeURIComponent(T)}`, token: mcpToken }, guard: { port, token },
     };
@@ -1083,7 +1085,11 @@ export class Orchestrator {
         return [];
       }
     });
-    return { role, root, readRoots, allowedFiles, denyBash: compile(this.settings.denyBash), checkCommands: compile(this.settings.checkCommands) };
+    const { home, claudeDir, codexDir } = this.deps.cfg;
+    return {
+      role, root, readRoots, allowedFiles, denyBash: compile(this.settings.denyBash), checkCommands: compile(this.settings.checkCommands),
+      ...(role === 'controller' ? { protectedRoots: [home, claudeDir, codexDir] } : {}),
+    };
   }
 
   private runDir(agentId: string): string {

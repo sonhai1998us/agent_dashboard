@@ -6,10 +6,10 @@ export function buildClaudeArgs(spec: RunSpec, files: { systemPromptFile: string
   const args = [
     '-p', '--output-format', 'stream-json', '--verbose', '--model', spec.model, '--effort', spec.effort,
     ...(spec.resume ? ['--resume', spec.sessionId] : ['--session-id', spec.sessionId]),
-    '--permission-mode', 'dontAsk', '--setting-sources', 'project,local',
-    '--tools', spec.tools.join(','), '--allowedTools', spec.allowedTools.join(','),
+    '--permission-mode', 'dontAsk', '--setting-sources', spec.inheritUser ? 'user,project,local' : 'project,local',
+    ...(spec.inheritUser ? [] : ['--tools', spec.tools.join(',')]), '--allowedTools', spec.allowedTools.join(','),
     '--append-system-prompt-file', files.systemPromptFile, '--settings', files.settingsFile,
-    '--mcp-config', files.mcpFile, '--strict-mcp-config',
+    '--mcp-config', files.mcpFile, ...(spec.inheritUser ? [] : ['--strict-mcp-config']),
   ];
   for (const d of spec.addDirs) args.push('--add-dir', d);
   return args;

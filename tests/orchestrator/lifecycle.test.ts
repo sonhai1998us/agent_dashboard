@@ -7,7 +7,7 @@ import { OrchestratorError } from '@/src/orchestrator/orchestrator';
 import { makeEnv, cleanup, validPlan, codexPlan, ids, runOf, openWaits, toRunning, g, type Env } from '../helpers/orchestratorEnv';
 
 const CTRL_ALLOWED = [
-  'Read', 'Glob', 'Grep', 'mcp__acctv__propose_plan', 'mcp__acctv__spawn_agent', 'mcp__acctv__wait_agents',
+  'mcp__acctv__propose_plan', 'mcp__acctv__spawn_agent', 'mcp__acctv__wait_agents',
   'mcp__acctv__get_agent_log', 'mcp__acctv__finish',
 ];
 
@@ -29,7 +29,7 @@ describe('vòng đời ticket', () => {
     const { ctrl, dev1, dev2, qc1 } = ids(T);
     expect(runs).toHaveLength(1);
     expect(runs[0].spec).toMatchObject({ agentId: ctrl, role: 'controller', resume: false, cwd: env.repo, addDirs: [], sessionId: 'sid-1' });
-    expect(runs[0].spec.tools).toEqual(['Read', 'Glob', 'Grep']);
+    expect(runs[0].spec).toMatchObject({ tools: [], inheritUser: true });
     expect(runs[0].spec.allowedTools).toEqual(CTRL_ALLOWED);
     expect(runs[0].spec.mcp).not.toBeNull();
     expect(runs[0].spec.mcp!.url).toBe(`http://127.0.0.1:4777/mcp?ticket=${T}`);
@@ -368,14 +368,20 @@ describe('các trường hợp riêng', () => {
     const tok = run.spec.guard.token;
     expect(env.orch.guard(dev1, 'sai', {})).toBeNull();
     expect(env.orch.guard('acctv:T-9:dev-1', tok, {})).toBeNull();
-    expect(env.orch.guard(dev1, tok, { tool_name: 'Edit', tool_input: { file_path: join(wt, 'src', 'a.ts') }, cwd: wt })).toEqual({ allow: true });
+    expect(env.orch.guard(dev1, tok, { tool_name: 'Edit', tool_input: { file_path: join(wt, 'src', 'a.ts') }, cwd: wt })).toEqual({ allow: true }); // worker: không allow tường minh
     const d = env.orch.guard(dev1, tok, { tool_name: 'Edit', tool_input: { file_path: join(wt, 'src', 'b.ts') }, cwd: wt });
     expect(d).toEqual({ allow: false, reason: expect.stringMatching(/^\[acctv-guard\] ngoài phạm vi:/) });
     expect(env.orch.guard(dev1, tok, { tool_name: 'Bash', tool_input: { command: 'git commit -m x' }, cwd: wt })).toMatchObject({ allow: false });
-    // controller: đọc được thư mục dự án và worktree, không chạy Bash
+    // controller: quyền như người dùng (allow tường minh), trừ commit/push và thư mục được bảo vệ
     const ct = runOf(env, ctrl)!.spec.guard.token;
-    expect(env.orch.guard(ctrl, ct, { tool_name: 'Read', tool_input: { file_path: join(wt, 'src', 'x.ts') }, cwd: env.repo })).toEqual({ allow: true });
-    expect(env.orch.guard(ctrl, ct, { tool_name: 'Bash', tool_input: { command: 'ls' }, cwd: env.repo })).toMatchObject({ allow: false });
+    const cg = (tool_name: string, tool_input: unknown) => env.orch.guard(ctrl, ct, { tool_name, tool_input, cwd: env.repo });
+    expect(cg('Read', { file_path: join(wt, 'src', 'x.ts') })).toEqual({ allow: true, decide: true });
+    expect(cg('Bash', { command: 'twg jira issue get US-1' })).toEqual({ allow: true, decide: true });
+    expect(cg('mcp__figma__get_design_context', {})).toEqual({ allow: true, decide: true });
+    expect(cg('Bash', { command: 'git push origin main' })).toMatchObject({ allow: false });
+    expect(cg('Write', { file_path: join(env.cfg.home, 'acctv.db') })).toMatchObject({ allow: false });
+    expect(cg('Write', { file_path: join(env.cfg.claudeDir, 'settings.json') })).toMatchObject({ allow: false });
+    expect(cg('Write', { file_path: join(env.repo, 'notes.md') })).toEqual({ allow: true, decide: true });
     // run xong thì token hết hiệu lực
     run.finish({});
     await env.orch.idle();
