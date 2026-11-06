@@ -112,6 +112,7 @@ Trên Windows chỉ tự dò các CLI dạng `.exe`. Nếu cài bằng npm (shim
 - Tắt dashboard sẽ kill các agent đang chạy và đánh dấu chúng là bị gián đoạn.
 - Agent bị rate limit sẽ chờ rồi thử lại sau 60s, 120s, 300s; quá số lần đó thì báo lỗi.
 - Lặp lệnh từ `loopCritical` với agent do dashboard chạy thì tự dừng (`auto-stop: loop`); phiên ngoài ticket không bao giờ bị tự dừng.
+- Agent Claude đã báo xong lượt (dòng `result`) mà tiến trình chưa thoát sau 10 giây (vd. tiến trình con treo chờ stdin giữ pipe) thì dashboard tắt cả cây tiến trình và vẫn nhận kết quả như lần chạy thành công.
 
 ### Agent cần bạn (đăng nhập, mở link…)
 
