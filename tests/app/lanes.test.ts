@@ -103,3 +103,40 @@ describe('layoutLane: chờ subagent', () => {
     expect([...waitingCallIds('a', kids)]).toEqual(['t1', 't6']);
   });
 });
+
+describe('layoutLane: model nghĩ', () => {
+  const llm = (id: string, s: number, e: number | null, o: Partial<CallRecord> = {}) =>
+    call(id, s, { kind: 'llm', name: 'claude-opus-5-5', endedAt: e, ok: e === null ? null : true, tokensOut: 727, ...o });
+
+  test('call llm vẽ thành khoảng nghĩ, không thành thanh tool', () => {
+    const r = layoutLane([call('t', 0, { endedAt: MIN }), llm('m', MIN, 2 * MIN)], agent({ status: 'ended' }), win, 500, []);
+    expect(r.bars.map((b) => b.callId)).toEqual(['t']);
+    expect(r.thinks).toHaveLength(1);
+    expect(r.thinks[0]).toMatchObject({ live: false });
+    expect(r.thinks[0].x).toBeCloseTo(100);
+    expect(r.thinks[0].w).toBeCloseTo(100);
+    expect(r.thinks[0].title).toContain('model nghĩ');
+    expect(r.thinks[0].title).toContain('727');
+  });
+
+  test('agent đang chạy, không có tool mở: từ sự kiện cuối tới cuối cửa sổ là "đang nghĩ"', () => {
+    const r = layoutLane([call('t', 0, { endedAt: 3 * MIN })], agent({ lastEventAt: MIN }), win, 500, []);
+    expect(r.thinks).toHaveLength(1);
+    expect(r.thinks[0]).toMatchObject({ live: true });
+    expect(r.thinks[0].x).toBeCloseTo(300);
+    expect(r.thinks[0].x + r.thinks[0].w).toBeCloseTo(500);
+    expect(r.thinks[0].title).toMatch(/^đang nghĩ/);
+  });
+
+  test('không vẽ "đang nghĩ" khi tool đang mở, khi agent không chạy, hoặc khi sự kiện cuối ở sau cửa sổ', () => {
+    const open = call('t', 4 * MIN, { endedAt: null, ok: null });
+    expect(layoutLane([open], agent({ lastEventAt: 4 * MIN }), win, 500, []).thinks).toEqual([]);
+    expect(layoutLane([call('t', 0)], agent({ status: 'idle' }), win, 500, []).thinks).toEqual([]);
+    expect(layoutLane([call('t', 0, { endedAt: 6 * MIN })], agent(), win, 500, []).thinks).toEqual([]);
+  });
+
+  test('call llm ngoài cửa sổ bị bỏ', () => {
+    const r = layoutLane([llm('m', 6 * MIN, 7 * MIN)], agent({ status: 'ended' }), win, 500, []);
+    expect(r.thinks).toEqual([]);
+  });
+});

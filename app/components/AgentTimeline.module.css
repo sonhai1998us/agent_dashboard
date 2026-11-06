@@ -63,3 +63,9 @@
 .wait { fill: var(--wait); fill-opacity: .55; }
 .waitTxt { fill: var(--fg); font-size: 9px; pointer-events: none; }
 .sw[data-s='grey'] { background: var(--wait); }
+.think { fill: var(--run); fill-opacity: .45; }
+.think[data-live] { fill-opacity: .8; animation: thinkPulse 1.6s ease-in-out infinite; }
+@keyframes thinkPulse { 50% { fill-opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .think[data-live] { animation: none; } }
+.thinkHit { cursor: default; }
+.sw[data-s='think'] { height: 4px; background: color-mix(in srgb, var(--run) 45%, transparent); }

@@ -5,7 +5,7 @@ import { ensureCalls, selectAgent, selectCall, useLive } from '../lib/liveStore'
 import { agentWorkMs, layoutWaits, replayRange } from '../lib/tickets';
 import type { WaitSpan } from '@/src/tickets/model';
 import { flattenTree } from '../lib/tree';
-import { DEFAULT_WINDOW_MIN, WINDOWS_MIN, layoutLane, waitingCallIds, type Bar, type LoopZone } from '../lib/lanes';
+import { DEFAULT_WINDOW_MIN, WINDOWS_MIN, layoutLane, waitingCallIds, type Bar, type LoopZone, type Think } from '../lib/lanes';
 import { fmtClock, fmtDuration } from '../lib/format';
 import { alertTag } from '../lib/detail';
 import { statusOf } from './SessionList';
@@ -13,6 +13,7 @@ import styles from './AgentTimeline.module.css';
 
 const LANE_H = 30;
 const BAR_H = 14;
+const THINK_H = 4;
 const EMPTY_CALLS: CallRecord[] = [];
 
 interface Frame { now: number; agents: Record<string, AgentInfo>; calls: Record<string, CallRecord[]>; alerts: Alert[]; waits: WaitSpan[]; }
@@ -221,7 +222,7 @@ export default function AgentTimeline() {
               <div className={styles.track} ref={i === 0 ? trackRef : undefined}>
                 {width > 0 && (
                   <Lane
-                    width={width} bars={lane.bars} zones={lane.loopZones} waits={laneWaits[i]} showNow={!replaying} agentId={a.id} onTip={showTip} onHide={hideTip}
+                    width={width} bars={lane.bars} zones={lane.loopZones} thinks={lane.thinks} waits={laneWaits[i]} showNow={!replaying} agentId={a.id} onTip={showTip} onHide={hideTip}
                     onPick={selectCall}
                   />
                 )}
@@ -236,6 +237,7 @@ export default function AgentTimeline() {
       <footer className={styles.legend} aria-label="Chú giải">
         <span><i className={styles.sw} data-s="ok" /> ok</span>
         <span><i className={styles.sw} data-s="error" /> lỗi</span>
+        <span><i className={styles.sw} data-s="think" /> model nghĩ</span>
         <span><i className={styles.sw} data-s="running" /> đang chạy</span>
         <span><i className={styles.sw} data-s="wait" /> chờ subagent</span>
         <span><i className={styles.sw} data-s="unknown" /> không rõ</span>
@@ -247,8 +249,8 @@ export default function AgentTimeline() {
   );
 }
 
-const Lane = memo(function Lane({ agentId, width, bars, zones, waits, showNow, onTip, onHide, onPick }: {
-  agentId: string; width: number; bars: Bar[]; zones: LoopZone[]; waits: { x: number; w: number; title: string }[]; showNow: boolean;
+const Lane = memo(function Lane({ agentId, width, bars, zones, thinks, waits, showNow, onTip, onHide, onPick }: {
+  agentId: string; width: number; bars: Bar[]; zones: LoopZone[]; thinks: Think[]; waits: { x: number; w: number; title: string }[]; showNow: boolean;
   onTip: (text: string, el: Element, mouse?: { x: number; y: number }) => void;
   onHide: () => void; onPick: (agentId: string, callId: string) => void;
 }) {
@@ -267,6 +269,17 @@ const Lane = memo(function Lane({ agentId, width, bars, zones, waits, showNow, o
           <title>{w.title}</title>
           <rect x={w.x} y={y - 3} width={w.w} height={BAR_H + 6} rx={2} className={styles.wait} />
           {w.w >= 28 && <text x={w.x + 4} y={LANE_H / 2 + 3} className={styles.waitTxt}>chờ</text>}
+        </g>
+      ))}
+      {thinks.map((t, i) => (
+        <g
+          key={`t${i}`} className={styles.thinkHit}
+          onMouseEnter={(e) => onTip(t.title, e.currentTarget, { x: e.clientX, y: e.clientY })}
+          onMouseMove={(e) => onTip(t.title, e.currentTarget, { x: e.clientX, y: e.clientY })}
+          onMouseLeave={onHide}
+        >
+          <rect x={t.x} y={y} width={t.w} height={BAR_H} fill="transparent" />
+          <rect x={t.x} y={LANE_H / 2 - THINK_H / 2} width={t.w} height={THINK_H} rx={1} className={styles.think} data-live={t.live || undefined} />
         </g>
       ))}
       {bars.filter((b) => b.state === 'error').map((b) => (
