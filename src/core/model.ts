@@ -40,8 +40,13 @@ export interface CallRecord {
   endedAt: number | null;
   ok: boolean | null;
   errorPreview: string | null;
+  /** tổng token đầu vào, gồm cả phần ghi cache và đọc cache */
   tokensIn: number | null;
   tokensOut: number | null;
+  /** phần của tokensIn đọc từ prompt cache */
+  cacheRead?: number | null;
+  /** phần của tokensIn ghi vào prompt cache */
+  cacheWrite?: number | null;
 }
 
 export type AlertKind = 'stuck' | 'long_tool' | 'loop' | 'error_burst' | 'guard';

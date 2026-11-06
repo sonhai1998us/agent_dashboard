@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { estimateCost, fmtClock, fmtCost, fmtDuration, fmtTokens } from '@/app/lib/format';
+import { cacheShare, estimateCost, fmtClock, fmtCost, fmtDuration, fmtPercent, fmtTokens } from '@/app/lib/format';
 
 describe('format', () => {
   test('fmtCost', () => {
@@ -31,4 +31,12 @@ describe('format', () => {
     const d = new Date(2026, 10, 2, 14, 2, 11).getTime();
     expect(fmtClock(d)).toBe('14:02:11');
   });
+});
+
+test('cacheShare / fmtPercent', () => {
+  expect(cacheShare(960, 1000)).toBe(0.96);
+  expect(cacheShare(0, 0)).toBeNull();
+  expect(cacheShare(2000, 1000)).toBe(1);
+  expect(fmtPercent(0.956)).toBe('96%');
+  expect(fmtPercent(null)).toBe('—');
 });

@@ -169,6 +169,7 @@ export function parseClaudeLine(line: string, ctx: ClaudeFileCtx): NormalizedEve
         call: {
           id, agentId: ctx.agentId, kind: 'llm', name: msg.model ?? 'llm', inputHash: '', inputPreview: '',
           startedAt: prevTs ?? at, tokensIn, tokensOut: u.output_tokens ?? 0,
+          cacheRead: u.cache_read_input_tokens ?? 0, cacheWrite: u.cache_creation_input_tokens ?? 0,
         },
       });
       out.push({ type: 'call_end', agentId: ctx.agentId, callId: id, endedAt: at, ok: true, errorPreview: null });

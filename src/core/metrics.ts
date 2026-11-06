@@ -10,6 +10,8 @@ export function percentile(values: number[], p: number): number | null {
 export interface AgentMetrics {
   calls: number; errors: number; okRate: number | null;
   p50: number | null; p95: number | null; tokensIn: number; tokensOut: number; durationMs: number;
+  /** phần của tokensIn đọc từ / ghi vào prompt cache */
+  cacheRead: number; cacheWrite: number;
 }
 
 const endedTools = (calls: CallRecord[]) => calls.filter((c) => c.kind === 'tool' && c.endedAt !== null);
@@ -22,10 +24,14 @@ export function agentMetrics(agent: AgentInfo, calls: CallRecord[], now: number)
   const lat = latencies(tools);
   let tokensIn = 0;
   let tokensOut = 0;
+  let cacheRead = 0;
+  let cacheWrite = 0;
   for (const c of calls) {
     if (c.kind !== 'llm') continue;
     tokensIn += c.tokensIn ?? 0;
     tokensOut += c.tokensOut ?? 0;
+    cacheRead += c.cacheRead ?? 0;
+    cacheWrite += c.cacheWrite ?? 0;
   }
   return {
     calls: tools.length,
@@ -35,6 +41,8 @@ export function agentMetrics(agent: AgentInfo, calls: CallRecord[], now: number)
     p95: percentile(lat, 95),
     tokensIn,
     tokensOut,
+    cacheRead,
+    cacheWrite,
     durationMs: (agent.status === 'running' ? now : agent.lastEventAt) - agent.startedAt,
   };
 }

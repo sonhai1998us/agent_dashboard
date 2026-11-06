@@ -45,3 +45,12 @@ export function fmtClock(ms: number): string {
   const d = new Date(ms);
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
+
+/** Phần token đầu vào đọc từ prompt cache (0–1); null khi chưa có token đầu vào. */
+export function cacheShare(cacheRead: number, tokensIn: number): number | null {
+  return tokensIn > 0 ? Math.min(1, Math.max(0, cacheRead / tokensIn)) : null;
+}
+
+export function fmtPercent(v: number | null): string {
+  return v === null ? '—' : `${Math.round(v * 100)}%`;
+}

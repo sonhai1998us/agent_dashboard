@@ -71,3 +71,12 @@ test('globalMetrics đếm running, alert active và chỉ tính tool call trong
   expect(g).toEqual({ running: 2, alerts: 2, okRate1h: 0.5, p50_1h: 100 });
   expect(globalMetrics([], [], [], now)).toEqual({ running: 0, alerts: 0, okRate1h: null, p50_1h: null });
 });
+
+test('agentMetrics cộng token cache đọc/ghi của llm call', () => {
+  const m = agentMetrics(agent(), [
+    call({ id: 'l1', kind: 'llm', tokensIn: 1000, tokensOut: 50, cacheRead: 900, cacheWrite: 90 }),
+    call({ id: 'l2', kind: 'llm', tokensIn: 500, tokensOut: 10, cacheRead: 400 }),
+    call({ id: 't1', kind: 'tool', cacheRead: 999 }),
+  ], 6000);
+  expect(m).toMatchObject({ tokensIn: 1500, tokensOut: 60, cacheRead: 1300, cacheWrite: 90 });
+});

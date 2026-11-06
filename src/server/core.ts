@@ -62,10 +62,10 @@ export function cliRunners(cfg: Config, env: Record<string, string | undefined> 
     if (typeof j.command !== 'string' || !j.command || !Array.isArray(prefix) || !prefix.every((x) => typeof x === 'string')) {
       throw new Error('ACCTV_CLAUDE_CMD phải có dạng {"command": "...", "prefixArgs": ["..."]}');
     }
-    out.claude = createClaudeRunner({ command: j.command, prefixArgs: prefix as string[], guardScript: GUARD_SCRIPT });
+    out.claude = createClaudeRunner({ command: j.command, prefixArgs: prefix as string[], guardScript: GUARD_SCRIPT, claudeDir: cfg.claudeDir });
   } else {
     const exe = findExecutable('claude', cfg.settings.claudePath);
-    if (exe) out.claude = createClaudeRunner({ command: exe, guardScript: GUARD_SCRIPT });
+    if (exe) out.claude = createClaudeRunner({ command: exe, guardScript: GUARD_SCRIPT, claudeDir: cfg.claudeDir });
   }
   const codex = findExecutable('codex', cfg.settings.codexPath);
   if (codex) out.codex = createCodexRunner({ command: codex });

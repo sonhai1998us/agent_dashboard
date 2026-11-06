@@ -2,6 +2,8 @@ import { writeRunFiles, buildClaudeArgs } from './claudeArgs';
 import { newStreamCtx, parseStreamLine } from './streamJson';
 import { startProcess, killTree, OVERFLOW } from './proc';
 import { hookCommand } from '@/src/guard/policy';
+import { findTranscript, transcriptUsage } from '@/src/adapters/claude/usage';
+import type { NormalizedEvent } from '@/src/core/model';
 import type { Runner, RunResult } from './types';
 
 /** Đã có dòng `result` mà tiến trình chưa thoát sau ngần này thì tắt cả cây tiến trình (vd. tiến trình cháu treo giữ stdio). */
@@ -9,6 +11,8 @@ export const REAP_AFTER_RESULT_MS = 10_000;
 
 export function createClaudeRunner(opts: {
   command: string; prefixArgs?: string[]; nodePath?: string; guardScript: string; reapAfterResultMs?: number;
+  /** ~/.claude: đọc lại transcript khi lượt chạy xong để lấy số token đúng; không có thì giữ số của stream-json */
+  claudeDir?: string;
 }): Runner {
   const reapMs = opts.reapAfterResultMs ?? REAP_AFTER_RESULT_MS;
   return (spec, sink) => {
@@ -20,6 +24,7 @@ export function createClaudeRunner(opts: {
     let result: { isError: boolean; text: string; costUsd: number | null; rateLimited: boolean } | null = null;
     let killed = false;
     let reaped = false;
+    const llmCalls = new Map<string, { name: string; startedAt: number }>();
     let reapTimer: NodeJS.Timeout | undefined;
 
     const stopTree = async (pid: number): Promise<void> => {
@@ -37,6 +42,7 @@ export function createClaudeRunner(opts: {
       if (line === OVERFLOW) { sink.events([{ type: 'parse_error', agentId: spec.agentId }]); return; }
       const out = parseStreamLine(line, ctx, Date.now());
       if (out.sessionId) sessionId = out.sessionId;
+      for (const e of out.events) if (e.type === 'call_start' && e.call.kind === 'llm') llmCalls.set(e.call.id, { name: e.call.name, startedAt: e.call.startedAt });
       if (out.events.length) sink.events(out.events);
       if (out.limited !== undefined) sink.limited(out.limited);
       if (out.result) {
@@ -56,7 +62,22 @@ export function createClaudeRunner(opts: {
     void proc.exit.then(() => clearTimeout(reapTimer));
     proc.stdin.end(spec.prompt, 'utf8');
 
-    const done: Promise<RunResult> = proc.exit.then(({ code }) => ({
+    // stream-json chỉ có output_tokens lúc message mới bắt đầu; transcript có số cuối và phần cache
+    const reconcile = (): void => {
+      if (!opts.claudeDir || !llmCalls.size) return;
+      try {
+        const file = findTranscript(opts.claudeDir, sessionId);
+        if (!file) return;
+        const events: NormalizedEvent[] = [];
+        for (const [id, u] of transcriptUsage(file, new Set(llmCalls.keys()))) {
+          const c = llmCalls.get(id)!;
+          events.push({ type: 'call_start', call: { id, agentId: spec.agentId, kind: 'llm', name: c.name, inputHash: '', inputPreview: '', startedAt: c.startedAt, ...u } });
+        }
+        if (events.length) sink.events(events);
+      } catch { /* giữ số của stream-json */ }
+    };
+
+    const done: Promise<RunResult> = proc.exit.then(({ code }) => (reconcile(), {
       // bị dọn sau khi đã có result: kết quả là của lượt đã xong, không phải lỗi
       exitCode: reaped ? 0 : code,
       killed,

@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS calls (
   id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, kind TEXT NOT NULL, name TEXT NOT NULL,
   input_hash TEXT NOT NULL, input_preview TEXT NOT NULL,
   started_at INTEGER NOT NULL, ended_at INTEGER, ok INTEGER, error_preview TEXT,
-  tokens_in INTEGER, tokens_out INTEGER
+  tokens_in INTEGER, tokens_out INTEGER, cache_read INTEGER, cache_write INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_calls_agent_started ON calls(agent_id, started_at);
 CREATE INDEX IF NOT EXISTS idx_calls_started ON calls(started_at);
@@ -54,6 +54,7 @@ function toCall(r: Row): CallRecord {
     ok: r.ok === null || r.ok === undefined ? null : r.ok === 1,
     errorPreview: r.error_preview ?? null,
     tokensIn: r.tokens_in ?? null, tokensOut: r.tokens_out ?? null,
+    cacheRead: r.cache_read ?? null, cacheWrite: r.cache_write ?? null,
   };
 }
 
@@ -81,6 +82,10 @@ export class Store {
     const cols = (this.db.prepare('PRAGMA table_info(agents)').all() as Row[]).map((c) => c.name);
     for (const col of ['parent_tool_use_id', 'request_shape']) {
       if (!cols.includes(col)) this.db.exec(`ALTER TABLE agents ADD COLUMN ${col} TEXT`);
+    }
+    const callCols = (this.db.prepare('PRAGMA table_info(calls)').all() as Row[]).map((c) => c.name);
+    for (const col of ['cache_read', 'cache_write']) {
+      if (!callCols.includes(col)) this.db.exec(`ALTER TABLE calls ADD COLUMN ${col} INTEGER`);
     }
   }
 
@@ -289,17 +294,22 @@ export class Store {
   private applyCallStart(c: Omit<CallRecord, 'endedAt' | 'ok' | 'errorPreview'>): HubEvent[] {
     this.ensureAgent(c.agentId, c.startedAt);
     this.db.prepare(
-      `INSERT OR IGNORE INTO calls (id, agent_id, kind, name, input_hash, input_preview, started_at, tokens_in, tokens_out)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(c.id, c.agentId, c.kind, c.name, c.inputHash, c.inputPreview.slice(0, PREVIEW_MAX), c.startedAt, c.tokensIn, c.tokensOut);
+      `INSERT OR IGNORE INTO calls (id, agent_id, kind, name, input_hash, input_preview, started_at, tokens_in, tokens_out, cache_read, cache_write)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(c.id, c.agentId, c.kind, c.name, c.inputHash, c.inputPreview.slice(0, PREVIEW_MAX), c.startedAt, c.tokensIn, c.tokensOut, c.cacheRead ?? null, c.cacheWrite ?? null);
     if (c.kind === 'llm') {
       // llm calls are emitted as call_start (+ call_end) possibly repeatedly: keep the largest token counts
       this.db.prepare(
         `UPDATE calls SET
            tokens_in = CASE WHEN ? IS NULL THEN tokens_in WHEN tokens_in IS NULL THEN ? ELSE MAX(tokens_in, ?) END,
-           tokens_out = CASE WHEN ? IS NULL THEN tokens_out WHEN tokens_out IS NULL THEN ? ELSE MAX(tokens_out, ?) END
+           tokens_out = CASE WHEN ? IS NULL THEN tokens_out WHEN tokens_out IS NULL THEN ? ELSE MAX(tokens_out, ?) END,
+           cache_read = CASE WHEN ? IS NULL THEN cache_read WHEN cache_read IS NULL THEN ? ELSE MAX(cache_read, ?) END,
+           cache_write = CASE WHEN ? IS NULL THEN cache_write WHEN cache_write IS NULL THEN ? ELSE MAX(cache_write, ?) END
          WHERE id = ? AND kind = 'llm'`,
-      ).run(c.tokensIn, c.tokensIn, c.tokensIn, c.tokensOut, c.tokensOut, c.tokensOut, c.id);
+      ).run(
+        c.tokensIn, c.tokensIn, c.tokensIn, c.tokensOut, c.tokensOut, c.tokensOut,
+        c.cacheRead ?? null, c.cacheRead ?? null, c.cacheRead ?? null, c.cacheWrite ?? null, c.cacheWrite ?? null, c.cacheWrite ?? null, c.id,
+      );
     }
     this.touch(c.agentId, c.startedAt);
     return [...this.agentOut(c.agentId), ...this.callOut(c.id)];

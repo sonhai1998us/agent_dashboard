@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { CallRecord } from '@/src/core/model';
 import { getState, selectAgentMetrics, useLive } from '../lib/liveStore';
-import { estimateCost, fmtClock, fmtCost, fmtDuration, fmtTokens } from '../lib/format';
+import { estimateCost, fmtClock, fmtCost, fmtDuration, fmtTokens, cacheShare, fmtPercent } from '../lib/format';
 import ManagedPanel from './ManagedPanel';
 import { alertPill, callRowState, toolCalls, topRepeatedError } from '../lib/detail';
 import styles from './AgentDetail.module.css';
@@ -109,7 +109,9 @@ export default function AgentDetail() {
     ['lỗi', m ? String(m.errors) : dash],
     ['p50', m?.p50 != null ? fmtDuration(m.p50) : dash],
     ['p95', m?.p95 != null ? fmtDuration(m.p95) : dash],
-    ['token', m ? fmtTokens(m.tokensIn + m.tokensOut) : dash],
+    ['token vào', m ? fmtTokens(m.tokensIn) : dash],
+    ['token ra', m ? fmtTokens(m.tokensOut) : dash],
+    ['đọc cache', m ? fmtPercent(cacheShare(m.cacheRead, m.tokensIn)) : dash],
     ['thời gian', m ? fmtDuration(m.durationMs) : dash],
     ['chi phí', fmtCost(cost)],
   ];

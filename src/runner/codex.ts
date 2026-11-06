@@ -68,7 +68,7 @@ export function parseCodexExecLine(line: string, ctx: CodexCtx, now: number): St
     const id = `${agentId}:llm:${ctx.turns = (ctx.turns ?? 0) + 1}`;
     return {
       events: [
-        { type: 'call_start', call: { id, agentId, kind: 'llm', name: 'llm', inputHash: '', inputPreview: '', startedAt: now, tokensIn: (u.input_tokens ?? 0) + (u.cached_input_tokens ?? 0), tokensOut: u.output_tokens ?? 0 } },
+        { type: 'call_start', call: { id, agentId, kind: 'llm', name: 'llm', inputHash: '', inputPreview: '', startedAt: now, tokensIn: (u.input_tokens ?? 0) + (u.cached_input_tokens ?? 0), tokensOut: u.output_tokens ?? 0, cacheRead: u.cached_input_tokens ?? 0, cacheWrite: null } },
         { type: 'call_end', agentId, callId: id, endedAt: now, ok: true, errorPreview: null },
       ],
       limited: false,

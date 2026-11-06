@@ -257,3 +257,26 @@ test('clearIngested giữ agent/call do dashboard chạy; isManagedSession; drop
   expect(s.activeAlerts().length).toBe(0);
   expect(s.isManagedSession('sid-x')).toBe(false);
 });
+
+test('llm call: cache đọc/ghi lưu riêng, lấy MAX khi cập nhật; DB cũ được thêm cột', async () => {
+  const s = new Store(':memory:'); s.applyEvent(agentEv);
+  const llm = (o: number, cr: number | null, cw: number | null) => callStart({ id: 'l1', kind: 'llm', name: 'm', tokensIn: 1000, tokensOut: o, cacheRead: cr, cacheWrite: cw });
+  s.applyEvent(llm(8, 900, 100)); s.applyEvent(llm(546, null, null)); s.applyEvent(llm(3, 800, 50));
+  expect(s.listCalls('claude:s1')[0]).toMatchObject({ tokensIn: 1000, tokensOut: 546, cacheRead: 900, cacheWrite: 100 });
+
+  const fs = await import('node:fs'); const os = await import('node:os'); const path = await import('node:path');
+  const { DatabaseSync } = await import('node:sqlite');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'acctv-store-'));
+  const file = path.join(dir, 'old.db');
+  const old = new DatabaseSync(file);
+  old.exec(`CREATE TABLE calls (id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, kind TEXT NOT NULL, name TEXT NOT NULL,
+    input_hash TEXT NOT NULL, input_preview TEXT NOT NULL, started_at INTEGER NOT NULL, ended_at INTEGER, ok INTEGER, error_preview TEXT,
+    tokens_in INTEGER, tokens_out INTEGER)`);
+  old.close();
+  const s2 = new Store(file);
+  s2.applyEvent(agentEv);
+  s2.applyEvent(llm(5, 10, 2));
+  expect(s2.listCalls('claude:s1')[0]).toMatchObject({ cacheRead: 10, cacheWrite: 2 });
+  s2.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+});
