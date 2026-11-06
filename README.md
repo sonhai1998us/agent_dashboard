@@ -87,6 +87,7 @@ acctv ls | watch | logs         # nhận biết ticket và agent do dashboard ch
 
 - Mỗi ticket làm việc trong một git worktree riêng ở `~/.acctv/worktrees` (theo `ACCTV_HOME`), trên nhánh `acctv/*`. Repo gốc không bị đụng.
 - Người dùng tự merge nhánh `acctv/*`. Dashboard không bao giờ `git push`.
+- Commit snapshot mỗi vòng dùng `--no-verify`: hook pre-commit/commit-msg của repo (vd. husky chạy tsc, test, lint, ép format message) không chạy cho các commit này. Hook vẫn chạy khi bạn tự commit hay merge.
 - `~/.claude` và `~/.codex` chỉ được đọc.
 
 ### Quyền theo vai

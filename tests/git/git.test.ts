@@ -78,7 +78,7 @@ describe('git helpers', () => {
     expect(await snapshotCommit(r, 'snap')).toMatch(/^[0-9a-f]{40}$/);
   });
 
-  it('a hanging pre-commit hook times out the snapshot instead of stalling', async () => {
+  it('snapshot bỏ qua hook của repo: pre-commit treo và commit-msg từ chối không chặn được', async () => {
     const r = join(root, 'hooked');
     mkdirSync(r);
     g(r, 'init', '-q');
@@ -87,13 +87,15 @@ describe('git helpers', () => {
     g(r, 'add', '-A');
     g(r, '-c', 'user.name=T', '-c', 'user.email=t@localhost', 'commit', '-q', '-m', 'first');
     writeFileSync(join(r, '.git', 'hooks', 'pre-commit'), '#!/bin/sh\nsleep 30\n', { mode: 0o755 });
+    writeFileSync(join(r, '.git', 'hooks', 'commit-msg'), '#!/bin/sh\necho "Invalid commit message format!" >&2\nexit 1\n', { mode: 0o755 });
     writeFileSync(join(r, 'b.txt'), 'b\n');
     const saved = GIT_TIMEOUT_MS.commit;
-    GIT_TIMEOUT_MS.commit = 1500;
+    GIT_TIMEOUT_MS.commit = 5000;
     try {
       const t0 = Date.now();
-      await expect(snapshotCommit(r, 'snap')).rejects.toThrow(/git commit lỗi: quá 1\.5s/);
-      expect(Date.now() - t0).toBeLessThan(10_000);
+      expect(await snapshotCommit(r, 'acctv: T-1 vòng 1')).toMatch(/^[0-9a-f]{40}$/);
+      expect(Date.now() - t0).toBeLessThan(5_000);
+      expect(g(r, 'log', '-1', '--format=%s').trim()).toBe('acctv: T-1 vòng 1');
     } finally {
       GIT_TIMEOUT_MS.commit = saved;
     }

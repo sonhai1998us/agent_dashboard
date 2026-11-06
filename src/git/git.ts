@@ -62,10 +62,14 @@ export async function createWorktree(repo: string, branch: string, wtPath: strin
   return { baseRef };
 }
 
+/**
+ * Commit snapshot vòng trên nhánh acctv/* của worktree. Bỏ qua hook của repo (`--no-verify`): hook pre-commit/commit-msg
+ * (vd. husky chạy tsc, test, lint, ép format message) làm snapshot chậm hoặc lỗi; agent đã tự chạy kiểm tra, người dùng review trước khi merge.
+ */
 export async function snapshotCommit(wt: string, message: string): Promise<string | null> {
   await git(wt, ['add', '-A']);
   if ((await git(wt, ['status', '--porcelain'])).trim() === '') return null;
-  await git(wt, [...IDENT, 'commit', '-m', message], GIT_TIMEOUT_MS.commit);
+  await git(wt, [...IDENT, 'commit', '--no-verify', '-m', message], GIT_TIMEOUT_MS.commit);
   return (await git(wt, ['rev-parse', 'HEAD'])).trim();
 }
 

@@ -27,9 +27,9 @@ Quyền hạn:
 Quy trình:
 1. Lập kế hoạch: đọc ticket và code liên quan. Ticket nhắc tới issue Jira, trang Confluence hay link Figma thì đọc chúng (twg, MCP) trước khi chia việc. Ước lượng độ khó, chia việc thành các gói. Mỗi gói ghi rõ những file được sửa; các gói Dev chạy song song không được trùng file. Chọn vai, số lượng, model/effort cho từng vai và tiêu chí nghiệm thu. Vai explorer (chỉ đọc, tìm file cho Dev) hợp với việc cần tìm nhiều chỗ trong code lớn; việc nhỏ đã rõ file thì để count 0.
 2. Gọi propose_plan. Khi nó trả lời rằng người dùng đang duyệt, hãy kết thúc lượt ngay, không gọi thêm tool và không viết gì thêm.
-3. Sau khi được duyệt: gọi spawn_agent theo từng gói việc. Nếu kế hoạch có Explorer (model rẻ), giao Explorer tìm và đọc file liên quan trước, rồi dùng báo cáo của nó để ghi task và files cho Dev cụ thể hơn. Cho các Dev chạy song song khi tập file không giao nhau. Rồi gọi wait_agents với id các agent vừa giao. Khi wait_agents trả "Đang chờ", kết thúc lượt ngay; bạn sẽ được gọi lại kèm báo cáo.
+3. Sau khi được duyệt: gọi spawn_agent theo từng gói việc. Nếu kế hoạch có Explorer (model rẻ), giao Explorer tìm và đọc file liên quan trước, rồi dùng báo cáo của nó để ghi task và files cho Dev cụ thể hơn. Task giao Dev phải đủ để làm đúng ngay vòng đầu: chép spec cụ thể (kích thước, màu, chữ, dữ liệu từ Figma/Jira) vào task thay vì chỉ đưa link, và nêu lệnh kiểm tra cần chạy (thường chỉ typecheck và lint phần đã sửa; build toàn dự án chỉ khi tiêu chí nghiệm thu cần). Cho các Dev chạy song song khi tập file không giao nhau. Rồi gọi wait_agents với id các agent vừa giao. Khi wait_agents trả "Đang chờ", kết thúc lượt ngay; bạn sẽ được gọi lại kèm báo cáo.
 4. Khi Dev xong: giao Designer (nếu kế hoạch có) và QC review, rồi lại wait_agents.
-5. Còn lỗi thì giao lại Dev ở vòng sau, kèm danh sách lỗi cụ thể (file:dòng). Mỗi vòng Dev được tính một lần; có giới hạn số vòng.
+5. Quyết định vòng mới dựa trên báo cáo review, không tự soi lại toàn bộ. Chỉ giao lại Dev ở vòng sau khi còn lỗi nghiêm trọng hoặc vừa, hoặc chưa đạt tiêu chí nghiệm thu, kèm danh sách lỗi cụ thể (file:dòng). Lỗi nhẹ (lệch vài px, câu chữ, đề xuất thêm) ghi vào báo cáo cuối cho người dùng, không mở vòng mới. Mỗi vòng Dev được tính một lần; có giới hạn số vòng.
 6. Dùng get_agent_log khi cần xem một agent đã làm gì hoặc vì sao thất bại / bị dừng.
 7. Kết thúc bằng finish: status "done" khi đạt mọi tiêu chí nghiệm thu, "escalated" khi hết vòng mà vẫn còn lỗi hoặc cần người dùng quyết. Báo cáo cuối nêu đã làm gì, file nào đổi, kết quả kiểm tra và việc còn lại.
 
@@ -43,7 +43,8 @@ Quy tắc:
 - Không chạy lệnh nền (run_in_background bị chặn); chạy ở tiền cảnh kèm timeout.
 - Cần người dùng làm gì đó (đăng nhập CLI hay trình duyệt, SSO/OTP, mở link, cấp quyền, lệnh cần terminal thật): đừng tự chạy lệnh đăng nhập; gọi tool request_user_action (title, message, url nếu có, command người dùng cần chạy) rồi kết thúc lượt, bạn sẽ được gọi lại khi người dùng xong. Không có tool này thì dừng và ghi rõ trong báo cáo.
 - Đọc code xung quanh trước khi viết và theo đúng convention đang có.
-- Chạy test, lint, typecheck theo phạm vi gói việc (ví dụ \`vitest run <file test>\`), tránh chạy cả bộ nặng cùng lúc với Dev khác.
+- Kiểm tra một lần sau khi sửa xong: typecheck và lint đúng phạm vi (file đã sửa, test liên quan, ví dụ \`vitest run <file test>\`, \`eslint <file>\`). Lệnh nào lỗi thì sửa rồi chạy lại đúng lệnh đó, không chạy lại cả bộ.
+- Chỉ chạy build toàn dự án khi task hoặc tiêu chí nghiệm thu yêu cầu, và chỉ một lần ở cuối. Không cài lại dependency khi node_modules đã có. Tránh chạy bộ nặng cùng lúc với Dev khác.
 - Cấm \`git commit\`, \`git push\` và mọi lệnh git đổi nhánh hoặc remote; dashboard tự commit snapshot mỗi vòng. Không cài phần mềm toàn máy, không tắt tiến trình không phải của mình.
 - Spec mơ hồ hoặc cần sửa file ngoài phạm vi thì dừng và nói rõ trong báo cáo.
 
@@ -123,7 +124,7 @@ export const turn = {
         'Các thay đổi này sẽ nằm trong snapshot vòng. Nếu cần thiết (vd. lockfile sau khi cài dependency) thì nêu rõ trong báo cáo cuối; ' +
         'nếu không, giao Dev hoàn tác ở vòng sau, hoặc finish với status "escalated" để người dùng quyết.\n\n'
       : '') +
-    'Xem báo cáo. Nếu Dev vừa xong thì giao review (Designer nếu có, QC). Còn lỗi và còn vòng thì giao lại Dev kèm lỗi cụ thể. ' +
+    'Xem báo cáo. Nếu Dev vừa xong thì giao review (Designer nếu có, QC). Còn lỗi nghiêm trọng/vừa hoặc chưa đạt tiêu chí nghiệm thu và còn vòng thì giao lại Dev kèm lỗi cụ thể; lỗi nhẹ ghi vào báo cáo cuối, không mở vòng mới. ' +
     'Đạt mọi tiêu chí thì gọi finish với status "done"; hết vòng mà còn lỗi thì finish với status "escalated".',
   nudge: (): string =>
     'Bạn vừa kết thúc lượt mà không gọi tool chờ (propose_plan, wait_agents) hay finish. ' +

@@ -113,3 +113,19 @@ describe('request_user_action trong prompt worker', () => {
     expect(systemPrompt('controller', { worktree: 'wt', files: [], denyBash: [] })).not.toMatch(/request_user_action/);
   });
 });
+
+describe('dặn agent làm nhanh', () => {
+  const ctx = { worktree: 'W', files: ['a.ts'], denyBash: [] };
+  it('Dev: kiểm tra một lần, build chỉ khi cần, không cài lại dependency', () => {
+    const s = systemPrompt('dev', ctx);
+    expect(s).toMatch(/Kiểm tra một lần sau khi sửa xong/);
+    expect(s).toMatch(/Chỉ chạy build toàn dự án khi task hoặc tiêu chí nghiệm thu yêu cầu, và chỉ một lần/);
+    expect(s).toMatch(/Không cài lại dependency/);
+  });
+  it('Controller: task đủ spec cho vòng đầu; lỗi nhẹ không mở vòng mới', () => {
+    const s = systemPrompt('controller', ctx);
+    expect(s).toMatch(/làm đúng ngay vòng đầu/);
+    expect(s).toMatch(/Lỗi nhẹ .* không mở vòng mới/);
+    expect(turn.agentsDone([], 1, 3)).toMatch(/lỗi nhẹ ghi vào báo cáo cuối, không mở vòng mới/);
+  });
+});

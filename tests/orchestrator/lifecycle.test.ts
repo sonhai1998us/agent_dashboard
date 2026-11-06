@@ -557,8 +557,14 @@ describe('các trường hợp riêng', () => {
 });
 
 describe('bản sửa sau review cuối', () => {
-  beforeEach(() => { env = makeEnv({ delays: { rateLimitMs: [10, 10, 10] } }); });
-  const failingHook = (repo: string) => writeFileSync(join(repo, '.git', 'hooks', 'pre-commit'), '#!/bin/sh\necho hook-chan >&2\nexit 1\n', { mode: 0o755 });
+  // snapshot bỏ qua hook của repo (--no-verify), nên lỗi commit được giả lập ở lớp git: có thay đổi thì commit lỗi
+  let commitFails = false;
+  const snapshotCommit: typeof git.snapshotCommit = async (wt, msg) => {
+    if (commitFails && (await git.worktreeChanges(wt)).length) throw new Error('git commit lỗi: hook-chan');
+    return git.snapshotCommit(wt, msg);
+  };
+  beforeEach(() => { commitFails = false; env = makeEnv({ delays: { rateLimitMs: [10, 10, 10] }, git: { snapshotCommit } }); });
+  const failingHook = (_repo: string) => { commitFails = true; };
 
   it('spawn: vai có count 0 trong kế hoạch bị từ chối; đủ số lượng thì phải chờ', async () => {
     const T = await toRunning(env);
@@ -599,7 +605,7 @@ describe('bản sửa sau review cuối', () => {
     expect(g(env.repo, 'branch', '--list', 'acctv/T-1-trang-dang-nhap-2')).toContain('acctv/T-1-trang-dang-nhap-2');
   });
 
-  it('pre-commit hook lỗi: snapshot vòng ghi log lỗi, Controller vẫn được đánh thức', async () => {
+  it('commit snapshot lỗi: snapshot vòng ghi log lỗi, Controller vẫn được đánh thức', async () => {
     failingHook(env.repo);
     const T = await toRunning(env);
     const tools = env.orch.mcpTools(T);
