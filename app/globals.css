@@ -34,6 +34,18 @@
 
 html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg); }
 
+/* Thanh cuộn mảnh 6px, không có nút mũi tên. Chrome bỏ qua ::-webkit-scrollbar nếu đặt scrollbar-width/color,
+   nên hai thuộc tính chuẩn chỉ dùng cho trình duyệt không có ::-webkit-scrollbar (Firefox). */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+::-webkit-scrollbar-corner { background: transparent; }
+@supports not selector(::-webkit-scrollbar) {
+  * { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+}
+
 body {
   font-family: var(--font-fira-sans), system-ui, sans-serif;
   font-size: 13px;
