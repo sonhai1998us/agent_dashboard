@@ -18,6 +18,8 @@ const STOP_REASON = 'người dùng dừng';
 const ROLES: Role[] = ['controller', 'explorer', 'dev', 'designer', 'qc'];
 const AGENTS: AgentKind[] = ['claude', 'codex'];
 const EFFORTS: Effort[] = ['low', 'medium', 'high', 'xhigh', 'max'];
+const AGENT_ID = /^acctv:(T-\d+):([a-z]+-\d+)$/;
+const CAPTURE_FILE = /^\d+-[\w-]{1,40}\.png$/;
 
 export class HttpError extends Error {
   constructor(public status: number, msg: string, public extra: Record<string, unknown> = {}) {
@@ -137,7 +139,7 @@ function bearer(req: http.IncomingMessage): string {
 // ---------- routes ----------
 
 interface Ctx { req: http.IncomingMessage; url: URL; core: Core; params: string[] }
-interface Reply { status: number; json?: unknown }
+interface Reply { status: number; json?: unknown; body?: Buffer; contentType?: string }
 interface Route { method: 'GET' | 'POST' | 'PUT'; re: RegExp; run(c: Ctx): Promise<Reply> | Reply }
 
 const ok = (json: unknown, status = 200): Reply => ({ status, json });
@@ -200,7 +202,53 @@ const ROUTES: Route[] = [
   },
   {
     method: 'GET', re: /^\/api\/tickets\/([^/]+)$/,
-    run: ({ core, params: [id] }) => ok({ ticket: mustTicket(core, id), agents: core.tickets.listManaged(id), log: core.tickets.listLog(id) }),
+    run: ({ core, params: [id] }) => ok({ ticket: mustTicket(core, id), agents: core.tickets.listManaged(id), log: core.tickets.listLog(id), preview: core.orchestrator.previewStatus(id) }),
+  },
+  {
+    method: 'POST', re: /^\/api\/tickets\/([^/]+)\/preview\/stop$/,
+    run: async ({ core, params: [id] }) => {
+      mustTicket(core, id);
+      await core.orchestrator.stopPreview(id);
+      return ok({ ok: true });
+    },
+  },
+  {
+    // ảnh capture của một agent, mới nhất trước
+    method: 'GET', re: /^\/api\/agents\/([^/]+)\/captures$/,
+    run: ({ core, params: [id] }) => {
+      const m = AGENT_ID.exec(id);
+      if (!m) throw new HttpError(404, 'agent không hợp lệ');
+      const dir = path.join(core.cfg.home, 'runs', m[1], m[2], 'captures');
+      let names: string[] = [];
+      try {
+        names = fs.readdirSync(dir).filter((f) => CAPTURE_FILE.test(f));
+      } catch {
+        names = [];
+      }
+      const items = names.map((name) => {
+        let at = 0;
+        try { at = fs.statSync(path.join(dir, name)).mtimeMs; } catch { /* vừa bị xoá */ }
+        return { name, file: `/api/captures/${m[1]}/${m[2]}/${name}`, at: Math.round(at) };
+      });
+      items.sort((a, b) => b.at - a.at || b.name.localeCompare(a.name, undefined, { numeric: true }));
+      return ok(items);
+    },
+  },
+  {
+    method: 'GET', re: /^\/api\/captures\/([^/]+)\/([^/]+)\/([^/]+)$/,
+    run: ({ core, params: [ticket, slot, file] }) => {
+      if (!/^T-\d+$/.test(ticket) || !/^[a-z]+-\d+$/.test(slot) || !CAPTURE_FILE.test(file)) throw new HttpError(404, 'not found');
+      const runs = path.join(core.cfg.home, 'runs');
+      const abs = path.join(runs, ticket, slot, 'captures', file);
+      if (!inside(abs, runs)) throw new HttpError(404, 'not found');
+      let body: Buffer;
+      try { body = fs.readFileSync(abs); } catch { throw new HttpError(404, 'not found'); }
+      return { status: 200, body, contentType: 'image/png' };
+    },
+  },
+  {
+    method: 'POST', re: /^\/api\/projects\/reset-db$/,
+    run: async ({ req, core }) => ok(await core.orchestrator.resetProjectDb(absDir(objBody(await readJson(req)).dir))),
   },
   {
     method: 'POST', re: /^\/api\/tickets\/([^/]+)\/approve$/,
@@ -329,7 +377,10 @@ export async function handleApi(req: http.IncomingMessage, res: http.ServerRespo
       throw new HttpError(400, 'bad path parameter');
     }
     const r = await route.run({ req, url, core, params });
-    if (r.json === undefined) {
+    if (r.body) {
+      res.writeHead(r.status, { 'content-type': r.contentType ?? 'application/octet-stream', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
+      res.end(r.body);
+    } else if (r.json === undefined) {
       res.writeHead(r.status, { 'cache-control': 'no-store' });
       res.end();
     } else sendJson(res, r.status, r.json);

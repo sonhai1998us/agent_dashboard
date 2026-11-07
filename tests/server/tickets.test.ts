@@ -265,6 +265,51 @@ test('settings: mật khẩu tài khoản test bị che khi GET; PUT với giá 
   expect(bad.json.errors.join('\n')).toMatch(/accounts\.member\.password/);
 });
 
+test('preview: trạng thái trong GET ticket, nút tắt server, ảnh capture, reset dữ liệu', async () => {
+  await start();
+  await toAwaiting();
+  const t = await call('GET', '/api/tickets/T-1');
+  expect(t.json.preview).toBeNull();
+  expect((await post('/api/tickets/T-1/preview/stop')).json).toEqual({ ok: true });
+  expect((await post('/api/tickets/T-9/preview/stop')).status).toBe(404);
+
+  const dir = path.join(cfg.home, 'runs', 'T-1', 'qc-1', 'captures');
+  fs.mkdirSync(dir, { recursive: true });
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
+  fs.writeFileSync(path.join(dir, '1-home.png'), png);
+  fs.writeFileSync(path.join(dir, '2-error-3.png'), png);
+  fs.writeFileSync(path.join(dir, 'x.txt'), 'no');
+  const list = await call('GET', `/api/agents/${encodeURIComponent('acctv:T-1:qc-1')}/captures`);
+  expect(list.status).toBe(200);
+  expect(list.json.map((c: any) => c.name).sort()).toEqual(['1-home.png', '2-error-3.png']);
+  expect(list.json[0]).toEqual({ name: expect.any(String), file: expect.stringMatching(/^\/api\/captures\/T-1\/qc-1\/\d+-[\w-]+\.png$/), at: expect.any(Number) });
+  expect((await call('GET', `/api/agents/${encodeURIComponent('acctv:T-1:nope-1')}/captures`)).json).toEqual([]);
+  expect((await call('GET', '/api/agents/bad/captures')).status).toBe(404);
+
+  const img = await fetch(`${srv!.url}/api/captures/T-1/qc-1/1-home.png`);
+  expect(img.status).toBe(200);
+  expect(img.headers.get('content-type')).toBe('image/png');
+  expect(Buffer.from(await img.arrayBuffer())).toEqual(png);
+  for (const p of ['/api/captures/T-1/qc-1/x.txt', '/api/captures/T-1/qc-1/..%2F..%2Fconfig.json', '/api/captures/..%2F..%2Fx/qc-1/1-home.png', '/api/captures/T-1/qc-1/9-none.png']) {
+    expect((await fetch(srv!.url + p)).status, p).toBe(404);
+  }
+
+  const proj = {
+    dev: { command: 'next dev -p {port}' }, prod: { build: 'next build', start: 'next start -p {port}' }, defaultMode: 'dev', env: {}, readyPath: '/',
+    accounts: [{ name: 'owner', description: '', username: 'o@x', password: 'pw-42' }],
+    db: { resetCommand: `"${process.execPath}" -e "console.log(42); console.log('pw-42')"`, cwd: tmp },
+  };
+  const cur = (await call('GET', '/api/settings')).json;
+  expect((await call('PUT', '/api/settings', { ...cur, settings: { ...cur.settings, projects: { [repo]: proj } } })).status).toBe(200);
+  const reset = await post('/api/projects/reset-db', { dir: repo });
+  expect(reset.status).toBe(200);
+  expect(reset.json.code).toBe(0);
+  expect(reset.json.tail).toContain('42');
+  expect(reset.json.tail).not.toContain('pw-42');
+  expect((await post('/api/projects/reset-db', { dir: tmp })).status).toBe(400);
+  expect((await post('/api/projects/reset-db', { dir: repo }, { ...JSON_CT, origin: 'http://evil.example' })).status).toBe(403);
+});
+
 test('fs/check và fs/git-init', async () => {
   await start();
   const chk = await call('GET', `/api/fs/check?dir=${encodeURIComponent(repo)}`);

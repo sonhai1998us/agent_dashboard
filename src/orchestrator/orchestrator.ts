@@ -9,6 +9,10 @@ import { TERMINAL_STATES, type UserAction, type AgentKind, type ManagedAgent, ty
 import { branchName, filesOverlap, transition, validatePlan, type TicketEvent } from '@/src/tickets/flow';
 import { CAPTURE_TOOL, checkTool, matchEntry, USER_ACTION_TOOL, type GuardPolicy } from '@/src/guard/policy';
 import type { PreviewManager } from '@/src/preview/manager';
+import type { PreviewStatus } from '@/src/preview/server';
+import { resolveProject } from '@/src/preview/config';
+import { redact } from '@/src/preview/captureArgs';
+import { runShell } from '@/src/preview/dbReset';
 import { mkdirSync } from 'node:fs';
 import { inside } from '@/src/core/paths';
 import type { Runner, RunHandle, RunResult, RunSink, RunSpec } from '@/src/runner/types';
@@ -25,6 +29,7 @@ export interface OrchestratorDeps {
 }
 
 const CAPTURE_ROLES: WorkRole[] = ['dev', 'designer', 'qc'];
+const RESET_DB_MS = 300_000;
 /** File server preview (next dev/build) tự sinh trong worktree: không tính là thay đổi ngoài phạm vi. */
 const PREVIEW_GENERATED = new Set(['next-env.d.ts']);
 
@@ -433,6 +438,24 @@ export class Orchestrator {
     run.resumePrompt = prompt;
     if (run.waitingUser) await this.resumeWorker(agentId);
     return this.deps.tickets.getManaged(agentId) ?? next;
+  }
+
+  previewStatus(ticketId: string): PreviewStatus | null {
+    this.mustTicket(ticketId);
+    return this.deps.preview?.status(ticketId) ?? null;
+  }
+
+  async stopPreview(ticketId: string): Promise<void> {
+    this.mustTicket(ticketId);
+    await this.deps.preview?.stop(ticketId);
+  }
+
+  /** Người dùng bấm "Reset dữ liệu" của một dự án: chạy db.resetCommand trong db.cwd. Agent không gọi được. */
+  async resetProjectDb(dir: string): Promise<{ code: number | null; tail: string }> {
+    const project = resolveProject(this.settings.projects, dir);
+    if (!project?.db) throw new OrchestratorError(400, 'Dự án chưa khai lệnh reset dữ liệu (Settings > Dự án)');
+    const r = await runShell(project.db.resetCommand, project.db.cwd, RESET_DB_MS);
+    return { code: r.code, tail: redact(r.tail, project.accounts.map((a) => a.password)) };
   }
 
   /** Chỉ kiểm token guard của agent (không quyết định, không tác dụng phụ). */
