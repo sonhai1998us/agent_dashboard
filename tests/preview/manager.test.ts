@@ -212,6 +212,35 @@ describe('PreviewManager', () => {
     expect(JSON.parse(meta.previewPids)).toEqual({});
   });
 
+  it('killOrphans chỉ kill pid còn đúng là tiến trình của server/trình duyệt, cùng lần khởi động máy', async () => {
+    const run = async (boot: number) => {
+      const meta: Record<string, string> = { previewPids: JSON.stringify({ 'T-1': [111, 222], 'T-2': [333] }), previewBoot: '1000000' };
+      const killed: number[] = [];
+      const m = new PreviewManager({
+        settings: () => ({ projects: {} }), publish: () => {}, getMeta: (k) => meta[k], setMeta: (k, v) => (meta[k] = v),
+        bootTime: () => boot,
+        procName: async (pid) => ({ 111: 'node.exe', 222: 'Code.exe', 333: 'chrome.exe' } as Record<number, string>)[pid] ?? null,
+        kill: async (pid) => { killed.push(pid); },
+      });
+      await m.killOrphans();
+      return { killed, meta };
+    };
+    const same = await run(1000000 + 30_000);
+    expect(same.killed.sort()).toEqual([111, 333]);
+    expect(JSON.parse(same.meta.previewPids)).toEqual({});
+    const rebooted = await run(1000000 + 3_600_000);
+    expect(rebooted.killed).toEqual([]);
+    expect(JSON.parse(rebooted.meta.previewPids)).toEqual({});
+  });
+
+  it('lưu pid kèm thời điểm khởi động máy', async () => {
+    const { m, meta, servers } = setup();
+    await m.capture(req({ steps: [{ goto: '/' }] }));
+    servers[0].d.onPids([4242]);
+    expect(Number(meta.previewBoot)).toBeGreaterThan(0);
+    await m.stopAll();
+  });
+
   it('next dev biên dịch lạnh: timeout điều hướng 60s và làm nóng trang đăng nhập khi server vừa bật', async () => {
     const warmed: string[] = [];
     const opts: { navTimeoutMs?: number }[] = [];

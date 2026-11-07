@@ -1,3 +1,6 @@
+import { execFile } from 'node:child_process';
+import os from 'node:os';
+import path from 'node:path';
 import type { HubEvent } from '@/src/core/model';
 import { killTree } from '@/src/runner/proc';
 import { LoginError, TicketBrowser, findBrowser as defaultFindBrowser } from './browser';
@@ -22,6 +25,11 @@ export interface PreviewManagerDeps {
   /** gọi trước một URL để next dev biên dịch sẵn (lỗi bị bỏ qua) */
   warm?: (url: string) => Promise<void>;
   idleMs?: number;
+  /** thời điểm máy khởi động (ms); pid lưu ở lần khởi động khác không còn là tiến trình của mình */
+  bootTime?: () => number;
+  /** tên file chạy của pid, null nếu không còn */
+  procName?: (pid: number) => Promise<string | null>;
+  kill?: (pid: number) => Promise<void>;
 }
 
 interface Waiter { resolve(): void; reject(e: Error): void }
@@ -45,6 +53,11 @@ interface Entry {
 
 const MAX_ACTIVE = 2;
 const PIDS_KEY = 'previewPids';
+const BOOT_KEY = 'previewBoot';
+/** sai số khi tính thời điểm khởi động từ uptime */
+const BOOT_SLACK_MS = 120_000;
+/** chỉ kill tiến trình có tên như server preview (shell, node, trình quản lý gói) hoặc trình duyệt headless */
+const ORPHAN_NAMES = /^(node|cmd|sh|bash|pnpm|npm|yarn|bun|chrome|msedge|chrome-headless-shell|chromium)(\.exe)?$/i;
 const IDLE_MS = 600_000;
 /** next dev biên dịch trang lần đầu khi được mở: trên Windows app vừa có thể mất 10–30s */
 const DEV_NAV_MS = 60_000;
@@ -66,6 +79,24 @@ async function defaultFetchOk(url: string): Promise<boolean> {
 
 const serverKey = (p: ProjectPreview): string => JSON.stringify([p.dev, p.prod, p.env, p.readyPath]);
 const browserKey = (p: ProjectPreview): string => JSON.stringify([p.login ?? null, p.accounts]);
+
+function defaultBootTime(): number {
+  return Math.round(Date.now() - os.uptime() * 1000);
+}
+
+/** Tên file chạy của pid (Windows: tasklist; nơi khác: ps). */
+function defaultProcName(pid: number): Promise<string | null> {
+  return new Promise((resolve) => {
+    if (process.platform === 'win32') {
+      execFile('tasklist', ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'], { windowsHide: true }, (e, out) => {
+        const m = !e && /^"([^"]+)","(\d+)"/m.exec(out);
+        resolve(m && Number(m[2]) === pid ? m[1] : null);
+      });
+    } else {
+      execFile('ps', ['-p', String(pid), '-o', 'comm='], (e, out) => resolve(e ? null : path.basename(out.trim()) || null));
+    }
+  });
+}
 
 async function defaultWarm(url: string): Promise<void> {
   try {
@@ -168,7 +199,17 @@ export class PreviewManager {
       saved = {};
     }
     const pids = Object.values(saved).flat().filter((p) => Number.isInteger(p) && p > 0);
-    await Promise.allSettled(pids.map((p) => killTree(p)));
+    const boot = Number(this.d.getMeta(BOOT_KEY));
+    const now = (this.d.bootTime ?? defaultBootTime)();
+    // máy đã khởi động lại (hoặc không rõ): pid cũ có thể đã được cấp cho tiến trình khác của người dùng
+    if (pids.length && Number.isFinite(boot) && Math.abs(now - boot) <= BOOT_SLACK_MS) {
+      const name = this.d.procName ?? defaultProcName;
+      const kill = this.d.kill ?? killTree;
+      await Promise.allSettled(pids.map(async (p) => {
+        const n = await name(p).catch(() => null);
+        if (n && ORPHAN_NAMES.test(n)) await kill(p);
+      }));
+    }
     this.d.setMeta(PIDS_KEY, '{}');
   }
 
@@ -256,6 +297,7 @@ export class PreviewManager {
     if (pids.length) all[ticketId] = pids;
     else delete all[ticketId];
     this.d.setMeta(PIDS_KEY, JSON.stringify(all));
+    if (pids.length) this.d.setMeta(BOOT_KEY, String((this.d.bootTime ?? defaultBootTime)()));
   }
 }
 
