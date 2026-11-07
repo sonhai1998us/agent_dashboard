@@ -69,6 +69,11 @@ describe('systemPrompt: capture, Figma, dữ liệu QC', () => {
     }
   });
 
+  it('chế độ prod: dặn không build song song vì capture đã build; dev thì không nói', () => {
+    expect(systemPrompt('qc', c)).toContain('Chế độ prod: capture đã tự build và chạy bản build');
+    expect(systemPrompt('qc', { ...c, preview: { ...preview, mode: 'dev' } })).not.toContain('Chế độ prod:');
+  });
+
   it('Designer so Figma bằng số; QC theo quy tắc dữ liệu', () => {
     const d = systemPrompt('designer', c);
     for (const s of ['get_design_context', 'excludeScreenshot', 'get_variable_defs', 'measure ở đúng viewport của frame', 'lệch tối đa ±1px', 'màu phải khớp đúng (hoặc khớp token)', 'file:dòng', 'đường dẫn ảnh']) expect(d).toContain(s);

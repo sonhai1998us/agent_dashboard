@@ -102,6 +102,9 @@ function previewParts(role: Role, pv: PreviewPromptCtx | undefined): string[] {
     return ['Không có tool capture trong lượt này (agent Codex hoặc dashboard chưa có server preview): kiểm bằng đọc code và lệnh kiểm tra, ghi rõ phần chưa kiểm được trên trình duyệt trong báo cáo.'];
   }
   const parts = [`Trình duyệt (tool capture):\n${bullets(CAPTURE_INTRO)}`, `Chế độ server: ${pv.mode}`];
+  if (pv.mode === 'prod') {
+    parts.push('Chế độ prod: capture đã tự build và chạy bản build (kết quả build ở server.buildMs; build lỗi thì capture báo kèm log). Không chạy next build / pnpm build song song: nó ghi đè thư mục build đang được phục vụ và capture phải build lại.');
+  }
   parts.push(pv.accounts.length
     ? `Tài khoản test (dùng as: "<name>"):\n${bullets(pv.accounts.map((a) => `\`${a.name}\`: ${a.description}`))}`
     : 'Dự án chưa khai tài khoản test: capture chỉ xem được trang khách (không truyền as).');

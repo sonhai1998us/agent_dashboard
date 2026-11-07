@@ -140,7 +140,8 @@ Dev, Designer và QC xem trang đang chạy bằng tool `capture`. Agent không 
   - Mỗi ticket có một server preview trong worktree của nó, cổng do dashboard cấp, origin luôn là `http://localhost:<cổng>`.
   - Server được bật ở lần `capture` đầu tiên và dùng chung cho mọi agent của ticket.
   - Server tự tắt khi ticket kết thúc hoặc bị huỷ, khi không ai dùng trong 10 phút, khi bạn bấm "Tắt server" trên trang ticket, hoặc khi dashboard tắt.
-  - Chế độ `dev` (mặc định) giữ server qua các vòng, nhờ HMR. Chế độ `prod` build rồi start, và build lại khi code trong worktree đã đổi. Controller đặt `preview.mode: prod` trong kế hoạch khi tiêu chí nghiệm thu đụng tới SSR, redirect, middleware hay header.
+  - Chế độ `dev` (mặc định) giữ server qua các vòng, nhờ HMR. Chế độ `prod` build rồi start, và build lại khi code trong worktree đã đổi, hoặc khi một lệnh build khác ghi đè `.next/BUILD_ID`.
+  - Next.js 16 tách thư mục build của `next dev` (`.next/dev`) khỏi `next build`. Với Next.js 15 trở xuống, `next build` chạy trong worktree khi server dev đang bật sẽ ghi chung `.next`; dùng chế độ `prod` hoặc tránh build song song. Controller đặt `preview.mode: prod` trong kế hoạch khi tiêu chí nghiệm thu đụng tới SSR, redirect, middleware hay header.
 - **Trình duyệt.** Dashboard dùng Chrome, không có thì dùng Edge, chạy headless. Biến `ACCTV_BROWSER` trỏ tới file chạy nếu trình duyệt cài ở chỗ khác. Mỗi tài khoản test có phiên (cookie) riêng.
 - **Kết quả của `capture`.** Ảnh PNG (agent xem bằng `Read`), số đo DOM (kích thước, màu, font, padding…), URL và chuyển hướng, lỗi console, request ghi (POST/PUT/PATCH/DELETE) kèm mã trạng thái, và tràn ngang. Ảnh lưu ở `ACCTV_HOME/runs/<ticket>/<agent>/captures`, hiện trong panel của agent.
 - **Cấu hình dự án** (Settings > Dự án, khoá theo thư mục dự án gốc):

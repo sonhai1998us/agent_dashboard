@@ -7,6 +7,8 @@ const [cmd, port] = process.argv.slice(2);
 if (cmd === 'build') {
   const n = fs.existsSync('built.txt') ? Number(fs.readFileSync('built.txt', 'utf8')) + 1 : 1;
   fs.writeFileSync('built.txt', String(n));
+  fs.mkdirSync('.next', { recursive: true });
+  fs.writeFileSync('.next/BUILD_ID', `build-${n}`);
   console.log(`built ${n}`);
   const wait = Number(process.env.FAKE_BUILD_MS ?? 0);
   setTimeout(() => process.exit(0), wait);

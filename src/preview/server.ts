@@ -82,6 +82,8 @@ export class PreviewServer {
   private building: ChildProcess | null = null;
   private exited = true;
   private builtSig: string | null = null;
+  /** .next/BUILD_ID sau lần build của chính server preview; null nếu không đọc được (distDir khác) */
+  private builtId: string | null = null;
   private pending: Promise<ServerInfo> | null = null;
   private gen = 0;
   private log = '';
@@ -117,6 +119,7 @@ export class PreviewServer {
     this.child = null;
     this.exited = true;
     this.builtSig = null;
+    this.builtId = null;
     await Promise.all(kids.map((c) => this.kill(c)));
     this.emitPids();
     this.set({ state: 'stopped', port: null, error: null, startedAt: null });
@@ -131,7 +134,8 @@ export class PreviewServer {
     const { mode, project } = this.d;
     if (this.alive() && this.st.state === 'ready') {
       if (mode === 'dev') return this.info(false, null);
-      if ((await this.d.signature()) === this.builtSig) return this.info(false, null);
+      // build khác (vd. agent chạy pnpm build) ghi đè thư mục build đang được next start phục vụ → build lại
+      if ((await this.d.signature()) === this.builtSig && (this.builtId === null || this.readBuildId() === this.builtId)) return this.info(false, null);
     }
     try {
       if (this.child) {
@@ -154,6 +158,7 @@ export class PreviewServer {
         this.set({ state: 'building' });
         await this.runBuild(project.prod.build, env, gen);
         this.builtSig = sig;
+        this.builtId = this.readBuildId();
         buildMs = Date.now() - t0;
       }
       this.check(gen);
@@ -175,6 +180,14 @@ export class PreviewServer {
       const err = e instanceof PreviewServerError ? e : new PreviewServerError('server_failed', e instanceof Error ? e.message : String(e), this.log);
       if (gen === this.gen) this.set({ state: 'failed', error: err.message });
       throw err;
+    }
+  }
+
+  private readBuildId(): string | null {
+    try {
+      return fs.readFileSync(path.join(this.d.worktree, '.next', 'BUILD_ID'), 'utf8').trim();
+    } catch {
+      return null;
     }
   }
 

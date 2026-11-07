@@ -115,6 +115,17 @@ describe('PreviewServer', () => {
     await until(() => !alivePid(oldPid));
   });
 
+  it('prod: thư mục build bị build khác ghi đè (.next/BUILD_ID đổi) → build lại và bật lại', async () => {
+    const { s, worktree } = make({ mode: 'prod' });
+    await s.ensure();
+    expect(fs.readFileSync(path.join(worktree, 'built.txt'), 'utf8')).toBe('1');
+    expect((await s.ensure()).startedNow).toBe(false);
+    fs.writeFileSync(path.join(worktree, '.next', 'BUILD_ID'), 'agent-build');
+    const again = await s.ensure();
+    expect(again.startedNow).toBe(true);
+    expect(fs.readFileSync(path.join(worktree, 'built.txt'), 'utf8')).toBe('2');
+  });
+
   it('không sẵn sàng trong readyMs → lỗi "không sẵn sàng sau"', async () => {
     const { s } = make({ project: { env: { FAKE_DELAY_MS: '5000' } }, timeouts: { readyMs: 1000, buildMs: 5000 } });
     const e = await s.ensure().catch((x) => x);
