@@ -107,8 +107,15 @@ export function validatePlan(raw: unknown, s: Settings): { ok: true; plan: Plan 
   const acceptance = Array.isArray(raw.acceptance) ? raw.acceptance : [];
   if (acceptance.length < 1 || !acceptance.every((a) => isStr(a) && a.trim())) errors.push('acceptance: cần ít nhất một dòng, mỗi dòng không rỗng');
 
+  let preview: Plan['preview'];
+  if (raw.preview !== undefined && raw.preview !== null) {
+    const m = isObj(raw.preview) ? raw.preview.mode : undefined;
+    if (m === 'dev' || m === 'prod') preview = { mode: m };
+    else errors.push('preview.mode: phải là dev hoặc prod');
+  }
+
   if (errors.length) return { ok: false, errors };
-  return { ok: true, plan: { summary: raw.summary as string, difficulty: raw.difficulty as Plan['difficulty'], packages, roles, acceptance: acceptance as string[] } };
+  return { ok: true, plan: { summary: raw.summary as string, difficulty: raw.difficulty as Plan['difficulty'], packages, roles, acceptance: acceptance as string[], ...(preview ? { preview } : {}) } };
 }
 
 export function filesOverlap(a: string[], b: string[]): boolean {

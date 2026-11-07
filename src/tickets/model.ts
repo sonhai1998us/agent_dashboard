@@ -25,6 +25,8 @@ export interface Plan {
   packages: WorkPackage[];
   roles: Record<WorkRole, RoleSpec & { count: number }>;
   acceptance: string[];
+  /** Chế độ server preview cho tool capture; thiếu thì dùng defaultMode của dự án. */
+  preview?: { mode: 'dev' | 'prod' };
 }
 
 export interface Ticket {

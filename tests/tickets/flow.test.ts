@@ -67,6 +67,15 @@ describe('slugify / branchName', () => {
 
 describe('validatePlan', () => {
   it('kế hoạch hợp lệ qua', () => expect(validatePlan(good(), S).ok).toBe(true));
+  it('preview.mode tuỳ chọn: dev/prod giữ lại, giá trị lạ bị từ chối, thiếu thì undefined', () => {
+    const r = validatePlan({ ...good(), preview: { mode: 'prod' } }, S);
+    expect(r.ok && r.plan.preview).toEqual({ mode: 'prod' });
+    expect(has(errs({ ...good(), preview: { mode: 'x' } }), 'preview.mode')).toBe(true);
+    expect(has(errs({ ...good(), preview: 'prod' }), 'preview.mode')).toBe(true);
+    const none = validatePlan(good(), S);
+    expect(none.ok && none.plan.preview).toBeUndefined();
+    expect(none.ok && 'preview' in none.plan).toBe(false);
+  });
   it('thiếu designer/qc thì điền count 0 + roleDefaults', () => {
     const p: any = good();
     delete p.roles.designer;

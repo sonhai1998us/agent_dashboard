@@ -47,6 +47,14 @@ const PLAN_SCHEMA = {
       required: ['explorer', 'dev', 'designer', 'qc'],
     },
     acceptance: { type: 'array', items: { type: 'string' }, description: 'Tiêu chí nghiệm thu.' },
+    preview: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        mode: { type: 'string', enum: ['dev', 'prod'], description: 'Chế độ server preview cho capture; prod khi tiêu chí nghiệm thu cần SSR, redirect, middleware hay header.' },
+      },
+      required: ['mode'],
+    },
   },
   required: ['summary', 'difficulty', 'packages', 'roles', 'acceptance'],
 };
