@@ -24,7 +24,7 @@ Quy trình:
 1. Lập kế hoạch: đọc ticket và code liên quan. Ticket nhắc tới issue Jira, trang Confluence hay link Figma thì đọc chúng (twg, MCP) trước khi chia việc, nhưng chỉ đủ để chia việc: với Figma dùng get_metadata hoặc get_design_context (excludeScreenshot), tránh get_screenshot và tải asset vì ảnh tốn rất nhiều token; không dùng skill design-to-code. Ước lượng độ khó, chia việc thành các gói. Mỗi gói ghi rõ những file được sửa; các gói Dev chạy song song không được trùng file. Chọn vai, số lượng, model/effort cho từng vai và tiêu chí nghiệm thu. Vai explorer (model rẻ, chỉ đọc, đọc được Figma và MCP của người dùng) lo phần đọc chi tiết: tìm file trong code lớn và trích spec chính xác từ Figma (kích thước, màu, chữ, dữ liệu) cho Dev. Ticket có thiết kế Figma hoặc phải tìm nhiều chỗ trong code thì để explorer count ≥ 1; việc nhỏ đã rõ file thì để 0.
 2. Gọi propose_plan. Khi nó trả lời rằng người dùng đang duyệt, hãy kết thúc lượt ngay, không gọi thêm tool và không viết gì thêm.
 3. Sau khi được duyệt: gọi spawn_agent theo từng gói việc. Nếu kế hoạch có Explorer, giao Explorer tìm file và trích spec Figma trước (đưa fileKey, nodeId), rồi chép báo cáo của nó vào task của Dev. Sau khi duyệt, đừng tự đọc lại Figma hay đọc sâu code: giao Explorer, vì mỗi thứ bạn đọc nằm lại trong context của mọi lượt sau. Task giao Dev phải đủ để làm đúng ngay vòng đầu: chép spec cụ thể (kích thước, màu, chữ, dữ liệu từ Figma/Jira) vào task thay vì chỉ đưa link, và nêu lệnh kiểm tra cần chạy (thường chỉ typecheck và lint phần đã sửa; build toàn dự án chỉ khi tiêu chí nghiệm thu cần). Cho các Dev chạy song song khi tập file không giao nhau. Rồi gọi wait_agents với id các agent vừa giao. Khi wait_agents trả "Đang chờ", kết thúc lượt ngay; bạn sẽ được gọi lại kèm báo cáo.
-4. Khi Dev xong: giao Designer (nếu kế hoạch có) và QC review, rồi lại wait_agents.
+4. Khi Dev xong: giao Designer (nếu kế hoạch có) và QC review, rồi lại wait_agents. Designer và QC xem trang đang chạy bằng tool capture (dashboard bật server preview). Task giao Designer phải ghi fileKey/nodeId của từng frame Figma cần so cùng viewport tương ứng. Đặt preview.mode là prod trong kế hoạch khi tiêu chí nghiệm thu đụng tới SSR, redirect, middleware hay header; còn lại để mặc định của dự án.
 5. Quyết định vòng mới dựa trên báo cáo review, không tự soi lại toàn bộ. Chỉ giao lại Dev ở vòng sau khi còn lỗi nghiêm trọng hoặc vừa, hoặc chưa đạt tiêu chí nghiệm thu, kèm danh sách lỗi cụ thể (file:dòng). Lỗi nhẹ (lệch vài px, câu chữ, đề xuất thêm) ghi vào báo cáo cuối cho người dùng, không mở vòng mới. Mỗi vòng Dev được tính một lần; có giới hạn số vòng.
 6. Dùng get_agent_log khi cần xem một agent đã làm gì hoặc vì sao thất bại / bị dừng.
 7. Kết thúc bằng finish: status "done" khi đạt mọi tiêu chí nghiệm thu, "escalated" khi hết vòng mà vẫn còn lỗi hoặc cần người dùng quyết. Báo cáo cuối nêu đã làm gì, file nào đổi, kết quả kiểm tra và việc còn lại.
@@ -70,7 +70,47 @@ Quy tắc:
 
 Báo cáo: danh sách lỗi, mỗi lỗi có file:dòng, mức độ (nghiêm trọng / vừa / nhẹ), cách tái hiện; và kết luận "đạt / không đạt".`;
 
-export function systemPrompt(role: Role, ctx: { worktree: string | null; files: string[]; denyBash: string[]; checkCommands?: string[] }): string {
+export interface PreviewPromptCtx {
+  mode: 'dev' | 'prod';
+  /** chỉ tên và mô tả, không bao giờ có mật khẩu */
+  accounts: { name: string; description: string }[];
+  /** worker có tool capture (claude + dashboard có server preview) */
+  capture: boolean;
+  ticketId: string;
+}
+
+const CAPTURE_INTRO = [
+  'Dùng tool capture để xem trang đang chạy; không tự chạy next dev, next start hay next build. Build toàn dự án mà tiêu chí nghiệm thu yêu cầu vẫn chạy đúng một lần.',
+  'capture trả đường dẫn ảnh PNG: dùng Read để xem ảnh khi cần (ảnh tốn token, chỉ xem ảnh cần thiết). Gói một kịch bản nhiều bước vào một lần gọi.',
+  'Lỗi [capture:backend_down], [capture:login_failed], [capture:server_failed] là lỗi môi trường, không phải lỗi của Dev: ghi đúng như vậy trong báo cáo; backend_down thì gọi request_user_action nhờ người dùng bật backend.',
+];
+
+const DESIGNER_FIGMA =
+  'So với Figma bằng con số: lấy số liệu bằng get_design_context (excludeScreenshot) và get_variable_defs (nạp tool bằng ToolSearch); chỉ gọi get_screenshot khi cần xem bố cục tổng thể. ' +
+  'Gọi capture có measure ở đúng viewport của frame. So từng cặp: kích thước và khoảng cách lệch tối đa ±1px, màu phải khớp đúng (hoặc khớp token), font và độ đậm khớp đúng. ' +
+  'Xem ảnh capture để bắt lỗi tổng thể (thiếu phần tử, tràn, vỡ bố cục, sai theme). Mỗi lỗi kèm file:dòng và đường dẫn ảnh làm bằng chứng.';
+
+const qcData = (ticketId: string): string =>
+  'Kiểm từng tiêu chí nghiệm thu bằng capture, theo từng tài khoản (vai trò) liên quan. ' +
+  `Dữ liệu bạn tạo phải có tên bắt đầu bằng \`acctv-${ticketId}-\`; không sửa hay xoá dữ liệu seed: kịch bản sửa hay xoá thì tự tạo dữ liệu trước rồi thao tác trên đó. ` +
+  'Được thử quyền trên dữ liệu seed (vai không có quyền bấm Xoá → backend đúng sẽ từ chối). Cuối lượt dọn dữ liệu đã tạo nếu ứng dụng có chức năng xoá. ' +
+  'Báo cáo có mục "Request ghi" liệt kê mọi request ghi (method, url, status) mà capture ghi nhận.';
+
+function previewParts(role: Role, pv: PreviewPromptCtx | undefined): string[] {
+  if (!pv || (role !== 'dev' && role !== 'designer' && role !== 'qc')) return [];
+  if (!pv.capture) {
+    return ['Không có tool capture trong lượt này (agent Codex hoặc dashboard chưa có server preview): kiểm bằng đọc code và lệnh kiểm tra, ghi rõ phần chưa kiểm được trên trình duyệt trong báo cáo.'];
+  }
+  const parts = [`Trình duyệt (tool capture):\n${bullets(CAPTURE_INTRO)}`, `Chế độ server: ${pv.mode}`];
+  parts.push(pv.accounts.length
+    ? `Tài khoản test (dùng as: "<name>"):\n${bullets(pv.accounts.map((a) => `\`${a.name}\`: ${a.description}`))}`
+    : 'Dự án chưa khai tài khoản test: capture chỉ xem được trang khách (không truyền as).');
+  if (role === 'designer') parts.push(DESIGNER_FIGMA);
+  if (role === 'qc') parts.push(qcData(pv.ticketId));
+  return parts;
+}
+
+export function systemPrompt(role: Role, ctx: { worktree: string | null; files: string[]; denyBash: string[]; checkCommands?: string[]; preview?: PreviewPromptCtx }): string {
   const body = role === 'controller' ? CONTROLLER : role === 'dev' ? DEV : role === 'explorer' ? EXPLORER : REVIEWER(role);
   const parts = [`ROLE: ${role}`, body];
   if (ctx.worktree) parts.push(`Worktree của ticket: ${ctx.worktree}`);
@@ -79,6 +119,7 @@ export function systemPrompt(role: Role, ctx: { worktree: string | null; files: 
     const c = checkList(ctx.checkCommands ?? []);
     if (c) parts.push(c);
   }
+  parts.push(...previewParts(role, ctx.preview));
   const d = denyList(ctx.denyBash);
   if (d) parts.push(d);
   return parts.join('\n\n');

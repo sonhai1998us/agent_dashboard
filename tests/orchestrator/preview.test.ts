@@ -99,6 +99,9 @@ describe('capture và Figma trong orchestrator', () => {
     expect(f.calls.capture[0]).toEqual({ ticketId: T, agentId: qcId, worktree: t.worktree, projectDir: t.dir, mode: 'prod', outDir, args: { steps: [{ goto: '/' }] } });
 
     const qc = runOf(env, qcId)!.spec;
+    expect(qc.systemPrompt).toContain('`owner`: Chủ');
+    expect(qc.systemPrompt).toContain(`acctv-${T}-`);
+    expect(qc.systemPrompt).toContain('Chế độ server: prod');
     expect(env.orch.guard(qcId, qc.guard.token, { tool_name: 'Read', tool_input: { file_path: join(outDir, '1-home.png') }, cwd: qc.cwd })).toEqual({ allow: true });
     const other = join(env.cfg.home, 'runs', T, 'designer-1', 'captures', '1-x.png');
     expect(env.orch.guard(qcId, qc.guard.token, { tool_name: 'Read', tool_input: { file_path: other }, cwd: qc.cwd })).toMatchObject({ allow: false });

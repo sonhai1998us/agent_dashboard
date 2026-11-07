@@ -54,6 +54,45 @@ describe('systemPrompt', () => {
   });
 });
 
+describe('systemPrompt: capture, Figma, dữ liệu QC', () => {
+  const preview = { mode: 'prod' as const, accounts: [{ name: 'owner', description: 'Chủ workspace' }, { name: 'member', description: 'Thành viên' }], capture: true, ticketId: 'T-5' };
+  const c = { worktree: 'W', files: [], denyBash: [], checkCommands: [], preview };
+
+  it('mọi vai có capture: dặn không tự chạy next, liệt kê tài khoản, chế độ server, lỗi môi trường', () => {
+    for (const r of ['dev', 'designer', 'qc'] as const) {
+      const p = systemPrompt(r, c);
+      expect(p).toContain('Dùng tool capture để xem trang đang chạy; không tự chạy next dev, next start hay next build.');
+      expect(p).toContain('Tài khoản test (dùng as: "<name>"):\n- `owner`: Chủ workspace\n- `member`: Thành viên');
+      expect(p).toContain('Chế độ server: prod');
+      expect(p).toContain('Lỗi [capture:backend_down], [capture:login_failed], [capture:server_failed] là lỗi môi trường, không phải lỗi của Dev');
+      expect(p).not.toMatch(/password|mật khẩu của tài khoản/i);
+    }
+  });
+
+  it('Designer so Figma bằng số; QC theo quy tắc dữ liệu', () => {
+    const d = systemPrompt('designer', c);
+    for (const s of ['get_design_context', 'excludeScreenshot', 'get_variable_defs', 'measure ở đúng viewport của frame', 'lệch tối đa ±1px', 'màu phải khớp đúng (hoặc khớp token)', 'file:dòng', 'đường dẫn ảnh']) expect(d).toContain(s);
+    const q = systemPrompt('qc', c);
+    for (const s of ['tên bắt đầu bằng `acctv-T-5-`', 'không sửa hay xoá dữ liệu seed', 'thử quyền trên dữ liệu seed', 'dọn dữ liệu đã tạo', 'Request ghi']) expect(q).toContain(s);
+    expect(systemPrompt('dev', c)).not.toContain('acctv-T-5-');
+  });
+
+  it('không có capture (codex hoặc không có server preview): nói rõ; explorer không nhắc capture', () => {
+    const p = systemPrompt('qc', { ...c, preview: { ...preview, capture: false } });
+    expect(p).toContain('Không có tool capture');
+    expect(p).not.toContain('Tài khoản test');
+    expect(systemPrompt('explorer', c)).not.toMatch(/capture/);
+    expect(systemPrompt('qc', { worktree: 'W', files: [], denyBash: [] })).not.toMatch(/capture/);
+  });
+
+  it('Controller: giao Designer kèm fileKey/nodeId và viewport; preview.mode prod khi cần', () => {
+    const p = systemPrompt('controller', { worktree: null, files: [], denyBash: [] });
+    expect(p).toContain('fileKey/nodeId');
+    expect(p).toMatch(/viewport/);
+    expect(p).toMatch(/preview\.mode.*prod.*SSR, redirect, middleware hay header/);
+  });
+});
+
 describe('workerPrompt', () => {
   it('có task, từng file, worktree và tiêu chí nghiệm thu', () => {
     const p = workerPrompt({ task: 'Viết form đăng nhập', files: ['src/login.tsx', 'src/login.test.tsx'], role: 'dev' }, plan, 'D:\\Dự án\\wt');
