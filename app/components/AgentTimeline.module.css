@@ -69,3 +69,8 @@
 @media (prefers-reduced-motion: reduce) { .think[data-live] { animation: none; } }
 .thinkHit { cursor: default; }
 .sw[data-s='think'] { height: 4px; background: color-mix(in srgb, var(--run) 45%, transparent); }
+.wait[data-kind='startup'] { fill: var(--wait); fill-opacity: .18; stroke: var(--wait); stroke-width: 1; stroke-dasharray: 2 2; }
+.wait[data-kind='interrupted'] { fill: var(--err); fill-opacity: .14; stroke: var(--err); stroke-opacity: .6; stroke-width: 1; stroke-dasharray: 3 2; }
+.cut { stroke: var(--err); stroke-width: 2; }
+.sw[data-s='startup'] { background: color-mix(in srgb, var(--wait) 18%, transparent); outline: 1px dashed var(--wait); outline-offset: -1px; }
+.sw[data-s='interrupted'] { background: color-mix(in srgb, var(--err) 14%, transparent); outline: 1px dashed var(--err); outline-offset: -1px; box-shadow: inset 2px 0 0 var(--err); }

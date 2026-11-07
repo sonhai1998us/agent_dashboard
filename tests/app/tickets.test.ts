@@ -2,7 +2,7 @@ import { describe, expect, test } from 'vitest';
 import type { AgentInfo } from '@/src/core/model';
 import type { Ticket } from '@/src/tickets/model';
 import type { WaitSpan } from '@/src/tickets/model';
-import { agentWorkMs, ticketDuration, controllerIdOf, isExternal, layoutWaits, managedStateText, replayRange, reportBlocks, roleOverrides, statusAction, ticketStatusText } from '@/app/lib/tickets';
+import { agentWorkMs, ticketDuration, controllerIdOf, isExternal, isStartingUp, layoutWaits, managedStateText, replayRange, reportBlocks, roleOverrides, statusAction, ticketStatusText } from '@/app/lib/tickets';
 
 const t = (o: Partial<Ticket>): Ticket => ({ id: 'T-1', status: 'draft', round: 0, maxRounds: 3, ...o } as Ticket);
 
@@ -48,13 +48,27 @@ describe('layoutWaits', () => {
       w({ id: '1', agentId: 'b' }), w({ id: '2', kind: 'agents', startedAt: 60_000, endedAt: 120_000 }),
       w({ id: '3', startedAt: 700_000, endedAt: 800_000 }),
     ], 'a', win, 600);
-    expect(r).toEqual([{ x: 60, w: 60, title: 'chờ subagent · 1m00' }]);
+    expect(r).toEqual([{ x: 60, w: 60, title: 'chờ subagent · 1m00', kind: 'agents' }]);
   });
   test('span mở: tooltip tính theo now', () => {
     expect(layoutWaits([w({ startedAt: 300_000, endedAt: null })], 'a', win, 200, 900_000)[0].title).toBe('chờ duyệt kế hoạch · 10m00');
   });
   test('chờ duyệt kế hoạch', () => {
     expect(layoutWaits([w({ startedAt: 0, endedAt: 30_000 })], 'a', win, 600)[0].title).toBe('chờ duyệt kế hoạch · 30s');
+  });
+  test('khởi động và gián đoạn có kind và tooltip riêng', () => {
+    const r = layoutWaits([
+      w({ id: '1', kind: 'startup', startedAt: 0, endedAt: 7000 }), w({ id: '2', kind: 'interrupted', startedAt: 60_000, endedAt: 105_000 }),
+    ], 'a', win, 600);
+    expect(r.map((b) => b.kind)).toEqual(['startup', 'interrupted']);
+    expect(r[0].title).toBe('claude đang khởi động lượt chạy · 7s');
+    expect(r[1].title).toMatch(/^gián đoạn: dashboard tắt\/khởi động lại.* · 45s$/);
+  });
+  test('isStartingUp: chỉ khi có khoảng startup còn mở của đúng agent', () => {
+    expect(isStartingUp([w({ kind: 'startup', endedAt: null })], 'a')).toBe(true);
+    expect(isStartingUp([w({ kind: 'startup', endedAt: 5 })], 'a')).toBe(false);
+    expect(isStartingUp([w({ kind: 'startup', endedAt: null, agentId: 'b' })], 'a')).toBe(false);
+    expect(isStartingUp([w({ kind: 'approval', endedAt: null })], 'a')).toBe(false);
   });
 });
 

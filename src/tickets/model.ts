@@ -86,10 +86,16 @@ export interface UserAction {
   createdAt: number;
 }
 
+/**
+ * Khoảng thời gian trên làn timeline không có call nào:
+ * approval = chờ duyệt kế hoạch, agents = Controller chờ subagent,
+ * startup = claude đang khởi động lượt chạy (từ lúc spawn tới dòng đầu tiên nó gửi về),
+ * interrupted = lượt bị ngắt vì dashboard tắt/khởi động lại (từ event cuối tới lúc dashboard chạy lại).
+ */
 export interface WaitSpan {
   id: string;
   agentId: string;
-  kind: 'approval' | 'agents';
+  kind: 'approval' | 'agents' | 'startup' | 'interrupted';
   startedAt: number;
   endedAt: number | null;
 }

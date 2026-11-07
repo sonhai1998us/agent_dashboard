@@ -106,7 +106,12 @@ export const ids = (T: string) => ({
 });
 
 export const runOf = (env: Env, agentId: string): FakeRun | undefined => [...env.runs].reverse().find((r) => r.spec.agentId === agentId);
-export const openWaits = (env: Env, agentId: string) => env.tickets.listWaits(Number.MAX_SAFE_INTEGER).filter((w) => w.agentId === agentId);
+/** Khoảng chờ (duyệt / subagent) còn mở của agent; bỏ qua khoảng khởi động và gián đoạn. */
+export const openWaits = (env: Env, agentId: string) => openSpans(env, agentId).filter((w) => w.kind === 'approval' || w.kind === 'agents');
+/** Mọi khoảng còn mở của agent (gồm startup, interrupted). */
+export const openSpans = (env: Env, agentId: string) => env.tickets.listWaits(Number.MAX_SAFE_INTEGER).filter((w) => w.agentId === agentId);
+/** Mọi khoảng của agent, cả đã đóng. */
+export const allSpans = (env: Env, agentId: string) => env.tickets.listWaits(0).filter((w) => w.agentId === agentId);
 
 /** Tạo ticket, đề xuất kế hoạch hợp lệ, duyệt: trả id ticket ở trạng thái running (lượt controller sau duyệt đang chạy). */
 export async function toRunning(env: Env, plan: ReturnType<typeof validPlan> = validPlan()): Promise<string> {

@@ -135,6 +135,11 @@ describe('layoutLane: model nghĩ', () => {
     expect(layoutLane([call('t', 0, { endedAt: 6 * MIN })], agent(), win, 500, []).thinks).toEqual([]);
   });
 
+  test('đang khởi động: không vẽ "đang nghĩ"', () => {
+    expect(layoutLane([], agent({ lastEventAt: MIN }), win, 500, [], undefined, true).thinks).toEqual([]);
+    expect(layoutLane([], agent({ lastEventAt: MIN }), win, 500, []).thinks).toHaveLength(1);
+  });
+
   test('call llm ngoài cửa sổ bị bỏ', () => {
     const r = layoutLane([llm('m', 6 * MIN, 7 * MIN)], agent({ status: 'ended' }), win, 500, []);
     expect(r.thinks).toEqual([]);

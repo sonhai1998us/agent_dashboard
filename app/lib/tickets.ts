@@ -77,21 +77,32 @@ export const managedStateText = (s: ManagedState): StatusText => MANAGED[s];
 
 export const isExternal = (a: AgentInfo): boolean => !isManagedId(a.id);
 
+export interface WaitBox { x: number; w: number; title: string; kind: WaitSpan['kind'] }
+
+const WAIT_TEXT: Record<WaitSpan['kind'], string> = {
+  approval: 'chờ duyệt kế hoạch', agents: 'chờ subagent', startup: 'claude đang khởi động lượt chạy',
+  interrupted: 'gián đoạn: dashboard tắt/khởi động lại, phần model đang làm bị mất',
+};
+
+/** Agent có khoảng khởi động đang mở (chưa gửi về dòng nào). */
+export const isStartingUp = (waits: WaitSpan[], agentId: string): boolean =>
+  waits.some((w) => w.agentId === agentId && w.kind === 'startup' && w.endedAt === null);
+
 export function layoutWaits(
   waits: WaitSpan[], agentId: string, win: { start: number; end: number }, width: number, now: number = win.end,
-): { x: number; w: number; title: string }[] {
+): WaitBox[] {
   const span = win.end - win.start;
   if (span <= 0 || width <= 0) return [];
   const px = (t: number): number => ((Math.min(Math.max(t, win.start), win.end) - win.start) / span) * width;
-  const out: { x: number; w: number; title: string }[] = [];
+  const out: WaitBox[] = [];
   for (const w of waits) {
     if (w.agentId !== agentId) continue;
     const end = w.endedAt ?? win.end;
     if (end < win.start || w.startedAt > win.end) continue;
     const x = px(w.startedAt);
     out.push({
-      x, w: Math.max(2, px(end) - x),
-      title: `${w.kind === 'approval' ? 'chờ duyệt kế hoạch' : 'chờ subagent'} · ${fmtDuration((w.endedAt ?? now) - w.startedAt)}`,
+      x, w: Math.max(2, px(end) - x), kind: w.kind,
+      title: `${WAIT_TEXT[w.kind] ?? w.kind} · ${fmtDuration((w.endedAt ?? now) - w.startedAt)}`,
     });
   }
   return out;

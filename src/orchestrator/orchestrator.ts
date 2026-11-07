@@ -111,6 +111,8 @@ export class Orchestrator {
   private alerted = new Set<string>();
   private removing = new Set<string>();
   private recovered = false;
+  /** agentId → id của khoảng `startup` đang mở (đóng khi tiến trình gửi về dòng đầu tiên hoặc kết thúc). */
+  private startups = new Map<string, string>();
   /** Sau shutdown(): handler thoát, hẹn giờ và sink không còn chạm vào store. */
   private closed = false;
   private now: () => number;
@@ -274,9 +276,16 @@ export class Orchestrator {
     const at = this.now();
     for (const m of this.deps.tickets.listManaged()) {
       if (!LIVE.includes(m.state) && !isWorkerLive(m)) continue;
+      // dashboard chết đột ngột: lượt đang chạy bị ngắt từ event cuối
+      this.openSpan(m.agentId, 'interrupted', this.lastEventAt(m.agentId, at));
+      this.closeOpenCalls(m.agentId, at, INTERRUPTED);
       this.saveManaged(m.agentId, { state: 'interrupted', stopReason: INTERRUPTED, endedAt: at, userAction: null });
       this.emitAgent({ id: m.agentId, source: m.runner, sessionId: m.sessionId, status: 'ended' });
       this.log(m.ticketId, `${m.agentId} ${INTERRUPTED}`);
+    }
+    // khoảng gián đoạn (mở lúc tắt hoặc ngay trên) và khởi động dở kết thúc lúc dashboard chạy lại
+    for (const w of this.deps.tickets.listWaits(Number.MAX_SAFE_INTEGER)) {
+      if (w.endedAt === null && (w.kind === 'interrupted' || w.kind === 'startup')) this.closeSpan(w.id, at);
     }
     for (const t of this.deps.tickets.listTickets()) {
       if (t.status === 'planning') this.restartTurn(t.id);
@@ -315,8 +324,13 @@ export class Orchestrator {
     this.guards.clear();
     this.mcpTokens.clear();
     const at = this.now();
+    for (const id of this.startups.values()) this.closeSpan(id, at);
+    this.startups.clear();
     for (const m of this.deps.tickets.listManaged()) {
       if (!LIVE.includes(m.state) && !isWorkerLive(m)) continue;
+      // để mở: recover() đóng lúc dashboard chạy lại, nên khoảng phủ cả thời gian dashboard tắt
+      this.openSpan(m.agentId, 'interrupted', this.lastEventAt(m.agentId, at));
+      this.closeOpenCalls(m.agentId, at, SHUTDOWN);
       this.saveManaged(m.agentId, { state: 'interrupted', stopReason: SHUTDOWN, endedAt: at, userAction: null });
       this.emitAgent({ id: m.agentId, source: m.runner, sessionId: m.sessionId, status: 'ended' });
       this.log(m.ticketId, `${m.agentId} ${SHUTDOWN}`);
@@ -755,9 +769,38 @@ export class Orchestrator {
     this.saveManaged(id, { state: 'waiting' });
     this.emitAgent({ id, source: 'claude', sessionId: t.controllerSessionId, status: 'idle' });
     this.closeWaits(id);
-    const w: WaitSpan = { id: randomUUID(), agentId: id, kind, startedAt: this.now(), endedAt: null };
+    this.openSpan(id, kind);
+  }
+
+  private openSpan(agentId: string, kind: WaitSpan['kind'], startedAt: number = this.now()): WaitSpan {
+    const w: WaitSpan = { id: randomUUID(), agentId, kind, startedAt, endedAt: null };
     this.deps.tickets.openWait(w);
     this.deps.hub.publish({ type: 'wait', wait: w });
+    return w;
+  }
+
+  private closeSpan(id: string, at: number = this.now()): void {
+    const closed = this.deps.tickets.closeWait(id, at);
+    if (closed) this.deps.hub.publish({ type: 'wait', wait: closed });
+  }
+
+  /** Event cuối của agent (không sau `at`); chưa có agent thì `at`. */
+  private lastEventAt(agentId: string, at: number): number {
+    return Math.min(this.deps.store.getAgent(agentId)?.lastEventAt ?? at, at);
+  }
+
+  /** Tool call còn mở của lượt bị ngắt không bao giờ có kết quả: đóng lại để timeline không vẽ "đang chạy" mãi. */
+  private closeOpenCalls(agentId: string, at: number, reason: string): void {
+    const open = this.deps.store.listCalls(agentId).filter((c) => c.endedAt === null);
+    if (!open.length) return;
+    this.deps.ingest(open.map((c) => ({ type: 'call_end' as const, agentId, callId: c.id, endedAt: Math.max(at, c.startedAt), ok: false, errorPreview: reason })));
+  }
+
+  private endStartup(agentId: string): void {
+    const id = this.startups.get(agentId);
+    if (id === undefined) return;
+    this.startups.delete(agentId);
+    this.closeSpan(id);
   }
 
   private endController(T: string): void {
@@ -1043,6 +1086,8 @@ export class Orchestrator {
   private launch(spec: RunSpec, sink: RunSink): RunHandle {
     const runner = this.deps.runners[spec.agent];
     if (!runner) return failedHandle(spec, NO_CLI[spec.agent]);
+    this.endStartup(spec.agentId);
+    this.startups.set(spec.agentId, this.openSpan(spec.agentId, 'startup').id);
     try {
       return runner(spec, sink);
     } catch (e) {
@@ -1052,8 +1097,8 @@ export class Orchestrator {
 
   private onEnd(spec: RunSpec, h: RunHandle, fn: (r: RunResult) => Promise<void>): void {
     h.done.then(
-      (r) => { if (!this.closed) this.track(fn(r)); },
-      (e) => { if (!this.closed) this.track(fn({ exitCode: null, killed: false, isError: true, text: errMsg(e), costUsd: null, rateLimited: false, sessionId: spec.sessionId, changedFiles: [] })); },
+      (r) => { if (!this.closed) { this.endStartup(spec.agentId); this.track(fn(r)); } },
+      (e) => { if (this.closed) return; this.endStartup(spec.agentId); this.track(fn({ exitCode: null, killed: false, isError: true, text: errMsg(e), costUsd: null, rateLimited: false, sessionId: spec.sessionId, changedFiles: [] })); },
     );
   }
 
@@ -1061,6 +1106,7 @@ export class Orchestrator {
     return {
       events: (evs) => {
         if (this.closed) return;
+        if (evs.length) this.endStartup(agentId);
         try {
           this.deps.ingest(evs);
           for (const e of evs) {
@@ -1094,7 +1140,7 @@ export class Orchestrator {
     });
     const { home, claudeDir, codexDir } = this.deps.cfg;
     return {
-      role, root, readRoots, allowedFiles, denyBash: compile(this.settings.denyBash), checkCommands: compile(this.settings.checkCommands),
+      role, root, readRoots: [...readRoots, ...(this.settings.readRoots ?? [])], allowedFiles, denyBash: compile(this.settings.denyBash), checkCommands: compile(this.settings.checkCommands),
       ...(role === 'controller' ? { protectedRoots: [home, claudeDir, codexDir] } : {}),
     };
   }

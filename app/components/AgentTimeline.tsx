@@ -2,7 +2,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import type { AgentInfo, Alert, CallRecord } from '@/src/core/model';
 import { ensureCalls, selectAgent, selectCall, useLive } from '../lib/liveStore';
-import { agentWorkMs, layoutWaits, replayRange } from '../lib/tickets';
+import { agentWorkMs, isStartingUp, layoutWaits, replayRange, type WaitBox } from '../lib/tickets';
 import type { WaitSpan } from '@/src/tickets/model';
 import { flattenTree } from '../lib/tree';
 import { DEFAULT_WINDOW_MIN, WINDOWS_MIN, layoutLane, waitingCallIds, type Bar, type LoopZone, type Think } from '../lib/lanes';
@@ -14,6 +14,10 @@ import styles from './AgentTimeline.module.css';
 const LANE_H = 30;
 const BAR_H = 14;
 const THINK_H = 4;
+const WAIT_LABEL: Record<WaitBox['kind'], { text: string; min: number }> = {
+  approval: { text: 'chờ', min: 28 }, agents: { text: 'chờ', min: 28 },
+  startup: { text: 'khởi động', min: 56 }, interrupted: { text: 'gián đoạn', min: 56 },
+};
 const EMPTY_CALLS: CallRecord[] = [];
 
 interface Frame { now: number; agents: Record<string, AgentInfo>; calls: Record<string, CallRecord[]>; alerts: Alert[]; waits: WaitSpan[]; }
@@ -101,6 +105,7 @@ export default function AgentTimeline() {
   const lanes = useMemo(
     () => nodes.map((n) => layoutLane(
       frame.calls[n.agent.id] ?? EMPTY_CALLS, n.agent, win, width, frame.alerts, waitingCallIds(n.agent.id, Object.values(frame.agents)),
+      isStartingUp(frame.waits, n.agent.id),
     )),
     [nodes, frame, win, width],
   );
@@ -243,6 +248,8 @@ export default function AgentTimeline() {
         <span><i className={styles.sw} data-s="unknown" /> không rõ</span>
         <span><i className={styles.sw} data-s="loop" /> vùng lặp</span>
         <span><i className={styles.sw} data-s="grey" /> chờ duyệt / chờ subagent</span>
+        <span><i className={styles.sw} data-s="startup" /> khởi động</span>
+        <span><i className={styles.sw} data-s="interrupted" /> gián đoạn</span>
         {!replaying && <span><i className={styles.nowSw} /> bây giờ</span>}
       </footer>
     </section>
@@ -250,7 +257,7 @@ export default function AgentTimeline() {
 }
 
 const Lane = memo(function Lane({ agentId, width, bars, zones, thinks, waits, showNow, onTip, onHide, onPick }: {
-  agentId: string; width: number; bars: Bar[]; zones: LoopZone[]; thinks: Think[]; waits: { x: number; w: number; title: string }[]; showNow: boolean;
+  agentId: string; width: number; bars: Bar[]; zones: LoopZone[]; thinks: Think[]; waits: WaitBox[]; showNow: boolean;
   onTip: (text: string, el: Element, mouse?: { x: number; y: number }) => void;
   onHide: () => void; onPick: (agentId: string, callId: string) => void;
 }) {
@@ -267,8 +274,9 @@ const Lane = memo(function Lane({ agentId, width, bars, zones, thinks, waits, sh
       {waits.map((w, i) => (
         <g key={`w${i}`}>
           <title>{w.title}</title>
-          <rect x={w.x} y={y - 3} width={w.w} height={BAR_H + 6} rx={2} className={styles.wait} />
-          {w.w >= 28 && <text x={w.x + 4} y={LANE_H / 2 + 3} className={styles.waitTxt}>chờ</text>}
+          <rect x={w.x} y={y - 3} width={w.w} height={BAR_H + 6} rx={2} className={styles.wait} data-kind={w.kind} />
+          {w.kind === 'interrupted' && <line x1={w.x + 0.5} x2={w.x + 0.5} y1={1} y2={LANE_H - 1} className={styles.cut} />}
+          {w.w >= WAIT_LABEL[w.kind].min && <text x={w.x + 4} y={LANE_H / 2 + 3} className={styles.waitTxt}>{WAIT_LABEL[w.kind].text}</text>}
         </g>
       ))}
       {thinks.map((t, i) => (

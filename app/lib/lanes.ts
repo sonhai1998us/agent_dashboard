@@ -34,7 +34,7 @@ function stateOf(c: CallRecord, agent: AgentInfo, waiting: Set<string>): BarStat
 
 export function layoutLane(
   calls: CallRecord[], agent: AgentInfo, win: { start: number; end: number }, width: number, alerts: Alert[],
-  waiting: Set<string> = NO_WAIT,
+  waiting: Set<string> = NO_WAIT, startingUp = false,
 ): { bars: Bar[]; loopZones: LoopZone[]; thinks: Think[] } {
   const span = win.end - win.start;
   if (span <= 0 || width <= 0) return { bars: [], loopZones: [], thinks: [] };
@@ -69,7 +69,7 @@ export function layoutLane(
       if (b >= a && last.startedAt >= win.start && first.startedAt <= win.end) loopZones.push({ x: a, w: Math.max(MIN_W, b - a) });
     }
   }
-  return { bars, loopZones, thinks: layoutThinks(calls, tools, agent, win, px) };
+  return { bars, loopZones, thinks: layoutThinks(calls, tools, agent, win, px, startingUp) };
 }
 
 const fmtTokens = (n: number | null): string => (n === null ? '' : ` · ${n.toLocaleString('vi-VN')} token ra`);
@@ -80,6 +80,7 @@ const fmtTokens = (n: number | null): string => (n === null ? '' : ` · ${n.toLo
  */
 function layoutThinks(
   calls: CallRecord[], tools: CallRecord[], agent: AgentInfo, win: { start: number; end: number }, px: (t: number) => number,
+  startingUp: boolean,
 ): Think[] {
   const out: Think[] = [];
   const push = (from: number, to: number, title: string, live: boolean) => {
@@ -100,7 +101,8 @@ function layoutThinks(
   }
   const toolOpen = tools.some((c) => c.endedAt === null);
   const llmOpen = calls.some((c) => c.kind === 'llm' && c.endedAt === null);
-  if (running && !toolOpen && !llmOpen && last < win.end) {
+  // đang khởi động: chưa có model nào chạy, khoảng khởi động đã vẽ phần này
+  if (running && !startingUp && !toolOpen && !llmOpen && last < win.end) {
     push(last, win.end, `đang nghĩ · ${fmtDuration(win.end - last)}`, true);
   }
   return out;
