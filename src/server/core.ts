@@ -13,6 +13,7 @@ import type { HubEvent, NormalizedEvent } from '@/src/core/model';
 import type { AgentKind } from '@/src/tickets/model';
 import { TicketStore } from '@/src/tickets/store';
 import { Orchestrator } from '@/src/orchestrator/orchestrator';
+import { PreviewManager } from '@/src/preview/manager';
 import * as git from '@/src/git/git';
 import type { Runner } from '@/src/runner/types';
 import { createClaudeRunner } from '@/src/runner/claude';
@@ -94,7 +95,13 @@ export async function createCore(cfg: Config, watcherOptions: WatcherOptions = {
     const out = store.transaction(() => evs.flatMap((e) => store.applyEvent(e)));
     onEvents(out);
   };
-  const orchestrator = new Orchestrator({ cfg, store, tickets, hub, ingest, runners, git, port: opts.port ?? (() => cfg.port) });
+  const preview = new PreviewManager({
+    settings: () => cfg.settings,
+    publish: (e) => hub.publish(e),
+    getMeta: (k) => store.getMeta(k),
+    setMeta: (k, v) => store.setMeta(k, v),
+  });
+  const orchestrator = new Orchestrator({ cfg, store, tickets, hub, ingest, runners, git, port: opts.port ?? (() => cfg.port), preview });
   const unsub = hub.subscribe((e) => {
     if (e.type === 'alert') orchestrator.onAlert(e.alert);
   });

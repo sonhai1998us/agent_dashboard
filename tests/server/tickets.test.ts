@@ -337,7 +337,7 @@ test('snapshot có tickets/managed/waits/prices; WS nhận event ticket khi tr�
   expect(Array.isArray(snap.agents)).toBe(true);
 });
 
-test('worker MCP (?agent=) chỉ có request_user_action; trả lời qua /api/agents/:id/user-action', async () => {
+test('worker MCP (?agent=) chỉ có tool của worker (request_user_action, capture); trả lời qua /api/agents/:id/user-action', async () => {
   await start();
   await toAwaiting();
   expect((await post('/api/tickets/T-1/approve')).status).toBe(200);
@@ -350,7 +350,7 @@ test('worker MCP (?agent=) chỉ có request_user_action; trả lời qua /api/a
   expect((await devMcp('wrong', { jsonrpc: '2.0', id: 1, method: 'ping' })).status).toBe(401);
   expect((await devMcp(ctrl.spec.mcp!.token, { jsonrpc: '2.0', id: 1, method: 'ping' })).status).toBe(401);
   const list = await devMcp(dev.spec.guard.token, { jsonrpc: '2.0', id: 1, method: 'tools/list' });
-  expect(list.json.result.tools.map((t: any) => t.name)).toEqual(['request_user_action']);
+  expect(list.json.result.tools.map((t: any) => t.name)).toEqual(['request_user_action', 'capture']);
   const spawn = await devMcp(dev.spec.guard.token, { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'spawn_agent', arguments: {} } });
   expect(spawn.json.result.isError).toBe(true);
   // Controller không dùng được token của nó với tool của worker và ngược lại

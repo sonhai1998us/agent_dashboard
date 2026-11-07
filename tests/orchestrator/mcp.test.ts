@@ -33,6 +33,19 @@ describe('handleMcp', () => {
     expect((r.json as any).result.tools.map((t: any) => t.name)).toEqual(['request_user_action']);
   });
 
+  it('tools/list lists capture for workers that have it, with the step schema', async () => {
+    const noop = async () => ({ text: '' });
+    const r = await handleMcp(rpc('tools/list'), { request_user_action: noop, capture: noop });
+    const tools = (r.json as any).result.tools;
+    expect(tools.map((t: any) => t.name)).toEqual(['request_user_action', 'capture']);
+    const cap = tools.find((t: any) => t.name === 'capture');
+    expect(cap.description).toMatch(/server preview/);
+    expect(cap.description).toMatch(/không tự bật server hay trình duyệt/i);
+    expect(cap.inputSchema.required).toEqual(['steps']);
+    expect(cap.inputSchema.properties.steps.maxItems).toBe(30);
+    expect(Object.keys(cap.inputSchema.properties).sort()).toEqual(['as', 'colorScheme', 'cookies', 'locale', 'steps', 'viewport']);
+  });
+
   it('tools/list has the 5 Controller tools with Vietnamese wait hint', async () => {
     const noop = async () => ({ text: '' });
     const ctrl = Object.fromEntries(['propose_plan', 'spawn_agent', 'wait_agents', 'get_agent_log', 'finish'].map((n) => [n, noop]));

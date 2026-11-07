@@ -61,7 +61,40 @@ const PLAN_SCHEMA = {
 
 export const USER_ACTION_LIMITS = { title: 120, message: 2000, url: 2000, command: 500 };
 
-export const TOOL_DEFS: { name: 'propose_plan' | 'spawn_agent' | 'wait_agents' | 'get_agent_log' | 'finish' | 'request_user_action'; description: string; inputSchema: object }[] = [
+const TARGET = { type: 'string', description: 'CSS selector, hoặc text=<chữ>, role=button[name="Lưu"], testid=<id>' };
+const STEP_SCHEMA = {
+  type: 'object',
+  description: 'Đúng một loại bước: goto | click | fill+value | select+value | check(+checked) | press(+target) | upload+file | waitFor | shot(+fullPage,+target) | measure.',
+  properties: {
+    goto: { type: 'string', description: 'Đường dẫn tương đối trên server preview, bắt đầu bằng / (vd. /workspaces).' },
+    click: TARGET, fill: TARGET, select: TARGET, check: TARGET, upload: TARGET,
+    value: { type: 'string' },
+    checked: { type: 'boolean' },
+    press: { type: 'string', description: 'Tên phím, vd. Enter.' },
+    target: TARGET,
+    file: { type: 'string', description: 'File trong worktree để upload (đường dẫn tương đối).' },
+    waitFor: { description: 'Target cần hiện, hoặc { url: "<chuỗi con của URL>" }.', anyOf: [TARGET, { type: 'object', properties: { url: { type: 'string' } }, required: ['url'] }] },
+    shot: { type: 'string', description: 'Tên ảnh ([A-Za-z0-9_-], ≤ 40 ký tự). Tối đa 6 ảnh mỗi lần gọi.' },
+    fullPage: { type: 'boolean' },
+    measure: { type: 'array', items: TARGET, minItems: 1, maxItems: 20, description: 'Đo kích thước, vị trí và CSS computed (màu, font, padding, margin, gap, border, radius…).' },
+  },
+};
+
+const CAPTURE_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    as: { type: 'string', description: 'Tên tài khoản test (xem prompt). Bỏ trống = khách chưa đăng nhập. Dashboard tự đăng nhập; bạn không cần và không biết mật khẩu.' },
+    viewport: { type: 'object', additionalProperties: false, properties: { width: { type: 'integer', minimum: 320, maximum: 1920 }, height: { type: 'integer', minimum: 200, maximum: 4000 } }, description: 'Mặc định 1440×900.' },
+    colorScheme: { type: 'string', enum: ['light', 'dark'] },
+    locale: { type: 'string', description: 'Accept-Language, vd. vi hoặc en-US.' },
+    cookies: { type: 'array', maxItems: 20, items: { type: 'object', properties: { name: { type: 'string' }, value: { type: 'string' } }, required: ['name', 'value'] } },
+    steps: { type: 'array', minItems: 1, maxItems: 30, items: STEP_SCHEMA },
+  },
+  required: ['steps'],
+};
+
+export const TOOL_DEFS: { name: 'propose_plan' | 'spawn_agent' | 'wait_agents' | 'get_agent_log' | 'finish' | 'request_user_action' | 'capture'; description: string; inputSchema: object }[] = [
   {
     name: 'propose_plan',
     description: `Gửi kế hoạch cho người dùng duyệt trước khi giao việc. ${WAIT_NOTE} Chỉ sau khi được duyệt mới được gọi spawn_agent.`,
@@ -126,6 +159,14 @@ export const TOOL_DEFS: { name: 'propose_plan' | 'spawn_agent' | 'wait_agents' |
       },
       required: ['title', 'message'],
     },
+  },
+  {
+    name: 'capture',
+    description:
+      'Mở trang của ticket trong Chrome headless trên server preview do dashboard quản lý (đăng nhập theo tên tài khoản test nếu có `as`), chạy các bước, ' +
+      'trả ảnh (đường dẫn PNG để Read), số đo DOM, URL, console, request ghi. Không tự bật server hay trình duyệt. ' +
+      'Lần đầu có thể mất tới vài phút để bật/build server. Lỗi bắt đầu bằng [capture:<mã>].',
+    inputSchema: CAPTURE_SCHEMA,
   },
 ];
 

@@ -26,6 +26,10 @@ export function isUserMcpReadTool(toolName: string): boolean {
 /** Tool MCP duy nhất của worker: nhờ người dùng làm việc agent không tự làm được (đăng nhập…). */
 export const USER_ACTION_TOOL = 'mcp__acctv__request_user_action';
 
+/** Tool MCP của dashboard: mở trang trên server preview của ticket trong Chrome headless (Dev, Designer, QC). */
+export const CAPTURE_TOOL = 'mcp__acctv__capture';
+const CAPTURE_ROLES = new Set(['dev', 'designer', 'qc']);
+
 /** Độ dài tối đa của lệnh Bash mà guard chịu kiểm tra. */
 export const MAX_COMMAND = 32_000;
 
@@ -189,7 +193,9 @@ export function checkTool(p: GuardPolicy, toolName: string, input: unknown, cwd:
     }
   }
   if (toolName === USER_ACTION_TOOL) return { allow: true };
-  if (p.role === 'explorer') {
+  if (toolName === CAPTURE_TOOL && CAPTURE_ROLES.has(p.role)) return { allow: true };
+  // Explorer và Designer đọc thiết kế (Figma…) qua MCP của người dùng: chỉ tool đọc
+  if (p.role === 'explorer' || p.role === 'designer') {
     if (toolName === 'ToolSearch') return { allow: true, explicit: true };
     if (isUserMcpReadTool(toolName)) return { allow: true, explicit: true };
   }

@@ -7,7 +7,9 @@ import { isManagedId, type AgentInfo, type Alert, type NormalizedEvent } from '@
 import type { TicketStore } from '@/src/tickets/store';
 import { TERMINAL_STATES, type UserAction, type AgentKind, type ManagedAgent, type ManagedState, type Plan, type Role, type RoleSpec, type Ticket, type TicketStatus, type WaitSpan, type WorkRole } from '@/src/tickets/model';
 import { branchName, filesOverlap, transition, validatePlan, type TicketEvent } from '@/src/tickets/flow';
-import { checkTool, matchEntry, USER_ACTION_TOOL, type GuardPolicy } from '@/src/guard/policy';
+import { CAPTURE_TOOL, checkTool, matchEntry, USER_ACTION_TOOL, type GuardPolicy } from '@/src/guard/policy';
+import type { PreviewManager } from '@/src/preview/manager';
+import { mkdirSync } from 'node:fs';
 import { inside } from '@/src/core/paths';
 import type { Runner, RunHandle, RunResult, RunSink, RunSpec } from '@/src/runner/types';
 import { USER_ACTION_LIMITS, type ToolImpl, type ToolResult } from './mcp';
@@ -18,7 +20,13 @@ export interface OrchestratorDeps {
   cfg: Config; store: Store; tickets: TicketStore; hub: Hub; ingest(evs: NormalizedEvent[]): void;
   runners: Partial<Record<AgentKind, Runner>>; git: typeof import('@/src/git/git'); port(): number;
   now?: () => number; newSessionId?: () => string; delays?: { rateLimitMs: number[] };
+  /** Server preview + trình duyệt cho tool capture. Không có thì worker không có capture. */
+  preview?: Pick<PreviewManager, 'capture' | 'stop' | 'stopAll' | 'killOrphans' | 'accountsFor' | 'status' | 'defaultMode'>;
 }
+
+const CAPTURE_ROLES: WorkRole[] = ['dev', 'designer', 'qc'];
+/** File server preview (next dev/build) tự sinh trong worktree: không tính là thay đổi ngoài phạm vi. */
+const PREVIEW_GENERATED = new Set(['next-env.d.ts']);
 
 export class OrchestratorError extends Error {
   constructor(public status: 400 | 404 | 409, msg: string) {
@@ -44,7 +52,8 @@ const WORKER_TOOLS: Record<WorkRole, string[]> = {
   // ToolSearch: nạp tool MCP của người dùng (vd. Figma), guard chỉ cho tool đọc
   explorer: ['Read', 'Glob', 'Grep', 'ToolSearch'],
   dev: ['Read', 'Glob', 'Grep', 'Edit', 'Write', 'Bash'],
-  designer: ['Read', 'Glob', 'Grep', 'Bash'],
+  // ToolSearch: nạp tool đọc Figma của người dùng để so thiết kế
+  designer: ['Read', 'Glob', 'Grep', 'Bash', 'ToolSearch'],
   qc: ['Read', 'Glob', 'Grep', 'Bash'],
 };
 const ROLE_LABEL: Record<WorkRole, string> = { explorer: 'Explorer', dev: 'Dev', designer: 'Designer', qc: 'QC' };
@@ -221,7 +230,7 @@ export class Orchestrator {
     this.move(ticketId, 'cancel', { pendingWait: null });
     this.ctrl(ticketId).queue.length = 0;
     this.log(ticketId, 'Người dùng huỷ ticket');
-    await Promise.all([this.stopLiveWorkers(ticketId, CANCELLED), this.stopController(ticketId, CANCELLED)]);
+    await Promise.all([this.stopLiveWorkers(ticketId, CANCELLED), this.stopController(ticketId, CANCELLED), this.deps.preview?.stop(ticketId)]);
     return this.mustTicket(ticketId);
   }
 
@@ -273,6 +282,8 @@ export class Orchestrator {
   async recover(): Promise<void> {
     if (this.recovered) return;
     this.recovered = true;
+    // server preview / Chrome còn sống từ lần chạy trước (dashboard chết đột ngột)
+    if (this.deps.preview) await this.deps.preview.killOrphans().catch((e) => console.warn(`[acctv] dọn server preview cũ lỗi: ${errMsg(e)}`));
     const at = this.now();
     for (const m of this.deps.tickets.listManaged()) {
       if (!LIVE.includes(m.state) && !isWorkerLive(m)) continue;
@@ -335,7 +346,7 @@ export class Orchestrator {
       this.emitAgent({ id: m.agentId, source: m.runner, sessionId: m.sessionId, status: 'ended' });
       this.log(m.ticketId, `${m.agentId} ${SHUTDOWN}`);
     }
-    await Promise.allSettled(handles.map((h) => h.kill()));
+    await Promise.allSettled([...handles.map((h) => h.kill()), this.deps.preview?.stopAll()]);
     await this.idle();
   }
 
@@ -368,9 +379,35 @@ export class Orchestrator {
     };
   }
 
-  /** MCP của worker: chỉ request_user_action. */
+  /** MCP của worker: request_user_action, và capture cho Dev/Designer/QC khi có server preview. */
   workerMcpTools(agentId: string): Record<string, ToolImpl> {
-    return { request_user_action: async (a) => this.requestUserAction(agentId, a) };
+    const tools: Record<string, ToolImpl> = { request_user_action: async (a) => this.requestUserAction(agentId, a) };
+    const m = this.deps.tickets.getManaged(agentId);
+    if (m && this.hasCapture(m.runner, m.role)) tools.capture = async (a) => this.capture(agentId, a);
+    return tools;
+  }
+
+  private hasCapture(runner: AgentKind, role: Role): boolean {
+    return !!this.deps.preview && runner === 'claude' && CAPTURE_ROLES.includes(role as WorkRole);
+  }
+
+  /** Chế độ server preview: kế hoạch → cấu hình dự án → dev. */
+  private previewMode(t: Ticket): 'dev' | 'prod' {
+    return t.plan?.preview?.mode ?? this.deps.preview?.defaultMode(t.dir) ?? 'dev';
+  }
+
+  private capturesDir(agentId: string): string {
+    return path.join(this.runDir(agentId), 'captures');
+  }
+
+  private async capture(agentId: string, args: Record<string, unknown>): Promise<ToolResult> {
+    const m = this.deps.tickets.getManaged(agentId);
+    const t = m && this.deps.tickets.getTicket(m.ticketId);
+    if (!m || !t || !this.deps.preview || !isWorkerLive(m)) return fail('Agent không còn chạy');
+    if (t.status !== 'running' || !t.worktree) return fail('Ticket không còn chạy');
+    return this.deps.preview.capture({
+      ticketId: t.id, agentId, worktree: t.worktree, projectDir: t.dir, mode: this.previewMode(t), outDir: this.capturesDir(agentId), args,
+    });
   }
 
   /** Worker dùng token guard của chính nó cho MCP. */
@@ -579,6 +616,7 @@ export class Orchestrator {
     this.move(T, status === 'done' ? 'finish_done' : 'finish_escalated', { report, pendingWait: null });
     this.ctrl(T).queue.length = 0;
     this.log(T, `Controller kết thúc ticket (${status})`);
+    if (this.deps.preview) this.track(this.deps.preview.stop(T));
     if (t.worktree) await this.snapshot(T, t.worktree, `acctv: ${T} kết thúc`, 'Snapshot cuối');
     if (t.baseRef && t.branch) {
       try {
@@ -836,7 +874,11 @@ export class Orchestrator {
     const wt = t.worktree;
     const port = this.deps.port();
     const token = newToken();
-    this.guards.set(id, { token, policy: this.policy(role, wt, [], m.files) });
+    const capture = this.hasCapture(m.runner, role);
+    const shots = this.capturesDir(id);
+    if (capture) mkdirSync(shots, { recursive: true });
+    // agent chỉ đọc được ảnh capture của chính nó
+    this.guards.set(id, { token, policy: this.policy(role, wt, capture ? [shots] : [], m.files) });
     const spec: RunSpec = {
       agentId: id, ticketId: t.id, role, agent: m.runner, label: `${ROLE_LABEL[role]}-${m.ordinal}`, parentId: controllerId(t.id),
       cwd: wt, model: m.model, effort: m.effort, prompt: workerPrompt(m, t.plan, wt),
@@ -845,8 +887,8 @@ export class Orchestrator {
       addDirs: [], runDir: this.runDir(id),
       // claude: MCP riêng của worker (request_user_action), xác thực bằng token guard; codex chưa nối MCP
       mcp: m.runner === 'claude' ? { url: `http://127.0.0.1:${port}/mcp?agent=${encodeURIComponent(id)}`, token } : null,
-      // Explorer đọc thiết kế / tài liệu qua MCP và connector của người dùng (Figma…); guard chỉ cho tool đọc
-      ...(role === 'explorer' && m.runner === 'claude' ? { userMcp: true } : {}),
+      // Explorer, Designer đọc thiết kế / tài liệu qua MCP và connector của người dùng (Figma…); guard chỉ cho tool đọc
+      ...((role === 'explorer' || role === 'designer') && m.runner === 'claude' ? { userMcp: true } : {}),
       guard: { port, token },
     };
     this.saveManaged(id, { state: 'running' });
@@ -859,6 +901,7 @@ export class Orchestrator {
 
   private workerTools(runner: AgentKind, role: WorkRole): { tools: string[]; allowedTools: string[] } {
     const t = runner === 'claude' ? [...WORKER_TOOLS[role], USER_ACTION_TOOL] : [...WORKER_TOOLS[role]];
+    if (this.hasCapture(runner, role)) t.push(CAPTURE_TOOL);
     return { tools: t, allowedTools: [...t] };
   }
 
@@ -1037,7 +1080,7 @@ export class Orchestrator {
   private async auditChanges(T: string, wt: string, ids: string[]): Promise<string[]> {
     let changed: string[];
     try {
-      changed = await this.deps.git.worktreeChanges(wt);
+      changed = (await this.deps.git.worktreeChanges(wt)).filter((f) => !PREVIEW_GENERATED.has(f));
     } catch (e) {
       this.log(T, `Không đọc được thay đổi trong worktree: ${errMsg(e)}`);
       return [];

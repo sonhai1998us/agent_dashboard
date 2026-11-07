@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { checkTool, hookCommand, matchGlob, type GuardPolicy } from '@/src/guard/policy';
+import { CAPTURE_TOOL, checkTool, hookCommand, matchGlob, type GuardPolicy } from '@/src/guard/policy';
 import { DEFAULT_SETTINGS } from '@/src/core/config';
 import type { Role } from '@/src/tickets/model';
 
@@ -125,6 +125,16 @@ describe('checkTool', () => {
     expect(checkTool(qc, 'Bash', { command: 'git diff' }, root).allow).toBe(true);
     expect(checkTool(qc, 'Bash', { command: 'cat C:\\secret' }, root).allow).toBe(false);
     expect(checkTool(qc, 'Bash', { command: 'ls ..' }, root).allow).toBe(false);
+  });
+  it('capture: dev/designer/qc được, explorer không; designer đọc Figma và ToolSearch như explorer', () => {
+    for (const r of ['dev', 'designer', 'qc'] as const) expect(checkTool(mk(r), CAPTURE_TOOL, {}, root), r).toEqual({ allow: true });
+    expect(checkTool(mk('explorer'), CAPTURE_TOOL, {}, root).allow).toBe(false);
+    expect(checkTool(mk('designer'), 'mcp__figma__get_design_context', {}, root)).toEqual({ allow: true, explicit: true });
+    expect(checkTool(mk('designer'), 'mcp__figma__use_figma', {}, root).allow).toBe(false);
+    expect(checkTool(mk('qc'), 'mcp__figma__get_design_context', {}, root).allow).toBe(false);
+    expect(checkTool(mk('designer'), 'ToolSearch', {}, root)).toEqual({ allow: true, explicit: true });
+    expect(checkTool(mk('qc'), 'ToolSearch', {}, root).allow).toBe(false);
+    expect(CAPTURE_TOOL).toBe('mcp__acctv__capture');
   });
   it('qc/designer: lý do chặn nêu mẫu lệnh được phép và nhắc dùng Read/Grep/Glob', () => {
     for (const r of ['qc', 'designer'] as const) {
