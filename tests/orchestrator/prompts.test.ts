@@ -35,6 +35,19 @@ describe('systemPrompt', () => {
     expect(p).not.toContain('\\b');
   });
 
+  it('QC/Designer thấy danh sách lệnh kiểm tra được phép, dễ đọc; vai khác không thấy', () => {
+    const c = { ...ctx, checkCommands: DEFAULT_SETTINGS.checkCommands };
+    for (const r of ['qc', 'designer'] as const) {
+      const p = systemPrompt(r, c);
+      expect(p).toContain('Chỉ các lệnh Bash khớp mẫu sau được chạy');
+      expect(p).toContain('`git (status|diff|log|show)`');
+      expect(p).toContain('`(npm|pnpm|yarn|bun) (run )?(test|lint|build|typecheck|check|preview)`');
+      expect(p).toMatch(/dùng Read, Grep, Glob thay cho cat, ls, grep, git grep/);
+      expect(p).not.toContain('\\s');
+    }
+    for (const r of ['dev', 'controller'] as const) expect(systemPrompt(r, c)).not.toContain('Chỉ các lệnh Bash khớp mẫu sau được chạy');
+  });
+
   it('QC báo cáo đạt / không đạt', () => {
     expect(systemPrompt('qc', ctx)).toContain('đạt / không đạt');
     expect(systemPrompt('designer', ctx)).toContain('đạt / không đạt');

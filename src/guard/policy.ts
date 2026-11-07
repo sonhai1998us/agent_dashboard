@@ -82,6 +82,17 @@ function relInside(root: string, abs: string): string | null {
 }
 const sameRel = (a: string, b: string) => cmp(a.replace(/\\/g, '/')) === cmp(b.replace(/\\/g, '/'));
 
+/** Regex của denyBash/checkCommands viết lại cho người (và model) đọc: bỏ \b, \s → dấu cách, [^\n]* → … */
+export function readableRule(src: string): string {
+  return src
+    .replace(/\\b/g, '')
+    .replace(/\[\^\\n\]\*/g, '…')
+    .replace(/\\s[+*]?/g, ' ')
+    .replace(/^\^/, '')
+    .replace(/ {2,}/g, ' ')
+    .trim();
+}
+
 const CHAIN = /[;&|<>`\n\r]|\$\(|--output/i;
 const hasGit = (rel: string) => rel.split('/').some((seg) => cmp(seg) === '.git');
 
@@ -167,7 +178,12 @@ export function checkTool(p: GuardPolicy, toolName: string, input: unknown, cwd:
       if (d) return d;
       const cmd = strField(input, 'command')!;
       if (p.role === 'designer' || p.role === 'qc' || p.role === 'explorer') {
-        if (CHAIN.test(cmd) || !p.checkCommands.some((re) => re.test(cmd))) return deny(`vai ${p.role} chỉ chạy lệnh kiểm tra`);
+        // Nêu rõ cái gì được phép: chỉ nói "bị chặn" thì model cứ thử biến thể khác và bị chặn lặp lại.
+        if (CHAIN.test(cmd)) return deny(`vai ${p.role} chỉ chạy lệnh kiểm tra đơn: không nối lệnh (; & | < > \` $( hay xuống dòng), không chuyển hướng và không dùng --output`);
+        if (!p.checkCommands.some((re) => re.test(cmd))) {
+          const allowed = p.checkCommands.map((re) => `\`${readableRule(re.source)}\``).join(', ');
+          return deny(`vai ${p.role} chỉ chạy lệnh kiểm tra khớp một trong các mẫu: ${allowed || '(không có)'}. Đọc hay tìm file thì dùng Read, Grep, Glob; lệnh khác (cat, ls, curl, node, chạy server…) sẽ bị chặn, đừng thử biến thể khác`);
+        }
       }
       return { allow: true };
     }

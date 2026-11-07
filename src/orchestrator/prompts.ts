@@ -1,19 +1,15 @@
 import type { AgentReport, ManagedAgent, Plan, Role, Ticket } from '@/src/tickets/model';
+import { readableRule } from '@/src/guard/policy';
 
-/** Regex của denyBash viết lại cho người (và model) đọc: bỏ \b, \s → dấu cách, [^\n]* → … */
-export function readableRule(src: string): string {
-  return src
-    .replace(/\\b/g, '')
-    .replace(/\[\^\\n\]\*/g, '…')
-    .replace(/\\s[+*]?/g, ' ')
-    .replace(/^\^/, '')
-    .replace(/ {2,}/g, ' ')
-    .trim();
-}
+export { readableRule };
 
 const bullets = (xs: string[]): string => xs.map((x) => `- ${x}`).join('\n');
 const denyList = (denyBash: string[]): string =>
   denyBash.length ? `Các lệnh khớp mẫu sau bị từ chối (không phân biệt hoa thường):\n${bullets(denyBash.map((s) => `\`${readableRule(s)}\``))}` : '';
+const checkList = (checkCommands: string[]): string =>
+  checkCommands.length
+    ? `Chỉ các lệnh Bash khớp mẫu sau được chạy (không phân biệt hoa thường); lệnh khác bị chặn, đừng thử biến thể khác. Đọc hay tìm file thì dùng Read, Grep, Glob thay cho cat, ls, grep, git grep:\n${bullets(checkCommands.map((s) => `\`${readableRule(s)}\``))}`
+    : '';
 
 const CONTROLLER = `Bạn là Controller của Agent CCTV: bạn điều phối một ticket, không tự viết code.
 
@@ -74,11 +70,15 @@ Quy tắc:
 
 Báo cáo: danh sách lỗi, mỗi lỗi có file:dòng, mức độ (nghiêm trọng / vừa / nhẹ), cách tái hiện; và kết luận "đạt / không đạt".`;
 
-export function systemPrompt(role: Role, ctx: { worktree: string | null; files: string[]; denyBash: string[] }): string {
+export function systemPrompt(role: Role, ctx: { worktree: string | null; files: string[]; denyBash: string[]; checkCommands?: string[] }): string {
   const body = role === 'controller' ? CONTROLLER : role === 'dev' ? DEV : role === 'explorer' ? EXPLORER : REVIEWER(role);
   const parts = [`ROLE: ${role}`, body];
   if (ctx.worktree) parts.push(`Worktree của ticket: ${ctx.worktree}`);
   if (role === 'dev' && ctx.files.length) parts.push(`File được sửa:\n${bullets(ctx.files)}`);
+  if (role === 'qc' || role === 'designer') {
+    const c = checkList(ctx.checkCommands ?? []);
+    if (c) parts.push(c);
+  }
   const d = denyList(ctx.denyBash);
   if (d) parts.push(d);
   return parts.join('\n\n');

@@ -840,7 +840,7 @@ export class Orchestrator {
     const spec: RunSpec = {
       agentId: id, ticketId: t.id, role, agent: m.runner, label: `${ROLE_LABEL[role]}-${m.ordinal}`, parentId: controllerId(t.id),
       cwd: wt, model: m.model, effort: m.effort, prompt: workerPrompt(m, t.plan, wt),
-      systemPrompt: systemPrompt(role, { worktree: wt, files: m.files, denyBash: this.settings.denyBash }),
+      systemPrompt: systemPrompt(role, { worktree: wt, files: m.files, denyBash: this.settings.denyBash, checkCommands: this.settings.checkCommands }),
       sessionId: m.sessionId, resume: false, ...this.workerTools(m.runner, role),
       addDirs: [], runDir: this.runDir(id),
       // claude: MCP riêng của worker (request_user_action), xác thực bằng token guard; codex chưa nối MCP

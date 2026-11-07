@@ -121,10 +121,25 @@ describe('checkTool', () => {
   });
   it('qc: --output denied, plain git diff and ls/cat not allowed', () => {
     const qc = mk('qc');
-    expect(checkTool(qc, 'Bash', { command: 'git diff --output=C:\\x.txt' }, root)).toMatchObject({ allow: false, reason: '[acctv-guard] vai qc chỉ chạy lệnh kiểm tra' });
+    expect(checkTool(qc, 'Bash', { command: 'git diff --output=C:\\x.txt' }, root)).toMatchObject({ allow: false, reason: expect.stringMatching(/^\[acctv-guard\] vai qc chỉ chạy lệnh kiểm tra/) });
     expect(checkTool(qc, 'Bash', { command: 'git diff' }, root).allow).toBe(true);
     expect(checkTool(qc, 'Bash', { command: 'cat C:\\secret' }, root).allow).toBe(false);
     expect(checkTool(qc, 'Bash', { command: 'ls ..' }, root).allow).toBe(false);
+  });
+  it('qc/designer: lý do chặn nêu mẫu lệnh được phép và nhắc dùng Read/Grep/Glob', () => {
+    for (const r of ['qc', 'designer'] as const) {
+      const d = checkTool(mk(r), 'Bash', { command: 'git grep foo' }, root) as { allow: false; reason: string };
+      expect(d.reason.startsWith(`[acctv-guard] vai ${r} chỉ chạy lệnh kiểm tra`)).toBe(true);
+      expect(d.reason).toContain('`git (status|diff|log|show)`');
+      expect(d.reason).toContain('`npx (tsc|vitest|jest|eslint|playwright|prettier --check)`');
+      expect(d.reason).toMatch(/Read, Grep, Glob/);
+      expect(d.reason).not.toContain('\\b');
+      expect(d.reason).not.toContain('\\s');
+    }
+  });
+  it('qc: lệnh nối bị chặn được báo rõ là do nối lệnh', () => {
+    const d = checkTool(mk('qc'), 'Bash', { command: 'npm test | tee x' }, root) as { allow: false; reason: string };
+    expect(d.reason).toMatch(/không nối lệnh/);
   });
   it('.git paths are never editable, even with ** allowed', () => {
     const all = { ...dev, allowedFiles: ['**'] };
