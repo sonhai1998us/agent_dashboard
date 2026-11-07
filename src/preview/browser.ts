@@ -37,7 +37,11 @@ export class LoginError extends Error {
   }
 }
 
-interface Opts { executablePath: string; origin: string; login?: PreviewLogin; accounts: PreviewAccount[]; onPid(pid: number): void }
+interface Opts {
+  executablePath: string; origin: string; login?: PreviewLogin; accounts: PreviewAccount[]; onPid(pid: number): void;
+  /** timeout cho goto và trang đăng nhập; mặc định LIMITS.stepMs */
+  navTimeoutMs?: number;
+}
 
 function locate(page: Page, t: Target): Locator {
   if (t.startsWith('text=')) return page.getByText(t.slice(5));
@@ -59,6 +63,11 @@ export class TicketBrowser {
   private counters = new Map<string, number>();
 
   constructor(private o: Opts) {}
+
+  /** Timeout điều hướng (goto, trang đăng nhập): next dev biên dịch trang lần đầu khi được mở, lâu hơn một bước thường. */
+  private navMs(): number {
+    return this.o.navTimeoutMs ?? LIMITS.stepMs;
+  }
 
   private secrets(): string[] {
     return this.o.accounts.map((a) => a.password);
@@ -98,14 +107,21 @@ export class TicketBrowser {
   private async attemptLogin(ctx: BrowserContext, a: PreviewAccount): Promise<Page | null> {
     const l = this.o.login!;
     const page = await ctx.newPage();
+    // chỉ request phát sinh sau khi bấm gửi mới tính: trang đăng nhập hay gọi /auth/refresh lúc tải và nhận 401
+    let armed = false;
     let rejected = false;
+    const afterSubmit = new WeakSet<object>();
+    page.on('request', (r) => {
+      if (armed) afterSubmit.add(r);
+    });
     page.on('response', (r) => {
-      if (!SAFE_METHODS.has(r.request().method()) && r.status() >= 400 && r.status() < 500) rejected = true;
+      if (afterSubmit.has(r.request()) && !SAFE_METHODS.has(r.request().method()) && r.status() >= 400 && r.status() < 500) rejected = true;
     });
     try {
-      await page.goto(this.o.origin + l.path, { waitUntil: 'load', timeout: LIMITS.stepMs });
+      await page.goto(this.o.origin + l.path, { waitUntil: 'load', timeout: this.navMs() });
       await page.locator(l.usernameSelector).first().fill(a.username, { timeout: LIMITS.stepMs });
       await page.locator(l.passwordSelector).first().fill(a.password, { timeout: LIMITS.stepMs });
+      armed = true;
       await page.locator(l.submitSelector).first().click({ timeout: LIMITS.stepMs });
       const deadline = Date.now() + LIMITS.stepMs;
       while (Date.now() < deadline && !rejected) {
@@ -244,7 +260,7 @@ export class TicketBrowser {
     const run = async (s: Step): Promise<void> => {
       const t = LIMITS.stepMs;
       if ('goto' in s) {
-        await page.goto(origin + s.goto, { waitUntil: 'load', timeout: t });
+        await page.goto(origin + s.goto, { waitUntil: 'load', timeout: this.navMs() });
       } else if ('click' in s) {
         await locate(page, s.click).first().click({ timeout: t });
         await page.waitForLoadState('domcontentloaded', { timeout: t }).catch(() => {});
@@ -284,6 +300,10 @@ export class TicketBrowser {
       }
     };
 
+    const loginLoop = async (): Promise<LoginError> => {
+      const shot = await shoot('login-loop').catch(() => null);
+      return new LoginError(`tài khoản ${account?.name} bị chuyển hướng về trang đăng nhập ngay sau khi đăng nhập lại (vòng chuyển hướng: phiên không được nhận, kiểm cookie/CORS của backend)`, shot);
+    };
     let relogged = false;
     try {
       for (let i = 0; i < args.steps.length; i++) {
@@ -292,12 +312,17 @@ export class TicketBrowser {
         const start = Date.now();
         try {
           if (Date.now() - t0 > LIMITS.totalMs) throw new Error(`hết thời gian ${LIMITS.totalMs / 1000}s cho một lần capture`);
+          const before = page.url();
           await run(s);
-          // phiên hết hạn: đăng nhập lại một lần rồi lặp lại bước
-          if (onLoginPage() && !('goto' in s && s.goto.startsWith(this.o.login!.path)) && !relogged) {
+          // phiên hết hạn: đăng nhập lại một lần, quay về trang trước bước rồi lặp lại bước
+          const wantsLogin = 'goto' in s && s.goto.startsWith(this.o.login?.path ?? '\0');
+          if (onLoginPage() && !wantsLogin) {
+            if (relogged) throw await loginLoop();
             relogged = true;
             await this.login(ctx, account!, outDir);
+            if (!('goto' in s) && before && before !== 'about:blank') await page.goto(before, { waitUntil: 'load', timeout: this.navMs() });
             await run(s);
+            if (onLoginPage()) throw await loginLoop();
           }
           if (blocked) throw new Error(`điều hướng ra ngoài server preview bị chặn: ${blocked}`);
         } catch (e) {

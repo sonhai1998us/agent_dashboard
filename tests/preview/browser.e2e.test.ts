@@ -10,7 +10,7 @@ import type { PreviewLogin } from '@/src/preview/config';
 
 const exe = findBrowser();
 const LOGIN: PreviewLogin = { path: '/login', usernameSelector: '#u', passwordSelector: '#p', submitSelector: 'button[type=submit]', success: { urlNotMatching: '/login' } };
-const FORM = '<form method="post" action="/login"><input id="u" name="u"><input id="p" name="p" type="password"><button type="submit">Đăng nhập</button></form>';
+const FORM = '<script>fetch("/auth/refresh",{method:"POST"})</script><form method="post" action="/login"><input id="u" name="u"><input id="p" name="p" type="password"><button type="submit">Đăng nhập</button></form>';
 const HOME = `<!doctype html><html><body style="margin:0">
 <h1 style="font-size:24px;color:rgb(1,2,3)">Xin chào</h1>
 <button id="del" onclick="fetch('/api/items/1',{method:'POST'}).then(()=>{const p=document.createElement('p');p.id='done';p.textContent='xong';document.body.appendChild(p)})">Xoá</button>
@@ -45,6 +45,12 @@ beforeAll(async () => {
       return;
     }
     if (url.pathname === '/login') return html(200, FORM);
+    if (url.pathname === '/auth/refresh') {
+      res.writeHead(401);
+      return res.end('no session');
+    }
+    // vòng chuyển hướng: đăng nhập rồi vẫn bị đẩy về /login
+    if (url.pathname === '/loop') return (res.writeHead(302, { location: '/login' }), res.end());
     if (url.pathname === '/home') return authed ? html(200, HOME) : (res.writeHead(302, { location: '/login' }), res.end());
     if (url.pathname === '/api/items/1') {
       res.writeHead(403);
@@ -111,6 +117,19 @@ describe.skipIf(!exe)('TicketBrowser (Chrome thật)', () => {
       expect(e).toBeInstanceOf(LoginError);
       expect(String(e.message)).not.toContain('sai');
       expect(loginPosts).toBe(2);
+    } finally {
+      await b.close();
+    }
+  });
+
+  it('vòng chuyển hướng về /login sau khi đăng nhập lại → LoginError (login_failed)', { timeout: 60000 }, async () => {
+    const b = new TicketBrowser({ executablePath: exe!, origin, login: LOGIN, accounts: [{ name: 'owner', description: '', username: 'owner@x', password: 'secret1' }], onPid: () => {} });
+    const out = fs.mkdtempSync(path.join(os.tmpdir(), 'acctv-shots-'));
+    try {
+      const e = await b.runCapture(args({ as: 'owner', steps: [{ goto: '/loop' }, { shot: 'x' }] }), out, wt).catch((x) => x);
+      expect(e).toBeInstanceOf(LoginError);
+      expect(String(e.message)).toMatch(/chuyển hướng/);
+      expect(String(e.message)).not.toContain('secret1');
     } finally {
       await b.close();
     }
