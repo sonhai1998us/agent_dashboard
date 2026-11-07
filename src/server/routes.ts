@@ -176,6 +176,10 @@ const ROUTES: Route[] = [
         metrics: liveMetrics(core, now), agentMetrics: agentM,
         tickets: core.tickets.listTickets(), managed: core.tickets.listManaged(), waits: core.tickets.listWaits(since),
         prices: core.cfg.settings.prices,
+        previews: Object.fromEntries(core.tickets.listTickets().flatMap((t) => {
+          const p = core.orchestrator.previewStatus(t.id);
+          return p ? [[t.id, p]] : [];
+        })),
       });
     },
   },

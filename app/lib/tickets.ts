@@ -1,6 +1,18 @@
 import { isManagedId, type AgentInfo } from '@/src/core/model';
 import type { ManagedState, Role, RoleSpec, Ticket, WaitSpan } from '@/src/tickets/model';
 import { fmtDuration } from './format';
+import type { PreviewStatus } from '@/src/preview/server';
+
+/** Chip trạng thái server preview của ticket. */
+export function previewLabel(s: PreviewStatus | null | undefined): string {
+  switch (s?.state) {
+    case 'starting': return 'Server: đang bật';
+    case 'building': return 'Server: đang build';
+    case 'ready': return `Server: sẵn sàng :${s.port} (${s.mode})`;
+    case 'failed': return 'Server: lỗi';
+    default: return 'Server: tắt';
+  }
+}
 
 export type StatusTone = 'run' | 'wait' | 'warn' | 'crit' | 'ok' | 'ended';
 export interface StatusText { icon: string; text: string; tone: StatusTone }

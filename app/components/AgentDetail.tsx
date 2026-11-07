@@ -12,6 +12,37 @@ export { topRepeatedError } from '../lib/detail';
 
 const EMPTY_CALLS: CallRecord[] = [];
 const ROW_H = 26;
+const CAPTURE_TOOL = 'mcp__acctv__capture';
+
+interface CaptureFile { name: string; file: string; at: number }
+
+/** Ảnh tool capture của agent (mới nhất trước); tải lại khi có call capture mới xong. */
+function Captures({ agentId, refresh }: { agentId: string; refresh: number }) {
+  const [items, setItems] = useState<CaptureFile[]>([]);
+  useEffect(() => {
+    let live = true;
+    fetch(`/api/agents/${encodeURIComponent(agentId)}/captures`, { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : []))
+      .then((j: CaptureFile[]) => { if (live) setItems(Array.isArray(j) ? j : []); })
+      .catch(() => { if (live) setItems([]); });
+    return () => { live = false; };
+  }, [agentId, refresh]);
+  if (!items.length) return null;
+  return (
+    <section className={styles.shots} aria-label="Ảnh chụp của capture">
+      <div className={styles.shotsHead}>Ảnh chụp <span className={styles.meta}>· {items.length}</span></div>
+      <div className={styles.shotsRow}>
+        {items.map((c) => (
+          <a key={c.name} href={c.file} target="_blank" rel="noreferrer" className={styles.shot} title={`${c.name} · ${fmtClock(c.at)}`}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={c.file} alt={c.name} loading="lazy" width={160} />
+            <span className="mono">{c.name}</span>
+          </a>
+        ))}
+      </div>
+    </section>
+  );
+}
 
 export default function AgentDetail() {
   const selected = useLive((s) => s.selectedAgentId);
@@ -181,6 +212,10 @@ export default function AgentDetail() {
         <div className={`${styles.repeat} mono`}>
           <span aria-hidden="true">▲</span> Lỗi lặp lại: {repeated.preview} ({repeated.count}×)
         </div>
+      )}
+
+      {managed && (managed.role === 'dev' || managed.role === 'designer' || managed.role === 'qc') && (
+        <Captures agentId={managed.agentId} refresh={rawCalls.filter((c) => c.name === CAPTURE_TOOL && c.endedAt !== null).length} />
       )}
 
       <dl className={styles.grid}>

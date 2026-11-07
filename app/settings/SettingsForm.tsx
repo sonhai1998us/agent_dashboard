@@ -6,6 +6,8 @@ import type { Settings, Thresholds } from '@/src/core/config';
 import type { AgentKind, Effort, Role, RoleSpec } from '@/src/tickets/model';
 import { errorsFor } from '../lib/settingsErrors';
 import styles from './SettingsForm.module.css';
+import ProjectsSection from './ProjectsSection';
+import { fromProjectForm, toProjectForm, type ProjectForm } from '../lib/projectsForm';
 
 const ROLES: { role: Role; label: string }[] = [
   { role: 'controller', label: 'Controller' },
@@ -39,6 +41,7 @@ interface Form {
   denyBash: string;
   checkCommands: string;
   readRoots: string;
+  projects: ProjectForm[];
   maxRounds: string;
   maxParallel: string;
   prices: { model: string; in: string; out: string }[];
@@ -60,6 +63,7 @@ function toForm(s: Settings, t: Thresholds): Form {
     denyBash: s.denyBash.join('\n'),
     checkCommands: s.checkCommands.join('\n'),
     readRoots: (s.readRoots ?? []).join('\n'),
+    projects: Object.entries(s.projects ?? {}).map(([d, p]) => toProjectForm(d, p)),
     maxRounds: String(s.maxRounds),
     maxParallel: String(s.maxParallel),
     prices: Object.entries(s.prices).map(([model, p]) => ({ model, in: String(p.in), out: String(p.out) })),
@@ -68,7 +72,7 @@ function toForm(s: Settings, t: Thresholds): Form {
   };
 }
 
-function toBody(f: Form) {
+function toBody(f: Form, projects: Record<string, unknown>) {
   const thresholds = {} as Record<string, number>;
   for (const { key, sec } of THRESHOLDS) thresholds[key] = sec ? Math.round(num(f.thr[key]) * 1000) : num(f.thr[key]);
   const prices: Record<string, { in: number; out: number }> = {};
@@ -81,6 +85,7 @@ function toBody(f: Form) {
       denyBash: lines(f.denyBash),
       checkCommands: lines(f.checkCommands),
       readRoots: lines(f.readRoots).map((x) => x.trim()),
+      projects,
       maxRounds: num(f.maxRounds),
       maxParallel: num(f.maxParallel),
       prices,
@@ -93,7 +98,7 @@ function toBody(f: Form) {
 
 const ALL_KEYS = [
   ...ROLES.flatMap((r) => ['agent', 'model', 'effort'].map((k) => `roleDefaults.${r.role}.${k}`)),
-  'controllerExec.model', 'controllerExec.effort', 'allowedModels.claude', 'allowedModels.codex', 'denyBash', 'checkCommands', 'readRoots', 'maxRounds', 'maxParallel', 'prices', 'claudePath', 'codexPath',
+  'controllerExec.model', 'controllerExec.effort', 'allowedModels.claude', 'allowedModels.codex', 'denyBash', 'checkCommands', 'readRoots', 'projects', 'maxRounds', 'maxParallel', 'prices', 'claudePath', 'codexPath',
   ...THRESHOLDS.map((t) => `thresholds.${t.key}`),
 ];
 
@@ -123,9 +128,15 @@ export default function SettingsForm() {
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
+    const projects: Record<string, unknown> = {};
+    for (const p of form.projects) {
+      const v = fromProjectForm(p);
+      if (!v.ok) { setMsg({ ok: false, text: `✕ Dự án ${p.dir || '(mới)'}: ${v.error}` }); return; }
+      projects[v.dir] = v.project;
+    }
     setBusy(true); setMsg(null);
     try {
-      const res = await fetch('/api/settings', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(toBody(form)) });
+      const res = await fetch('/api/settings', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(toBody(form, projects)) });
       const j = await res.json().catch(() => ({}));
       if (res.status === 200) {
         setForm(toForm(j.settings, j.thresholds)); setErrors([]); setMsg({ ok: true, text: '✓ Đã lưu' });
@@ -247,6 +258,10 @@ export default function SettingsForm() {
           <Field label="readRoots" errors={errs('readRoots')}>
             {(id) => <textarea id={id} rows={3} className="mono" spellCheck={false} value={form.readRoots} onChange={(e) => patch({ readRoots: e.target.value })} />}
           </Field>
+        </Section>
+
+        <Section title="Dự án" hint="Server preview cho tool capture của Dev/Designer/QC: lệnh bật server, đăng nhập test, tài khoản theo vai trò, reset dữ liệu. Mật khẩu chỉ lưu trong ~/.acctv/config.json, không bao giờ gửi cho agent.">
+          <ProjectsSection projects={form.projects} onChange={(projects) => patch({ projects })} errors={errs('projects')} />
         </Section>
 
         <Section title="Giới hạn">

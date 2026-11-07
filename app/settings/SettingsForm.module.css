@@ -36,3 +36,14 @@
 .primary { background: var(--run); color: var(--on-run); border: 1px solid var(--run); border-radius: 6px; padding: 7px 18px; font: inherit; font-weight: 600; cursor: pointer; }
 .primary:disabled { background: var(--sel); border-color: var(--border); color: var(--muted); cursor: not-allowed; }
 @media (max-width: 600px) { .two { grid-template-columns: 1fr; } .roleRow { grid-template-columns: 1fr 1fr; } .roleName { grid-column: 1 / -1; padding: 0; } .priceRow { grid-template-columns: 1fr 1fr; } }
+
+.project { border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; display: flex; flex-direction: column; gap: 8px; }
+.project[open] { gap: 8px; }
+.project > summary { cursor: pointer; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.accountRow { display: grid; grid-template-columns: minmax(80px, 1fr) minmax(120px, 2fr) minmax(120px, 2fr) minmax(100px, 1.5fr) auto; gap: 6px; align-items: end; }
+.projectActions { display: flex; gap: 6px; flex-wrap: wrap; }
+.resetOut { font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 200px; overflow: auto; border: 1px solid var(--border); border-radius: 4px; padding: 6px; margin: 0; }
+.resetOut[data-ok='false'] { border-color: var(--err); }
+@media (max-width: 720px) {
+  .accountRow { grid-template-columns: 1fr 1fr; }
+}

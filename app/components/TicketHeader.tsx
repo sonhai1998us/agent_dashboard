@@ -2,7 +2,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { postJson, useLive } from '../lib/liveStore';
-import { reportBlocks, statusAction, ticketDuration, ticketStatusText, type Inline } from '../lib/tickets';
+import { previewLabel, reportBlocks, statusAction, ticketDuration, ticketStatusText, type Inline } from '../lib/tickets';
 import { fmtDuration } from '../lib/format';
 import type { Ticket } from '@/src/tickets/model';
 import styles from './TicketHeader.module.css';
@@ -51,6 +51,7 @@ function Duration({ t }: { t: Ticket }) {
 export default function TicketHeader() {
   const id = useLive((s) => s.selectedTicketId);
   const t = useLive((s) => (s.selectedTicketId ? s.tickets[s.selectedTicketId] ?? null : null));
+  const preview = useLive((s) => (s.selectedTicketId ? s.previews[s.selectedTicketId] ?? null : null));
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [guiding, setGuiding] = useState(false);
@@ -95,7 +96,17 @@ export default function TicketHeader() {
           <span className={styles.st} data-tone={st.tone}>{badge}</span>
         )}
         <Duration t={t} />
+        {preview && preview.state !== 'stopped' && (
+          <span
+            className={`${styles.st} mono`}
+            data-tone={preview.state === 'failed' ? 'crit' : preview.state === 'ready' ? 'ok' : 'warn'}
+            title={preview.state === 'failed' ? `${preview.error ?? ''}\n${preview.logTail}`.trim() : preview.envFiles.length ? `env: ${preview.envFiles.join(', ')}` : undefined}
+          >{previewLabel(preview)}</span>
+        )}
         <span className={styles.actions}>
+          {preview && preview.state !== 'stopped' && (
+            <button type="button" className={styles.btn} disabled={busy} onClick={() => void act('preview/stop', {})}>Tắt server</button>
+          )}
           {t.status === 'awaiting_approval' && <Link href={`/tickets/${t.id}/plan`} className={styles.btn}>Duyệt kế hoạch</Link>}
           {t.status === 'escalated' && !guiding && (
             <button type="button" className={styles.btn} onClick={() => setGuiding(true)}>Tiếp tục kèm chỉ đạo</button>

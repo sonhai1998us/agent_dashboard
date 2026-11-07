@@ -3,6 +3,7 @@ import { useSyncExternalStore } from 'react';
 import { isManagedId, type AgentInfo, type Alert, type CallRecord, type HubEvent } from '@/src/core/model';
 import type { ManagedAgent, Ticket, WaitSpan } from '@/src/tickets/model';
 import type { Settings } from '@/src/core/config';
+import type { PreviewStatus } from '@/src/preview/server';
 import { controllerIdOf } from './tickets';
 import { agentMetrics, type AgentMetrics, type GlobalMetrics } from '@/src/core/metrics';
 
@@ -13,6 +14,8 @@ export interface LiveState {
   calls: Record<string, CallRecord[]>; selectedAgentId: string | null;
   tickets: Record<string, Ticket>; managed: Record<string, ManagedAgent>; waits: Record<string, WaitSpan>;
   prices: Settings['prices'];
+  /** trạng thái server preview theo ticket */
+  previews: Record<string, PreviewStatus>;
   selectedTicketId: string | null;
   /** call được chọn từ timeline; cột phải cuộn tới nó */
   selectedCallId: string | null;
@@ -28,7 +31,7 @@ export interface LiveState {
 export interface SnapshotAction {
   type: 'snapshot'; generatedAt: number; agents: AgentInfo[]; alerts: Alert[];
   metrics: GlobalMetrics; agentMetrics: Record<string, AgentMetrics>;
-  tickets?: Ticket[]; managed?: ManagedAgent[]; waits?: WaitSpan[]; prices?: Settings['prices'];
+  tickets?: Ticket[]; managed?: ManagedAgent[]; waits?: WaitSpan[]; prices?: Settings['prices']; previews?: Record<string, PreviewStatus>;
 }
 export type LiveAction =
   | Exclude<HubEvent, { type: 'alert' }>
@@ -45,7 +48,7 @@ export type LiveAction =
 export function initialState(): LiveState {
   return {
     conn: 'connecting', lastUpdateAt: null, agents: {}, alerts: {}, metrics: null,
-    agentMetrics: {}, calls: {}, selectedAgentId: null, tickets: {}, managed: {}, waits: {}, prices: {}, selectedTicketId: null, selectedCallId: null, selectedCallNonce: 0, alertEventAt: {},
+    agentMetrics: {}, calls: {}, selectedAgentId: null, tickets: {}, managed: {}, waits: {}, prices: {}, previews: {}, selectedTicketId: null, selectedCallId: null, selectedCallNonce: 0, alertEventAt: {},
     callsGen: 0, callsLoadedGen: {},
   };
 }
@@ -69,6 +72,7 @@ export function reduce(s: LiveState, e: LiveAction): LiveState {
     }
     case 'managed': return { ...s, managed: { ...s.managed, [e.managed.agentId]: e.managed } };
     case 'wait': return { ...s, waits: { ...s.waits, [e.wait.id]: e.wait } };
+    case 'preview': return { ...s, previews: { ...s.previews, [e.ticketId]: e.preview } };
     case 'alert': {
       const alerts = { ...s.alerts };
       if (e.alert.active) alerts[e.alert.id] = e.alert; else delete alerts[e.alert.id];
@@ -93,7 +97,7 @@ export function reduce(s: LiveState, e: LiveAction): LiveState {
       const managed = Object.fromEntries((e.managed ?? []).map((m) => [m.agentId, m]));
       const waits = Object.fromEntries((e.waits ?? []).map((w) => [w.id, w]));
       const selectedAgentId = s.selectedAgentId && agents[s.selectedAgentId] ? s.selectedAgentId : null;
-      return { ...s, agents, alerts, tickets, managed, waits, prices: e.prices ?? s.prices, selectedAgentId, selectedCallId: selectedAgentId ? s.selectedCallId : null, metrics: e.metrics, agentMetrics: e.agentMetrics, lastUpdateAt: e.generatedAt };
+      return { ...s, agents, alerts, tickets, managed, waits, prices: e.prices ?? s.prices, previews: e.previews ?? s.previews, selectedAgentId, selectedCallId: selectedAgentId ? s.selectedCallId : null, metrics: e.metrics, agentMetrics: e.agentMetrics, lastUpdateAt: e.generatedAt };
     }
     case 'calls': return {
       ...s,
@@ -141,7 +145,7 @@ async function loadSnapshot(): Promise<void> {
   const r = await fetch('/api/snapshot', { cache: 'no-store' });
   if (!r.ok) throw new Error(`snapshot ${r.status}`);
   const j = await r.json();
-  dispatch({ type: 'snapshot', generatedAt: j.generatedAt, agents: j.agents, alerts: j.alerts, metrics: j.metrics, agentMetrics: j.agentMetrics, tickets: j.tickets, managed: j.managed, waits: j.waits, prices: j.prices });
+  dispatch({ type: 'snapshot', generatedAt: j.generatedAt, agents: j.agents, alerts: j.alerts, metrics: j.metrics, agentMetrics: j.agentMetrics, tickets: j.tickets, managed: j.managed, waits: j.waits, prices: j.prices, previews: j.previews });
 }
 
 const BACKOFF = [1000, 2000, 5000, 10000];

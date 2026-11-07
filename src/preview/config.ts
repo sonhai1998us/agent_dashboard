@@ -1,39 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-export interface PreviewLogin {
-  path: string;
-  usernameSelector: string;
-  passwordSelector: string;
-  submitSelector: string;
-  /** dấu hiệu đăng nhập xong: URL không còn khớp (chuỗi con), hoặc một phần tử xuất hiện */
-  success: { urlNotMatching: string } | { selector: string };
-}
-export interface PreviewAccount { name: string; description: string; username: string; password: string }
-export interface ProjectPreview {
-  /** `{port}` được thay bằng cổng dashboard cấp. */
-  dev: { command: string };
-  prod: { build: string; start: string };
-  defaultMode: 'dev' | 'prod';
-  env: Record<string, string>;
-  readyPath: string;
-  backend?: { healthUrl: string };
-  login?: PreviewLogin;
-  accounts: PreviewAccount[];
-  /** chỉ chạy khi người dùng bấm nút */
-  db?: { resetCommand: string; cwd: string };
-}
+import { MASK, NEXT_DEFAULTS, type PreviewAccount, type PreviewLogin, type ProjectPreview } from './defaults';
 
-export const MASK = '••••';
-
-export const NEXT_DEFAULTS: ProjectPreview = {
-  dev: { command: 'pnpm exec next dev -p {port}' },
-  prod: { build: 'pnpm exec next build', start: 'pnpm exec next start -p {port}' },
-  defaultMode: 'dev',
-  env: {},
-  readyPath: '/',
-  accounts: [],
-};
+export { MASK, NEXT_DEFAULTS, type PreviewAccount, type PreviewLogin, type ProjectPreview };
 
 const ACCOUNT_NAME = /^[a-z0-9][a-z0-9_-]{0,31}$/;
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
