@@ -2,8 +2,7 @@
 import { useEffect } from 'react';
 import { selectTicket } from '../lib/liveStore';
 import TopBar from './TopBar';
-import TicketList from './TicketList';
-import SessionList from './SessionList';
+import ProjectTree from './ProjectTree';
 import AgentTimeline from './AgentTimeline';
 import TicketHeader from './TicketHeader';
 import AgentDetail from './AgentDetail';
@@ -20,8 +19,7 @@ export default function Dashboard() {
       <TopBar />
       <main className={styles.grid}>
         <div className={styles.left}>
-          <TicketList />
-          <SessionList />
+          <ProjectTree />
         </div>
         <div className={styles.mid}>
           <TicketHeader />

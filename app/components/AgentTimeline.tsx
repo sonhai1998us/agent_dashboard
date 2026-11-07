@@ -8,7 +8,7 @@ import { flattenTree } from '../lib/tree';
 import { DEFAULT_WINDOW_MIN, WINDOWS_MIN, layoutLane, waitingCallIds, type Bar, type LoopZone, type Think } from '../lib/lanes';
 import { fmtClock, fmtDuration } from '../lib/format';
 import { alertTag } from '../lib/detail';
-import { statusOf } from './SessionList';
+import { statusOf } from './ProjectTree';
 import styles from './AgentTimeline.module.css';
 
 const LANE_H = 30;
