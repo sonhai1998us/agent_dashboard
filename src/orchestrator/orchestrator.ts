@@ -265,6 +265,8 @@ export class Orchestrator {
     if (this.liveWorkers(ticketId).length) throw new OrchestratorError(409, 'Còn agent đang chạy trong worktree');
     this.removing.add(ticketId);
     try {
+      // server preview giữ file trong worktree (.next, .node) → Windows không xoá được
+      await this.deps.preview?.stop(ticketId);
       // remove --force bỏ file chưa commit → snapshot lên nhánh trước; snapshot lỗi mà còn thay đổi thì không xoá
       if (!(await this.snapshot(ticketId, wt, `acctv: ${ticketId} trước khi xoá worktree`, 'Snapshot trước khi xoá worktree'))) {
         const dirty = await this.deps.git.gitInfo(wt).then((i) => i.dirty, () => true);
@@ -710,7 +712,7 @@ export class Orchestrator {
   private async escalate(T: string, report: string): Promise<void> {
     this.move(T, 'finish_escalated', { report, pendingWait: null });
     this.ctrl(T).queue.length = 0;
-    await this.stopLiveWorkers(T, ESCALATED);
+    await Promise.all([this.stopLiveWorkers(T, ESCALATED), this.deps.preview?.stop(T)]);
   }
 
   private async retryController(T: string, message: string): Promise<void> {

@@ -132,6 +132,23 @@ describe('capture và Figma trong orchestrator', () => {
     expect(f.calls.stopAll).toBe(1);
   });
 
+  it('escalate không qua finish và xoá worktree cũng tắt server preview', { timeout: 20000 }, async () => {
+    const f = fakePreview();
+    env = makeEnv({ maxParallel: 5, preview: f.preview });
+    const T = await toRunning(env, reviewPlan());
+    const ctrl = `acctv:${T}:controller`;
+    // Controller kết thúc lượt mà không gọi tool chờ / finish nhiều lần → escalated
+    for (let i = 0; i < 3 && env.tickets.getTicket(T)!.status === 'running'; i++) {
+      runOf(env, ctrl)!.finish({});
+      await env.orch.idle();
+    }
+    expect(env.tickets.getTicket(T)!.status).toBe('escalated');
+    expect(f.calls.stop).toContain(T);
+    f.calls.stop.length = 0;
+    await env.orch.removeWorktree(T);
+    expect(f.calls.stop).toEqual([T]);
+  });
+
   it('next-env.d.ts do server preview sinh ra không bị báo ngoài phạm vi', async () => {
     const f = fakePreview();
     env = makeEnv({ maxParallel: 5, preview: f.preview });
