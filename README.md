@@ -101,6 +101,8 @@ acctv ls | watch | logs         # nhận biết ticket và agent do dashboard ch
 | Explorer | trong thư mục làm việc | không | không có tool Bash |
 | Designer, QC | trong thư mục làm việc | không | chỉ lệnh kiểm tra (`checkCommands`), không nối lệnh, không chuyển hướng, không dùng `--output` |
 
+Dev, Designer và QC (Claude) có thêm tool `capture` (xem "Review trên trình duyệt"). Designer đọc được Figma qua tool đọc của MCP người dùng, giống Explorer.
+
 Controller chạy với quyền như người dùng để đọc được ngữ cảnh khi lập kế hoạch: nạp cấu hình Claude của người dùng (`--setting-sources user,project,local`, gồm plugin và hook của người dùng), các MCP server và connector của người dùng (không `--strict-mcp-config`), dùng mọi tool kể cả CLI như `twg`. Guard cho phép tường minh mọi tool, trừ: lệnh khớp danh sách deny (gồm `git commit`, `git push`, lệnh git đổi nhánh/remote, gọi API của dashboard), lệnh nền, tool MCP có tên kiểu commit/push/merge (vd. `push_files`, `create_or_update_file`, `merge_pull_request`), `EnterWorktree`, và ghi vào `.git`, `ACCTV_HOME`, `~/.claude`, `~/.codex`. Lệnh chạy bằng shell vẫn có thể ghi file ở mọi nơi; Controller được dặn không tự sửa code mà giao Dev.
 
 Phạm vi file của dev được ép bằng hook guard (`[acctv-guard]`). Bash của dev chỉ bị giới hạn bởi danh sách deny nên file do lệnh Bash ghi ra không bị chặn; sau mỗi lần chờ agent, dashboard đối chiếu `git status` của worktree với phạm vi các gói Dev, ghi file đã đổi vào báo cáo và cảnh báo Controller (kèm log ticket) về file ngoài phạm vi.
@@ -129,6 +131,37 @@ Khi một Dev/QC/Designer (Claude) cần bạn làm việc nó không tự làm 
 - **Để sau**: ẩn hộp thoại. Mở lại bằng nút "cần bạn" trên thanh trên, hoặc nút "Mở" trong panel của agent.
 
 Trong lúc chờ, agent không chiếm slot chạy song song. Bạn vẫn dừng được agent ("Dừng → trả Controller"). Tab trình duyệt hiện số yêu cầu đang chờ. Worker Codex chưa có tool này.
+
+### Review trên trình duyệt
+
+Dev, Designer và QC xem trang đang chạy bằng tool `capture`. Agent không tự bật server hay trình duyệt.
+
+- **Server preview.**
+  - Mỗi ticket có một server preview trong worktree của nó, cổng do dashboard cấp, origin luôn là `http://localhost:<cổng>`.
+  - Server được bật ở lần `capture` đầu tiên và dùng chung cho mọi agent của ticket.
+  - Server tự tắt khi ticket kết thúc hoặc bị huỷ, khi không ai dùng trong 10 phút, khi bạn bấm "Tắt server" trên trang ticket, hoặc khi dashboard tắt.
+  - Chế độ `dev` (mặc định) giữ server qua các vòng, nhờ HMR. Chế độ `prod` build rồi start, và build lại khi code trong worktree đã đổi. Controller đặt `preview.mode: prod` trong kế hoạch khi tiêu chí nghiệm thu đụng tới SSR, redirect, middleware hay header.
+- **Trình duyệt.** Dashboard dùng Chrome, không có thì dùng Edge, chạy headless. Biến `ACCTV_BROWSER` trỏ tới file chạy nếu trình duyệt cài ở chỗ khác. Mỗi tài khoản test có phiên (cookie) riêng.
+- **Kết quả của `capture`.** Ảnh PNG (agent xem bằng `Read`), số đo DOM (kích thước, màu, font, padding…), URL và chuyển hướng, lỗi console, request ghi (POST/PUT/PATCH/DELETE) kèm mã trạng thái, và tràn ngang. Ảnh lưu ở `ACCTV_HOME/runs/<ticket>/<agent>/captures`, hiện trong panel của agent.
+- **Cấu hình dự án** (Settings > Dự án, khoá theo thư mục dự án gốc):
+  - lệnh `dev`, `build`, `start` (có `{port}`);
+  - chế độ mặc định;
+  - biến môi trường thêm;
+  - URL kiểm backend;
+  - form đăng nhập (trang, selector, dấu hiệu thành công);
+  - tài khoản test theo vai trò;
+  - lệnh reset dữ liệu.
+
+  Dự án Next.js chưa cấu hình dùng `pnpm exec next dev -p {port}`. Các file `.env*` của thư mục dự án gốc được nạp vào biến môi trường của server preview; chúng không bị chép vào worktree.
+- **Tài khoản test.**
+  - Mật khẩu chỉ lưu trong `ACCTV_HOME/config.json`. API Settings luôn trả `••••`.
+  - Agent chỉ thấy tên và mô tả của tài khoản, gọi kiểu `capture({ as: "owner", … })`, và dashboard tự đăng nhập.
+  - Mật khẩu bị thay bằng `***` trong mọi output.
+- **Dữ liệu.**
+  - Dashboard không bật backend. Bạn tự chạy backend local; dashboard chỉ gọi URL kiểm backend và báo `[capture:backend_down]` nếu nó không phản hồi.
+  - QC được dặn đặt tên dữ liệu tự tạo bắt đầu bằng `acctv-<ticket>-`, không sửa hay xoá dữ liệu seed, và dọn dữ liệu đã tạo. Quy tắc này nằm trong prompt, guard không ép được.
+  - Nút "Reset dữ liệu" chạy lệnh reset của dự án, và chỉ chạy khi bạn bấm.
+- **Codex.** Worker Codex chưa có `capture`.
 
 ### Biến môi trường chỉ để thử
 
