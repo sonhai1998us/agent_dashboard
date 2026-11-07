@@ -239,6 +239,30 @@ describe('PreviewManager', () => {
     await p.stopAll();
   });
 
+  it('đổi Settings khi server đang chạy: đổi tài khoản/đăng nhập → tạo lại trình duyệt; đổi lệnh/env → bật lại server', async () => {
+    let p = project();
+    const servers: FakeServer[] = [];
+    const browsers: { accounts: unknown }[] = [];
+    const m = new PreviewManager({
+      settings: () => ({ projects: { [DIR]: p } }), publish: () => {}, getMeta: () => undefined, setMeta: () => {},
+      makeServer: (d) => { const s = new FakeServer(d); servers.push(s); return s; },
+      makeBrowser: (o) => { browsers.push({ accounts: o.accounts }); return new FakeBrowser(); },
+      findBrowser: () => 'chrome.exe', fetchOk: async () => true, warm: async () => {},
+    });
+    await m.capture(req({ steps: [{ goto: '/' }] }));
+    p = { ...p, accounts: [...p.accounts, { name: 'member', description: 'TV', username: 'm@x', password: 'pw2' }] };
+    const r = await m.capture(req({ as: 'member', steps: [{ goto: '/' }] }));
+    expect(r.isError).toBeFalsy();
+    expect(browsers).toHaveLength(2);
+    expect(JSON.stringify(browsers[1].accounts)).toContain('member');
+    expect(servers).toHaveLength(1);
+    p = { ...p, env: { X: '1' } };
+    await m.capture(req({ steps: [{ goto: '/' }] }));
+    expect(servers).toHaveLength(2);
+    expect(servers[0].stops).toBe(1);
+    await m.stopAll();
+  });
+
   it('defaultMode theo cấu hình dự án', () => {
     expect(setup({ project: project({ defaultMode: 'prod' }) }).m.defaultMode(DIR)).toBe('prod');
     expect(setup({ project: null }).m.defaultMode(DIR)).toBe('dev');

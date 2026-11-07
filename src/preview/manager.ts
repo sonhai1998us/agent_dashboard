@@ -39,6 +39,8 @@ interface Entry {
   serverPids: number[];
   browserPids: number[];
   stopped: boolean;
+  serverKey: string;
+  browserStale: boolean;
 }
 
 const MAX_ACTIVE = 2;
@@ -61,6 +63,9 @@ async function defaultFetchOk(url: string): Promise<boolean> {
     return false;
   }
 }
+
+const serverKey = (p: ProjectPreview): string => JSON.stringify([p.dev, p.prod, p.env, p.readyPath]);
+const browserKey = (p: ProjectPreview): string => JSON.stringify([p.login ?? null, p.accounts]);
 
 async function defaultWarm(url: string): Promise<void> {
   try {
@@ -147,7 +152,8 @@ export class PreviewManager {
     await Promise.allSettled([b?.close(), e.server.stop()]);
     e.serverPids = [];
     e.browserPids = [];
-    this.savePids(ticketId, []);
+    // entry mới của cùng ticket (vd. đổi chế độ) đã ghi pid của nó: không xoá
+    if (!this.entries.has(ticketId)) this.savePids(ticketId, []);
   }
 
   async stopAll(): Promise<void> {
@@ -168,14 +174,18 @@ export class PreviewManager {
 
   private entry(req: CaptureRequest, project: ProjectPreview): Entry {
     const cur = this.entries.get(req.ticketId);
-    if (cur && cur.worktree === req.worktree && cur.mode === req.mode) {
+    const sKey = serverKey(project);
+    if (cur && cur.worktree === req.worktree && cur.mode === req.mode && cur.serverKey === sKey) {
+      // người dùng sửa tài khoản / form đăng nhập trong Settings: trình duyệt (và phiên đăng nhập) phải tạo lại
+      if (browserKey(project) !== browserKey(cur.project)) cur.browserStale = true;
       cur.project = project;
       return cur;
     }
+    // đổi worktree, chế độ hay lệnh/env của server: bật lại server
     if (cur) void this.stop(req.ticketId);
     const e: Entry = {
       ticketId: req.ticketId, worktree: req.worktree, mode: req.mode, project, server: null as unknown as ServerLike, browser: null, browserPort: null,
-      active: 0, waiting: [], idle: null, serverPids: [], browserPids: [], stopped: false,
+      active: 0, waiting: [], idle: null, serverPids: [], browserPids: [], stopped: false, serverKey: sKey, browserStale: false,
     };
     const deps: PreviewServerDeps = {
       worktree: req.worktree, projectDir: req.projectDir, project, mode: req.mode,
@@ -192,7 +202,8 @@ export class PreviewManager {
   }
 
   private async browserFor(e: Entry, port: number): Promise<BrowserLike> {
-    if (e.browser && e.browserPort === port) return e.browser;
+    if (e.browser && e.browserPort === port && !e.browserStale) return e.browser;
+    e.browserStale = false;
     if (e.browser) {
       const old = e.browser;
       e.browser = null;
