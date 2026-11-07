@@ -38,6 +38,7 @@ interface Form {
   thr: Record<keyof Thresholds, string>;
   denyBash: string;
   checkCommands: string;
+  readRoots: string;
   maxRounds: string;
   maxParallel: string;
   prices: { model: string; in: string; out: string }[];
@@ -58,6 +59,7 @@ function toForm(s: Settings, t: Thresholds): Form {
     thr,
     denyBash: s.denyBash.join('\n'),
     checkCommands: s.checkCommands.join('\n'),
+    readRoots: (s.readRoots ?? []).join('\n'),
     maxRounds: String(s.maxRounds),
     maxParallel: String(s.maxParallel),
     prices: Object.entries(s.prices).map(([model, p]) => ({ model, in: String(p.in), out: String(p.out) })),
@@ -78,6 +80,7 @@ function toBody(f: Form) {
       allowedModels: { claude: lines(f.allowed.claude).map((x) => x.trim()), codex: lines(f.allowed.codex).map((x) => x.trim()) },
       denyBash: lines(f.denyBash),
       checkCommands: lines(f.checkCommands),
+      readRoots: lines(f.readRoots).map((x) => x.trim()),
       maxRounds: num(f.maxRounds),
       maxParallel: num(f.maxParallel),
       prices,
@@ -90,7 +93,7 @@ function toBody(f: Form) {
 
 const ALL_KEYS = [
   ...ROLES.flatMap((r) => ['agent', 'model', 'effort'].map((k) => `roleDefaults.${r.role}.${k}`)),
-  'controllerExec.model', 'controllerExec.effort', 'allowedModels.claude', 'allowedModels.codex', 'denyBash', 'checkCommands', 'maxRounds', 'maxParallel', 'prices', 'claudePath', 'codexPath',
+  'controllerExec.model', 'controllerExec.effort', 'allowedModels.claude', 'allowedModels.codex', 'denyBash', 'checkCommands', 'readRoots', 'maxRounds', 'maxParallel', 'prices', 'claudePath', 'codexPath',
   ...THRESHOLDS.map((t) => `thresholds.${t.key}`),
 ];
 
@@ -237,6 +240,12 @@ export default function SettingsForm() {
           </Field>
           <Field label="checkCommands: lệnh kiểm tra QC được chạy" errors={errs('checkCommands')}>
             {(id) => <textarea id={id} rows={4} className="mono" spellCheck={false} value={form.checkCommands} onChange={(e) => patch({ checkCommands: e.target.value })} />}
+          </Field>
+        </Section>
+
+        <Section title="Thư mục đọc thêm" hint="Mỗi dòng một đường dẫn tuyệt đối. Mọi worker được Read/Glob/Grep trong đó (chỉ đọc).">
+          <Field label="readRoots" errors={errs('readRoots')}>
+            {(id) => <textarea id={id} rows={3} className="mono" spellCheck={false} value={form.readRoots} onChange={(e) => patch({ readRoots: e.target.value })} />}
           </Field>
         </Section>
 

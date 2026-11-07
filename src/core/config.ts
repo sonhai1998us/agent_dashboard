@@ -19,6 +19,8 @@ export interface Settings {
   allowedModels: Record<AgentKind, string[]>;
   denyBash: string[];
   checkCommands: string[];
+  /** Thư mục (đường dẫn tuyệt đối) mọi worker được đọc thêm ngoài worktree, vd. thư mục ảnh preview. */
+  readRoots: string[];
   maxRounds: number;
   maxParallel: number;
   prices: Record<string, { in: number; out: number }>;
@@ -78,6 +80,7 @@ export const DEFAULT_SETTINGS: Settings = {
     String.raw`^\s*npx\s+(tsc|vitest|jest|eslint|playwright|prettier\s+--check)\b`,
     String.raw`^\s*git\s+(status|diff|log|show)\b`,
   ],
+  readRoots: [],
   maxRounds: 3,
   maxParallel: 3,
   prices: {},
@@ -102,6 +105,7 @@ const isRegexArr = (v: unknown): v is string[] =>
       return false;
     }
   });
+const isAbsArr = (v: unknown): v is string[] => isStrArr(v) && v.every((x) => x.trim() !== '' && path.isAbsolute(x.trim()));
 const isPath = (v: unknown): v is string | null => v === null || (typeof v === 'string' && v.trim() !== '');
 const isPrice = (v: unknown): v is { in: number; out: number } =>
   isObj(v) && typeof v.in === 'number' && v.in >= 0 && typeof v.out === 'number' && v.out >= 0;
@@ -129,6 +133,7 @@ function mergeSettings(raw: unknown): Settings {
   }
   if (isRegexArr(raw.denyBash)) s.denyBash = raw.denyBash;
   if (isRegexArr(raw.checkCommands)) s.checkCommands = raw.checkCommands;
+  if (isAbsArr(raw.readRoots)) s.readRoots = raw.readRoots.map((x) => x.trim());
   if (isPosInt(raw.maxRounds)) s.maxRounds = raw.maxRounds;
   if (isPosInt(raw.maxParallel)) s.maxParallel = raw.maxParallel;
   if (isObj(raw.prices)) {
@@ -153,6 +158,7 @@ export function validateSettings(
   if (!isPosInt(s.maxRounds)) errors.push('maxRounds phải là số nguyên ≥ 1');
   if (!isRegexArr(s.denyBash)) errors.push('denyBash phải là mảng regex hợp lệ');
   if (!isRegexArr(s.checkCommands)) errors.push('checkCommands phải là mảng regex hợp lệ');
+  if (s.readRoots !== undefined && !isAbsArr(s.readRoots)) errors.push('readRoots phải là mảng đường dẫn tuyệt đối');
   if (!isPath(s.claudePath)) errors.push('claudePath phải là chuỗi hoặc null');
   const ce = s.controllerExec;
   if (ce !== undefined && ce !== null) {
@@ -205,6 +211,7 @@ export function validateSettings(
     allowedModels: { claude: [...(am.claude as string[])], codex: [...(am.codex as string[])] },
     denyBash: [...(s.denyBash as string[])],
     checkCommands: [...(s.checkCommands as string[])],
+    readRoots: ((s.readRoots ?? []) as string[]).map((x) => x.trim()),
     maxRounds: s.maxRounds as number,
     maxParallel: s.maxParallel as number,
     prices,

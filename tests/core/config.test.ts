@@ -68,6 +68,27 @@ test('validateSettings chấp nhận mặc định', () => {
   expect(validateSettings(cloneDefaults()).ok).toBe(true);
 });
 
+test('readRoots: chỉ nhận đường dẫn tuyệt đối; thiếu thì là []', () => {
+  const abs = path.resolve(os.tmpdir(), 'preview_frame');
+  const home = tmpHome();
+  fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({ settings: { readRoots: [` ${abs} `] } }));
+  expect(loadConfig({ ACCTV_HOME: home }).settings.readRoots).toEqual([abs]);
+  fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({ settings: { readRoots: ['tuong/doi'] } }));
+  expect(loadConfig({ ACCTV_HOME: home }).settings.readRoots).toEqual([]);
+
+  const ok = cloneDefaults();
+  ok.settings.readRoots = [abs];
+  const r = validateSettings(ok);
+  expect(r.ok && r.settings.readRoots).toEqual([abs]);
+  const bad = cloneDefaults();
+  bad.settings.readRoots = ['tuong/doi'];
+  expect(errorsOf(bad)).toContain('readRoots phải là mảng đường dẫn tuyệt đối');
+  const missing = cloneDefaults() as { settings: Partial<typeof DEFAULT_SETTINGS> };
+  delete missing.settings.readRoots;
+  const m = validateSettings(missing);
+  expect(m.ok && m.settings.readRoots).toEqual([]);
+});
+
 test('validateSettings từ chối giá trị sai, lỗi nêu tên trường', () => {
   const a = cloneDefaults();
   a.settings.maxParallel = 0;

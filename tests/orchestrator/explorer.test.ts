@@ -54,6 +54,20 @@ describe('vai explorer', () => {
     expect(env.tickets.getTicket(T)!.round).toBe(0); // chỉ vòng có Dev mới được tính
   });
 
+  it('settings.readRoots: worker được đọc thêm thư mục ngoài worktree, không được ghi', async () => {
+    const extra = join(env.repo, '..', 'preview_frame');
+    env.cfg.settings.readRoots = [extra];
+    const T = await toRunning(env, explorerPlan());
+    await env.orch.mcpTools(T).spawn_agent({ role: 'explorer', task: 'Xem ảnh preview', files: [] });
+    const id = `acctv:${T}:explorer-1`;
+    const run = runOf(env, id)!;
+    const g = (tool_name: string, tool_input: unknown) => env.orch.guard(id, run.spec.guard.token, { tool_name, tool_input, cwd: run.spec.cwd });
+    expect(g('Read', { file_path: join(extra, 'ui-preview-login.png') })).toEqual({ allow: true });
+    expect(g('Grep', { pattern: 'x', path: extra })).toEqual({ allow: true });
+    expect(g('Read', { file_path: join(env.repo, '..', 'khac', 'a.png') })).toMatchObject({ allow: false });
+    expect(g('Edit', { file_path: join(extra, 'a.ts') })).toMatchObject({ allow: false });
+  });
+
   it('guard: explorer không sửa file, chỉ chạy lệnh kiểm tra', () => {
     const p = {
       role: 'explorer' as const, root: env.repo, readRoots: [], allowedFiles: ['src/**'],
