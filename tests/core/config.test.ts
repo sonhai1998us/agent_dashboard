@@ -112,6 +112,15 @@ test('projects: loadConfig đọc cấu hình hợp lệ; hỏng thì {}; valida
   expect(m.ok && m.settings.projects).toEqual({});
 });
 
+test('projects: một dự án hỏng không làm mất các dự án hợp lệ khi nạp config', () => {
+  const good = path.resolve(os.tmpdir(), 'app-good');
+  const bad = path.resolve(os.tmpdir(), 'app-bad');
+  const p = { dev: { command: 'next dev -p {port}' }, prod: { build: 'next build', start: 'next start -p {port}' }, defaultMode: 'dev', env: {}, readyPath: '/', accounts: [{ name: 'owner', description: '', username: 'o', password: 'pw' }] };
+  const home = tmpHome();
+  fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({ settings: { projects: { [good]: p, [bad]: { ...p, defaultMode: 'x' }, 'rel/dir': p } } }));
+  expect(loadConfig({ ACCTV_HOME: home }).settings.projects).toEqual({ [good]: p });
+});
+
 test('denyBash mặc định chặn đọc config.json của dashboard', () => {
   const re = DEFAULT_SETTINGS.denyBash.map((s) => new RegExp(s, 'i'));
   for (const c of ['cat C:\\Users\\a\\.acctv\\config.json', 'type ~/.acctv/config.json', 'node -e "require(\'fs\').readFileSync(\'.acctv//config.json\')"']) {

@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { AgentKind, Effort, Role, RoleSpec } from '@/src/tickets/model';
-import { validateProjects, type ProjectPreview } from '@/src/preview/config';
+import { salvageProjects, validateProjects, type ProjectPreview } from '@/src/preview/config';
 
 export interface Thresholds {
   stuckMs: number;
@@ -140,8 +140,9 @@ function mergeSettings(raw: unknown): Settings {
   if (isRegexArr(raw.denyBash)) s.denyBash = raw.denyBash;
   if (isRegexArr(raw.checkCommands)) s.checkCommands = raw.checkCommands;
   if (isAbsArr(raw.readRoots)) s.readRoots = raw.readRoots.map((x) => x.trim());
-  const pr = validateProjects(raw.projects);
-  if (pr.ok) s.projects = pr.projects;
+  const pr = salvageProjects(raw.projects);
+  s.projects = pr.projects;
+  if (pr.errors.length) console.warn(`[acctv] bỏ qua cấu hình dự án không hợp lệ trong config.json:\n${pr.errors.join('\n')}`);
   if (isPosInt(raw.maxRounds)) s.maxRounds = raw.maxRounds;
   if (isPosInt(raw.maxParallel)) s.maxParallel = raw.maxParallel;
   if (isObj(raw.prices)) {

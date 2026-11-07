@@ -96,6 +96,19 @@ export function validateProjects(raw: unknown): { ok: true; projects: Record<str
   return errors.length ? { ok: false, errors } : { ok: true, projects };
 }
 
+/** Lúc nạp config.json: giữ từng dự án hợp lệ, bỏ dự án hỏng (để lần lưu sau từ UI không xoá mất tài khoản test). */
+export function salvageProjects(raw: unknown): { projects: Record<string, ProjectPreview>; errors: string[] } {
+  if (!isObj(raw)) return { projects: {}, errors: raw === undefined ? [] : ['projects phải là object theo thư mục dự án'] };
+  const projects: Record<string, ProjectPreview> = {};
+  const errors: string[] = [];
+  for (const [k, v] of Object.entries(raw)) {
+    const r = validateProjects({ [k]: v });
+    if (r.ok) Object.assign(projects, r.projects);
+    else errors.push(...r.errors);
+  }
+  return { projects, errors };
+}
+
 export function maskProjects(p: Record<string, ProjectPreview>): Record<string, ProjectPreview> {
   const out = structuredClone(p);
   for (const v of Object.values(out)) for (const a of v.accounts) a.password = MASK;
