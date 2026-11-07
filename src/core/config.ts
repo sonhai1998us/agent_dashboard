@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { AgentKind, Effort, Role, RoleSpec } from '@/src/tickets/model';
+import { validateProjects, type ProjectPreview } from '@/src/preview/config';
 
 export interface Thresholds {
   stuckMs: number;
@@ -21,6 +22,8 @@ export interface Settings {
   checkCommands: string[];
   /** Thư mục (đường dẫn tuyệt đối) mọi worker được đọc thêm ngoài worktree, vd. thư mục ảnh preview. */
   readRoots: string[];
+  /** Cấu hình server preview / đăng nhập test theo thư mục dự án gốc (ticket.dir). */
+  projects: Record<string, ProjectPreview>;
   maxRounds: number;
   maxParallel: number;
   prices: Record<string, { in: number; out: number }>;
@@ -74,6 +77,8 @@ export const DEFAULT_SETTINGS: Settings = {
     String.raw`\bkill\s+-`,
     String.raw`\brm\s+-\w*r\w*\s+(/|~|[A-Za-z]:[\\/])`,
     String.raw`Remove-Item\b[^\n]*-Recurse`,
+    // cấu hình dashboard chứa mật khẩu tài khoản test
+    String.raw`\.acctv[\\/]+config\.json`,
   ],
   checkCommands: [
     String.raw`^\s*(npm|pnpm|yarn|bun)\s+(run\s+)?(test|lint|build|typecheck|check|preview)\b`,
@@ -81,6 +86,7 @@ export const DEFAULT_SETTINGS: Settings = {
     String.raw`^\s*git\s+(status|diff|log|show)\b`,
   ],
   readRoots: [],
+  projects: {},
   maxRounds: 3,
   maxParallel: 3,
   prices: {},
@@ -134,6 +140,8 @@ function mergeSettings(raw: unknown): Settings {
   if (isRegexArr(raw.denyBash)) s.denyBash = raw.denyBash;
   if (isRegexArr(raw.checkCommands)) s.checkCommands = raw.checkCommands;
   if (isAbsArr(raw.readRoots)) s.readRoots = raw.readRoots.map((x) => x.trim());
+  const pr = validateProjects(raw.projects);
+  if (pr.ok) s.projects = pr.projects;
   if (isPosInt(raw.maxRounds)) s.maxRounds = raw.maxRounds;
   if (isPosInt(raw.maxParallel)) s.maxParallel = raw.maxParallel;
   if (isObj(raw.prices)) {
@@ -159,6 +167,8 @@ export function validateSettings(
   if (!isRegexArr(s.denyBash)) errors.push('denyBash phải là mảng regex hợp lệ');
   if (!isRegexArr(s.checkCommands)) errors.push('checkCommands phải là mảng regex hợp lệ');
   if (s.readRoots !== undefined && !isAbsArr(s.readRoots)) errors.push('readRoots phải là mảng đường dẫn tuyệt đối');
+  const projects = validateProjects(s.projects);
+  if (!projects.ok) errors.push(...projects.errors);
   if (!isPath(s.claudePath)) errors.push('claudePath phải là chuỗi hoặc null');
   const ce = s.controllerExec;
   if (ce !== undefined && ce !== null) {
@@ -212,6 +222,7 @@ export function validateSettings(
     denyBash: [...(s.denyBash as string[])],
     checkCommands: [...(s.checkCommands as string[])],
     readRoots: ((s.readRoots ?? []) as string[]).map((x) => x.trim()),
+    projects: projects.ok ? projects.projects : {},
     maxRounds: s.maxRounds as number,
     maxParallel: s.maxParallel as number,
     prices,

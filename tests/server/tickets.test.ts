@@ -238,6 +238,33 @@ test('settings: PUT sai → 400 errors; hợp lệ → 200 và GET trả lại; 
   expect((await call('GET', '/api/capabilities')).json).toEqual({ claude: true, codex: false });
 });
 
+test('settings: mật khẩu tài khoản test bị che khi GET; PUT với giá trị che giữ mật khẩu cũ', async () => {
+  await start();
+  const cur = (await call('GET', '/api/settings')).json;
+  const proj = {
+    dev: { command: 'next dev -p {port}' }, prod: { build: 'next build', start: 'next start -p {port}' }, defaultMode: 'dev', env: {}, readyPath: '/',
+    accounts: [{ name: 'owner', description: 'Chủ', username: 'o@x', password: 'secret-1' }],
+  };
+  const body = { ...cur, settings: { ...cur.settings, projects: { [repo]: proj } } };
+  const put = await call('PUT', '/api/settings', body);
+  expect(put.status).toBe(200);
+  expect(JSON.stringify(put.json)).not.toContain('secret-1');
+  const got = await call('GET', '/api/settings');
+  expect(JSON.stringify(got.json)).not.toContain('secret-1');
+  expect(got.json.settings.projects[repo].accounts[0].password).toBe('••••');
+
+  const again = await call('PUT', '/api/settings', got.json);
+  expect(again.status).toBe(200);
+  const saved = JSON.parse(fs.readFileSync(path.join(cfg.home, 'config.json'), 'utf8'));
+  expect(saved.settings.projects[repo].accounts[0].password).toBe('secret-1');
+
+  const fresh = structuredClone(got.json);
+  fresh.settings.projects[repo].accounts.push({ name: 'member', description: '', username: 'm@x', password: '••••' });
+  const bad = await call('PUT', '/api/settings', fresh);
+  expect(bad.status).toBe(400);
+  expect(bad.json.errors.join('\n')).toMatch(/accounts\.member\.password/);
+});
+
 test('fs/check và fs/git-init', async () => {
   await start();
   const chk = await call('GET', `/api/fs/check?dir=${encodeURIComponent(repo)}`);

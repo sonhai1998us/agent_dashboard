@@ -89,6 +89,37 @@ test('readRoots: chỉ nhận đường dẫn tuyệt đối; thiếu thì là [
   expect(m.ok && m.settings.readRoots).toEqual([]);
 });
 
+test('projects: loadConfig đọc cấu hình hợp lệ; hỏng thì {}; validateSettings kiểm và giữ', () => {
+  const dir = path.resolve(os.tmpdir(), 'app-x');
+  const p = { dev: { command: 'next dev -p {port}' }, prod: { build: 'next build', start: 'next start -p {port}' }, defaultMode: 'dev', env: {}, readyPath: '/', accounts: [] };
+  const home = tmpHome();
+  fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({ settings: { projects: { [dir]: p } } }));
+  expect(loadConfig({ ACCTV_HOME: home }).settings.projects).toEqual({ [dir]: p });
+  fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({ settings: { projects: { [dir]: { dev: {} } } } }));
+  expect(loadConfig({ ACCTV_HOME: home }).settings.projects).toEqual({});
+  expect(DEFAULT_SETTINGS.projects).toEqual({});
+
+  const ok = cloneDefaults();
+  (ok.settings as unknown as Record<string, unknown>).projects = { [dir]: p };
+  const r = validateSettings(ok);
+  expect(r.ok && r.settings.projects).toEqual({ [dir]: p });
+  const bad = cloneDefaults();
+  (bad.settings as unknown as Record<string, unknown>).projects = { [dir]: { ...p, defaultMode: 'x' } };
+  expect(errorsOf(bad).join('\n')).toMatch(/defaultMode/);
+  const missing = cloneDefaults() as { settings: Partial<typeof DEFAULT_SETTINGS> };
+  delete missing.settings.projects;
+  const m = validateSettings(missing);
+  expect(m.ok && m.settings.projects).toEqual({});
+});
+
+test('denyBash mặc định chặn đọc config.json của dashboard', () => {
+  const re = DEFAULT_SETTINGS.denyBash.map((s) => new RegExp(s, 'i'));
+  for (const c of ['cat C:\\Users\\a\\.acctv\\config.json', 'type ~/.acctv/config.json', 'node -e "require(\'fs\').readFileSync(\'.acctv//config.json\')"']) {
+    expect(re.some((x) => x.test(c)), c).toBe(true);
+  }
+  expect(re.some((x) => x.test('cat src/config.json'))).toBe(false);
+});
+
 test('validateSettings từ chối giá trị sai, lỗi nêu tên trường', () => {
   const a = cloneDefaults();
   a.settings.maxParallel = 0;

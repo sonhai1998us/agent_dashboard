@@ -7,6 +7,7 @@ import { inside } from '@/src/core/paths';
 import { agentMetrics, globalMetrics, type AgentMetrics } from '@/src/core/metrics';
 import { gitInfo, gitInit } from '@/src/git/git';
 import { handleMcp } from '@/src/orchestrator/mcp';
+import { maskProjects, unmaskProjects } from '@/src/preview/config';
 import { OrchestratorError } from '@/src/orchestrator/orchestrator';
 import type { AgentKind, Effort, Plan, Role, Ticket } from '@/src/tickets/model';
 import type { Core } from './core';
@@ -148,6 +149,11 @@ function intParam(v: string | null, def: number, min: number, max: number, msg: 
   return n;
 }
 
+/** Settings gửi cho UI: mật khẩu tài khoản test luôn bị che. */
+function publicSettings(core: Core) {
+  return { settings: { ...core.cfg.settings, projects: maskProjects(core.cfg.settings.projects) }, thresholds: core.cfg.thresholds };
+}
+
 function mustTicket(core: Core, id: string): Ticket {
   const t = core.tickets.getTicket(id);
   if (!t) throw new HttpError(404, `Không tìm thấy ticket ${id}`);
@@ -258,15 +264,18 @@ const ROUTES: Route[] = [
       return ok(await gitInfo(dir));
     },
   },
-  { method: 'GET', re: /^\/api\/settings$/, run: ({ core }) => ok({ settings: core.cfg.settings, thresholds: core.cfg.thresholds }) },
+  { method: 'GET', re: /^\/api\/settings$/, run: ({ core }) => ok(publicSettings(core)) },
   {
     method: 'PUT', re: /^\/api\/settings$/,
     run: async ({ req, core }) => {
       const v = validateSettings(await readJson(req));
       if (!v.ok) throw new HttpError(400, v.errors.join('\n'), { errors: v.errors });
-      saveSettings(core.cfg, v.settings, v.thresholds);
+      // mật khẩu hiện dạng che trên UI: giữ mật khẩu cũ khi người dùng không đổi
+      const u = unmaskProjects(v.settings.projects, core.cfg.settings.projects);
+      if (!u.ok) throw new HttpError(400, u.errors.join('\n'), { errors: u.errors });
+      saveSettings(core.cfg, { ...v.settings, projects: u.projects }, v.thresholds);
       core.reloadRunners();
-      return ok({ settings: core.cfg.settings, thresholds: core.cfg.thresholds });
+      return ok(publicSettings(core));
     },
   },
   { method: 'GET', re: /^\/api\/capabilities$/, run: ({ core }) => ok(core.capabilities()) },
