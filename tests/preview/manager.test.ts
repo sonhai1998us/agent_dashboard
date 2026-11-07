@@ -212,6 +212,33 @@ describe('PreviewManager', () => {
     expect(JSON.parse(meta.previewPids)).toEqual({});
   });
 
+  it('next dev biên dịch lạnh: timeout điều hướng 60s và làm nóng trang đăng nhập khi server vừa bật', async () => {
+    const warmed: string[] = [];
+    const opts: { navTimeoutMs?: number }[] = [];
+    const m = new PreviewManager({
+      settings: () => ({ projects: { [DIR]: project() } }), publish: () => {}, getMeta: () => undefined, setMeta: () => {},
+      makeServer: (d) => new FakeServer(d),
+      makeBrowser: (o) => {
+        opts.push(o);
+        return new FakeBrowser();
+      },
+      findBrowser: () => 'chrome.exe', fetchOk: async () => true, warm: async (u) => { warmed.push(u); },
+    });
+    await m.capture(req({ steps: [{ goto: '/' }] }));
+    await m.capture(req({ steps: [{ goto: '/' }] }));
+    expect(opts[0].navTimeoutMs).toBe(60000);
+    expect(warmed).toEqual(['http://localhost:3100/login']);
+    await m.stopAll();
+    const p = new PreviewManager({
+      settings: () => ({ projects: { [DIR]: project() } }), publish: () => {}, getMeta: () => undefined, setMeta: () => {},
+      makeServer: (d) => new FakeServer(d), makeBrowser: (o) => { opts.push(o); return new FakeBrowser(); },
+      findBrowser: () => 'chrome.exe', fetchOk: async () => true, warm: async () => {},
+    });
+    await p.capture({ ...req({ steps: [{ goto: '/' }] }), mode: 'prod' });
+    expect(opts.at(-1)!.navTimeoutMs).toBe(10000);
+    await p.stopAll();
+  });
+
   it('defaultMode theo cấu hình dự án', () => {
     expect(setup({ project: project({ defaultMode: 'prod' }) }).m.defaultMode(DIR)).toBe('prod');
     expect(setup({ project: null }).m.defaultMode(DIR)).toBe('dev');

@@ -19,6 +19,8 @@ export interface PreviewManagerDeps {
   makeBrowser?: (o: ConstructorParameters<typeof TicketBrowser>[0]) => BrowserLike;
   findBrowser?: () => string | null;
   fetchOk?: (url: string) => Promise<boolean>;
+  /** gọi trước một URL để next dev biên dịch sẵn (lỗi bị bỏ qua) */
+  warm?: (url: string) => Promise<void>;
   idleMs?: number;
 }
 
@@ -42,6 +44,8 @@ interface Entry {
 const MAX_ACTIVE = 2;
 const PIDS_KEY = 'previewPids';
 const IDLE_MS = 600_000;
+/** next dev biên dịch trang lần đầu khi được mở: trên Windows app vừa có thể mất 10–30s */
+const DEV_NAV_MS = 60_000;
 
 class CaptureError extends Error {
   constructor(public code: CaptureErrorCode, msg: string) {
@@ -55,6 +59,14 @@ async function defaultFetchOk(url: string): Promise<boolean> {
     return r.status < 500;
   } catch {
     return false;
+  }
+}
+
+async function defaultWarm(url: string): Promise<void> {
+  try {
+    await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(DEV_NAV_MS) });
+  } catch {
+    // chỉ để biên dịch sẵn
   }
 }
 
@@ -103,6 +115,7 @@ export class PreviewManager {
         throw new CaptureError('server_failed', `${err instanceof Error ? err.message : String(err)}${tail}`);
       }
       if (e.stopped) throw new CaptureError('busy_cancelled', 'server preview đã bị tắt');
+      if (info.startedNow && info.mode === 'dev' && e.project.login) await (this.d.warm ?? defaultWarm)(`http://localhost:${info.port}${e.project.login.path}`);
       const browser = await this.browserFor(e, info.port);
       let r: Omit<CaptureResult, 'server'>;
       try {
@@ -190,6 +203,7 @@ export class PreviewManager {
     if (!exe) throw new CaptureError('server_failed', 'Không tìm thấy Chrome hoặc Edge trên máy (đặt biến ACCTV_BROWSER nếu cài ở chỗ khác).');
     const b = (this.d.makeBrowser ?? ((o) => new TicketBrowser(o)))({
       executablePath: exe, origin: `http://localhost:${port}`, login: e.project.login, accounts: e.project.accounts,
+      navTimeoutMs: e.mode === 'dev' ? DEV_NAV_MS : LIMITS.stepMs,
       onPid: (pid) => {
         e.browserPids = [pid];
         if (!e.stopped) this.savePids(e.ticketId, [...e.serverPids, ...e.browserPids]);
