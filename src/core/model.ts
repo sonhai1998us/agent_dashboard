@@ -1,4 +1,5 @@
 import type { ManagedAgent, Ticket, WaitSpan } from '@/src/tickets/model';
+import type { PreviewStatus } from '@/src/preview/server';
 
 export type Source = 'claude' | 'codex';
 export type AgentStatus = 'running' | 'idle' | 'ended' | 'queued' | 'limited';
@@ -74,4 +75,5 @@ export type HubEvent =
   | { type: 'alert'; alert: Alert }
   | { type: 'ticket'; ticket: Ticket }
   | { type: 'managed'; managed: ManagedAgent }
-  | { type: 'wait'; wait: WaitSpan };
+  | { type: 'wait'; wait: WaitSpan }
+  | { type: 'preview'; ticketId: string; preview: PreviewStatus };
