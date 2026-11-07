@@ -4,3 +4,4 @@ node_modules/
 *.db
 *.tsbuildinfo
 next-env.d.ts
+.claude/worktrees/
