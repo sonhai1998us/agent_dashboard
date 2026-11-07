@@ -54,6 +54,28 @@ function locate(page: Page, t: Target): Locator {
   return page.locator(t);
 }
 
+/**
+ * Code chạy trong trang viết dạng chuỗi JS thuần: dashboard chạy bằng tsx, esbuild chèn `__name(...)`
+ * vào hàm được đặt tên trong callback của evaluate, và trang không có helper đó.
+ */
+export const OVERFLOW_SCRIPT = `function (max) {
+  var d = document.documentElement;
+  var cw = d.clientWidth;
+  var items = [];
+  var all = document.body ? Array.from(document.body.querySelectorAll('*')) : [];
+  for (var i = 0; i < all.length; i++) {
+    var el = all[i];
+    var r = el.getBoundingClientRect();
+    if (r.width > 0 && r.right > cw + 1) {
+      var id = el.id ? '#' + el.id : '';
+      var cls = typeof el.className === 'string' && el.className.trim() ? '.' + el.className.trim().split(/\\s+/).slice(0, 2).join('.') : '';
+      items.push({ selector: el.tagName.toLowerCase() + id + cls, width: Math.round(r.width), right: Math.round(r.right) });
+      if (items.length >= max) break;
+    }
+  }
+  return { scrollWidth: d.scrollWidth, clientWidth: cw, items: items };
+}`;
+
 const kindOf = (s: Step): string => Object.keys(s)[0];
 const errMsg = (e: unknown): string => (e instanceof Error ? e.message.split('\n')[0] : String(e)).slice(0, 300);
 
@@ -338,24 +360,7 @@ export class TicketBrowser {
         }
       }
       res.finalUrl = page.url();
-      res.overflow = await page.evaluate((max) => {
-        const d = document.documentElement;
-        const cw = d.clientWidth;
-        const items: { selector: string; width: number; right: number }[] = [];
-        const sel = (el: Element): string => {
-          const id = el.id ? `#${el.id}` : '';
-          const cls = typeof el.className === 'string' && el.className.trim() ? '.' + el.className.trim().split(/\s+/).slice(0, 2).join('.') : '';
-          return `${el.tagName.toLowerCase()}${id}${cls}`;
-        };
-        for (const el of Array.from(document.body?.querySelectorAll('*') ?? [])) {
-          const r = el.getBoundingClientRect();
-          if (r.width > 0 && r.right > cw + 1) {
-            items.push({ selector: sel(el), width: Math.round(r.width), right: Math.round(r.right) });
-            if (items.length >= max) break;
-          }
-        }
-        return { scrollWidth: d.scrollWidth, clientWidth: cw, items };
-      }, LIMITS.overflowItems).catch(() => null);
+      res.overflow = (await page.evaluate(`(${OVERFLOW_SCRIPT})(${LIMITS.overflowItems})`).catch(() => null)) as Result['overflow'];
     } finally {
       await page.close().catch(() => {});
     }
