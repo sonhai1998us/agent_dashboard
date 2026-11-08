@@ -271,6 +271,11 @@ const ROUTES: Route[] = [
     run: async ({ req, core, params: [id] }) => ok(await core.orchestrator.continueTicket(id, text(objBody(await readJson(req)).guidance, 'guidance', 5000))),
   },
   { method: 'POST', re: /^\/api\/tickets\/([^/]+)\/remove-worktree$/, run: async ({ core, params: [id] }) => ok(await core.orchestrator.removeWorktree(id)) },
+  { method: 'GET', re: /^\/api\/tickets\/([^/]+)\/merge-targets$/, run: async ({ core, params: [id] }) => ok(await core.orchestrator.mergeTargets(id)) },
+  {
+    method: 'POST', re: /^\/api\/tickets\/([^/]+)\/merge$/,
+    run: async ({ req, core, params: [id] }) => ok(await core.orchestrator.mergeTicket(id, text(objBody(await readJson(req)).target, 'target', 255))),
+  },
   {
     method: 'POST', re: /^\/api\/agents\/([^/]+)\/stop$/,
     run: async ({ core, params: [id] }) => {

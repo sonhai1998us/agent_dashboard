@@ -426,6 +426,52 @@ describe('điều khiển agent', () => {
     await expect(orch.removeWorktree(T)).rejects.toMatchObject({ status: 409 });
   });
 
+  it('merge nhánh ticket vào nhánh của người dùng: snapshot trước, ghi kết quả; xung đột để người dùng xử lý', async () => {
+    const { orch, tickets } = env;
+    g(env.repo, 'config', 'user.name', 'Người dùng');
+    g(env.repo, 'config', 'user.email', 'me@localhost');
+    const main = g(env.repo, 'symbolic-ref', '--short', 'HEAD').trim();
+    await expect(orch.mergeTicket('T-99', main)).rejects.toMatchObject({ status: 404 });
+    const T = await toRunning(env);
+    await expect(orch.mergeTicket(T, main)).rejects.toMatchObject({ status: 409 });
+    await orch.cancel(T);
+    await orch.idle();
+    const { branch, worktree: wt } = tickets.getTicket(T)!;
+
+    const targets = await orch.mergeTargets(T);
+    expect(targets).toEqual({ branches: [branch!, main].sort(), current: main, defaultTarget: main });
+
+    // phần dang dở trong worktree cũng được đưa vào
+    writeFileSync(join(wt!, 'src', 'moi.ts'), 'export const m = 1;\n');
+    const t1 = await orch.mergeTicket(T, main);
+    expect(g(env.repo, 'log', '-1', '--format=%s', branch!).trim()).toBe(`acctv: ${T} trước khi merge vào ${main}`);
+    expect(t1.merge).toMatchObject({ target: main, result: 'merged', fastForward: true, upToDate: false, head: g(env.repo, 'rev-parse', branch!).trim() });
+    expect(existsSync(join(env.repo, 'src', 'moi.ts'))).toBe(true);
+    expect(logs(env, T).some((l) => l.startsWith(`Đã merge ${branch} vào ${main}`))).toBe(true);
+    expect(t1.status).toBe('cancelled');
+
+    // cả hai bên sửa cùng file → xung đột nằm lại trong thư mục dự án
+    writeFileSync(join(env.repo, 'src', 'x.ts'), 'export const x = 2;\n');
+    g(env.repo, 'commit', '-qam', 'main sửa x');
+    writeFileSync(join(wt!, 'src', 'x.ts'), 'export const x = 3;\n');
+    const t2 = await orch.mergeTicket(T, main);
+    expect(t2.merge).toMatchObject({ target: main, result: 'conflict', conflicts: ['src/x.ts'] });
+    expect(g(env.repo, 'status', '--porcelain')).toContain('UU src/x.ts');
+    expect(logs(env, T).some((l) => l.includes('xung đột') && l.includes('src/x.ts'))).toBe(true);
+
+    // git từ chối → 400, giữ kết quả lần trước
+    await expect(orch.mergeTicket(T, main)).rejects.toMatchObject({ status: 400, message: expect.stringContaining('merge dở dang') });
+    await expect(orch.mergeTicket(T, 'khong-co')).rejects.toMatchObject({ status: 400 });
+    expect(tickets.getTicket(T)!.merge!.result).toBe('conflict');
+  });
+
+  it('merge: ticket chưa có nhánh → 409', async () => {
+    const t0 = await env.orch.createTicket({ title: 'x', description: 'y', dir: env.repo });
+    await env.orch.cancel(t0.id);
+    await expect(env.orch.mergeTicket(t0.id, 'main')).rejects.toMatchObject({ status: 409 });
+    await expect(env.orch.mergeTargets(t0.id)).rejects.toMatchObject({ status: 409 });
+  });
+
   it('huỷ khi Controller đang chờ: Controller stopped, đóng lượt chờ', async () => {
     const { orch, tickets } = env;
     const t0 = await orch.createTicket({ title: 'x', description: 'y', dir: env.repo });

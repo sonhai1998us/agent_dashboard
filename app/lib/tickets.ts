@@ -1,6 +1,6 @@
 import { isManagedId, type AgentInfo } from '@/src/core/model';
-import type { ManagedState, Role, RoleSpec, Ticket, WaitSpan } from '@/src/tickets/model';
-import { fmtDuration } from './format';
+import type { ManagedState, Role, RoleSpec, Ticket, TicketMerge, WaitSpan } from '@/src/tickets/model';
+import { fmtClock, fmtDuration } from './format';
 import type { PreviewStatus } from '@/src/preview/server';
 
 /** Chip trạng thái server preview của ticket. */
@@ -155,4 +155,15 @@ export function ticketDuration(t: Ticket, agents: AgentInfo[], waits: WaitSpan[]
     if (e > s) approvalMs += e - s;
   }
   return { totalMs: Math.max(0, end - t.createdAt), approvalMs, live };
+}
+
+/** Nút Merge: ticket không còn agent chạy (done, escalated, cancelled) và đã có nhánh. */
+export const canMerge = (t: Ticket): boolean => (t.status === 'done' || t.status === 'escalated' || t.status === 'cancelled') && !!t.branch;
+
+/** Dòng kết quả lần merge gần nhất trên header ticket. */
+export function mergeText(m: TicketMerge | null | undefined): { tone: 'ok' | 'crit'; text: string } | null {
+  if (!m) return null;
+  if (m.result === 'conflict') return { tone: 'crit', text: `merge vào ${m.target} bị xung đột · ${fmtClock(m.at)}` };
+  if (m.upToDate) return { tone: 'ok', text: `${m.target} đã có sẵn mọi thay đổi của nhánh ticket, không có gì mới để merge · ${fmtClock(m.at)}` };
+  return { tone: 'ok', text: `đã merge vào ${m.target} @ ${m.head.slice(0, 7)}${m.fastForward ? ' (fast-forward)' : ''} · ${fmtClock(m.at)}` };
 }

@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync, readFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { gitInfo, createWorktree, snapshotCommit, diffStat, removeWorktree, gitInit, worktreePath, uniqueBranch, worktreeChanges, GIT_TIMEOUT_MS } from '@/src/git/git';
+import { gitInfo, createWorktree, snapshotCommit, diffStat, removeWorktree, gitInit, worktreePath, uniqueBranch, worktreeChanges, GIT_TIMEOUT_MS, listBranches, mergeBranch } from '@/src/git/git';
 
 const g = (dir: string, ...a: string[]) => execFileSync('git', ['-C', dir, ...a], { encoding: 'utf8' });
 
@@ -136,5 +136,100 @@ describe('git helpers', () => {
     mkdirSync(join(d, 'ignored'));
     writeFileSync(join(d, 'ignored', 'x.txt'), 'x');
     expect((await worktreeChanges(d)).sort()).toEqual(['gone.txt', 'keep.txt', 'src/mới/tệp a.ts']);
+  });
+});
+
+describe('merge nhánh ticket vào nhánh của người dùng', () => {
+  let n = 0;
+  /** repo có main (a.txt) và nhánh ticket acctv/T-1 thêm b.txt; đang đứng ở main */
+  const mkRepo = (): string => {
+    const r = join(root, `merge-${++n}`);
+    mkdirSync(r);
+    g(r, 'init', '-q', '-b', 'main');
+    g(r, 'config', 'core.autocrlf', 'false');
+    g(r, 'config', 'user.name', 'Người dùng');
+    g(r, 'config', 'user.email', 'me@localhost');
+    writeFileSync(join(r, 'a.txt'), 'a\n');
+    g(r, 'add', '-A');
+    g(r, 'commit', '-q', '-m', 'first');
+    g(r, 'switch', '-q', '-c', 'acctv/T-1');
+    writeFileSync(join(r, 'b.txt'), 'b\n');
+    g(r, 'add', '-A');
+    g(r, 'commit', '-q', '-m', 'acctv: T-1 vòng 1');
+    g(r, 'switch', '-q', 'main');
+    return r;
+  };
+  const commitOn = (r: string, file: string, body: string, msg: string) => {
+    writeFileSync(join(r, file), body);
+    g(r, 'add', '-A');
+    g(r, 'commit', '-q', '-m', msg);
+  };
+  const head = (r: string) => g(r, 'rev-parse', 'HEAD').trim();
+  const hasMergeHead = (r: string) => { try { g(r, 'rev-parse', '-q', '--verify', 'MERGE_HEAD'); return true; } catch { return false; } };
+
+  it('listBranches: nhánh local đã sắp xếp và nhánh đang đứng', async () => {
+    const r = mkRepo();
+    g(r, 'branch', 'dev');
+    expect(await listBranches(r)).toEqual({ branches: ['acctv/T-1', 'dev', 'main'], current: 'main' });
+  });
+
+  it('fast-forward khi nhánh đích chưa đổi', async () => {
+    const r = mkRepo();
+    const tip = g(r, 'rev-parse', 'acctv/T-1').trim();
+    expect(await mergeBranch(r, 'main', 'acctv/T-1', 'Merge T-1: demo')).toEqual({ kind: 'merged', head: tip, fastForward: true, upToDate: false });
+    // merge lại: không có gì mới
+    expect(await mergeBranch(r, 'main', 'acctv/T-1', 'x')).toEqual({ kind: 'merged', head: tip, fastForward: false, upToDate: true });
+    expect(head(r)).toBe(tip);
+    expect(existsSync(join(r, 'b.txt'))).toBe(true);
+  });
+
+  it('đang đứng ở nhánh khác: chuyển sang nhánh đích rồi merge', async () => {
+    const r = mkRepo();
+    g(r, 'switch', '-q', '-c', 'dev');
+    const res = await mergeBranch(r, 'main', 'acctv/T-1', 'Merge T-1: demo');
+    expect(res.kind).toBe('merged');
+    expect(g(r, 'symbolic-ref', '--short', 'HEAD').trim()).toBe('main');
+    expect(g(r, 'rev-parse', 'main').trim()).toBe(g(r, 'rev-parse', 'acctv/T-1').trim());
+  });
+
+  it('nhánh đích đã có commit mới: tạo merge commit bằng tên git của người dùng', async () => {
+    const r = mkRepo();
+    commitOn(r, 'c.txt', 'c\n', 'việc khác trên main');
+    const res = await mergeBranch(r, 'main', 'acctv/T-1', 'Merge T-1: demo');
+    expect(res).toMatchObject({ kind: 'merged', fastForward: false, upToDate: false });
+    expect(g(r, 'log', '-1', '--format=%s|%an|%P').trim()).toMatch(/^Merge T-1: demo\|Người dùng\|\w+ \w+$/);
+    expect(existsSync(join(r, 'b.txt')) && existsSync(join(r, 'c.txt'))).toBe(true);
+  });
+
+  it('xung đột: để nguyên merge dở cho người dùng, trả danh sách file', async () => {
+    const r = mkRepo();
+    g(r, 'switch', '-q', 'acctv/T-1');
+    commitOn(r, 'a.txt', 'từ ticket\n', 'ticket sửa a');
+    g(r, 'switch', '-q', 'main');
+    commitOn(r, 'a.txt', 'từ main\n', 'main sửa a');
+    const res = await mergeBranch(r, 'main', 'acctv/T-1', 'Merge T-1: demo');
+    expect(res).toEqual({ kind: 'conflict', conflicts: ['a.txt'] });
+    expect(hasMergeHead(r)).toBe(true);
+    expect(readFileSync(join(r, 'a.txt'), 'utf8')).toContain('>>>>>>> acctv/T-1');
+    // merge dở dang → lần sau bị từ chối, không đụng gì thêm
+    await expect(mergeBranch(r, 'main', 'acctv/T-1', 'x')).rejects.toThrow(/merge dở dang/);
+  });
+
+  it('git từ chối (thay đổi chưa commit sẽ bị ghi đè): báo lỗi, không đổi gì', async () => {
+    const r = mkRepo();
+    commitOn(r, 'c.txt', 'c\n', 'việc khác trên main');
+    writeFileSync(join(r, 'b.txt'), 'đang sửa dở\n');
+    const before = head(r);
+    await expect(mergeBranch(r, 'main', 'acctv/T-1', 'Merge T-1: demo')).rejects.toThrow(/b\.txt/);
+    expect(head(r)).toBe(before);
+    expect(hasMergeHead(r)).toBe(false);
+    expect(readFileSync(join(r, 'b.txt'), 'utf8')).toBe('đang sửa dở\n');
+  });
+
+  it('nhánh đích không tồn tại hoặc tên không hợp lệ', async () => {
+    const r = mkRepo();
+    await expect(mergeBranch(r, 'khong-co', 'acctv/T-1', 'x')).rejects.toThrow(/khong-co/);
+    await expect(mergeBranch(r, '-main', 'acctv/T-1', 'x')).rejects.toThrow(/không hợp lệ/);
+    expect(g(r, 'symbolic-ref', '--short', 'HEAD').trim()).toBe('main');
   });
 });

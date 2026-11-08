@@ -124,6 +124,7 @@ export class Orchestrator {
   private bg = new Set<Promise<void>>();
   private alerted = new Set<string>();
   private removing = new Set<string>();
+  private merging = new Set<string>();
   private recovered = false;
   /** agentId → id của khoảng `startup` đang mở (đóng khi tiến trình gửi về dòng đầu tiên hoặc kết thúc). */
   private startups = new Map<string, string>();
@@ -159,7 +160,7 @@ export class Orchestrator {
       id, seq: Number(id.slice(2)), title: input.title, description: input.description, dir, status: 'draft',
       overrides: input.overrides ?? {}, plan: null, feedback: null, round: 0, maxRounds: this.settings.maxRounds,
       controllerSessionId: this.newSessionId(), branch: null, worktree: null, baseRef: null, pendingWait: null,
-      report: null, diffStat: null, createdAt: now, updatedAt: now,
+      report: null, diffStat: null, merge: null, createdAt: now, updatedAt: now,
     };
     this.deps.tickets.createTicket(t);
     this.deps.hub.publish({ type: 'ticket', ticket: t });
@@ -262,6 +263,7 @@ export class Orchestrator {
     if (!ENDED_TICKET.includes(t.status)) throw new OrchestratorError(409, 'Chỉ xoá worktree khi ticket đã xong, escalated hoặc đã huỷ');
     const wt = t.worktree;
     if (!wt || this.removing.has(ticketId)) throw new OrchestratorError(409, 'Ticket không có worktree');
+    if (this.merging.has(ticketId)) throw new OrchestratorError(409, 'Đang merge nhánh ticket; thử lại sau');
     if (this.liveWorkers(ticketId).length) throw new OrchestratorError(409, 'Còn agent đang chạy trong worktree');
     this.removing.add(ticketId);
     try {
@@ -283,6 +285,61 @@ export class Orchestrator {
     }
     this.log(ticketId, `Đã xoá worktree ${wt}; nhánh ${t.branch} giữ nguyên`);
     return this.save(ticketId, { worktree: null });
+  }
+
+  /** Nhánh đích cho nút Merge: nhánh local của dự án; mặc định main, không có thì nhánh thư mục đang đứng. */
+  async mergeTargets(ticketId: string): Promise<{ branches: string[]; current: string | null; defaultTarget: string | null }> {
+    const t = this.mustTicket(ticketId);
+    if (!t.branch) throw new OrchestratorError(409, 'Ticket chưa có nhánh');
+    let list: { branches: string[]; current: string | null };
+    try {
+      list = await this.deps.git.listBranches(t.dir);
+    } catch (e) {
+      throw new OrchestratorError(400, `Không đọc được nhánh của ${t.dir}: ${errMsg(e)}`);
+    }
+    const branches = list.branches.filter((b) => b !== t.branch);
+    const defaultTarget = branches.includes('main') ? 'main' : list.current && branches.includes(list.current) ? list.current : branches[0] ?? null;
+    return { branches: list.branches, current: list.current, defaultTarget };
+  }
+
+  /**
+   * Merge nhánh ticket vào `target` ngay trong thư mục dự án của người dùng. Phần dang dở trong worktree được snapshot trước.
+   * Xung đột không phải lỗi: merge dở được để nguyên cho người dùng xử lý, ticket ghi lại danh sách file.
+   */
+  async mergeTicket(ticketId: string, target: string): Promise<Ticket> {
+    const t = this.mustTicket(ticketId);
+    if (!ENDED_TICKET.includes(t.status)) throw new OrchestratorError(409, 'Chỉ merge khi ticket đã xong, escalated hoặc đã huỷ');
+    if (!t.branch) throw new OrchestratorError(409, 'Ticket chưa có nhánh');
+    const to = isStr(target) ? target.trim() : '';
+    if (!to) throw new OrchestratorError(400, 'Chưa chọn nhánh đích');
+    if (to === t.branch) throw new OrchestratorError(400, 'Nhánh đích trùng nhánh ticket');
+    if (this.merging.has(ticketId) || this.removing.has(ticketId)) throw new OrchestratorError(409, 'Ticket đang merge hoặc xoá worktree; thử lại sau');
+    if (this.liveWorkers(ticketId).length) throw new OrchestratorError(409, 'Còn agent đang chạy trong worktree');
+    this.merging.add(ticketId);
+    try {
+      if (t.worktree && !(await this.snapshot(ticketId, t.worktree, `acctv: ${ticketId} trước khi merge vào ${to}`, 'Snapshot trước khi merge'))) {
+        const dirty = await this.deps.git.gitInfo(t.worktree).then((i) => i.dirty, () => true);
+        if (dirty) throw new OrchestratorError(409, 'Không commit được snapshot; worktree còn thay đổi chưa lưu. Xử lý rồi thử lại.');
+      }
+      let res: Awaited<ReturnType<typeof this.deps.git.mergeBranch>>;
+      try {
+        res = await this.deps.git.mergeBranch(t.dir, to, t.branch, `Merge ${ticketId}: ${t.title}`);
+      } catch (e) {
+        this.log(ticketId, `Không merge được ${t.branch} vào ${to}: ${errMsg(e)}`);
+        throw new OrchestratorError(400, `Không merge được vào ${to}: ${errMsg(e)}`);
+      }
+      const at = this.now();
+      if (res.kind === 'conflict') {
+        this.log(ticketId, `Merge ${t.branch} vào ${to} bị xung đột (${res.conflicts.join(', ')}); sửa trong ${t.dir} rồi commit`);
+        return this.save(ticketId, { merge: { target: to, at, result: 'conflict', conflicts: res.conflicts } });
+      }
+      this.log(ticketId, res.upToDate
+        ? `Merge ${t.branch} vào ${to}: ${to} đã có sẵn mọi thay đổi, không có gì mới`
+        : `Đã merge ${t.branch} vào ${to} @ ${res.head.slice(0, 7)}${res.fastForward ? ' (fast-forward)' : ''}`);
+      return this.save(ticketId, { merge: { target: to, at, result: 'merged', head: res.head, fastForward: res.fastForward, upToDate: res.upToDate } });
+    } finally {
+      this.merging.delete(ticketId);
+    }
   }
 
   /** Gọi một lần khi server khởi động: agent đang chạy dở → interrupted, rồi gọi lại Controller nơi cần. */

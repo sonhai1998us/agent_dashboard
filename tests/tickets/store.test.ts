@@ -20,7 +20,7 @@ const ticket = (over: Partial<Ticket> = {}): Ticket => ({
     },
   },
   feedback: null, round: 1, maxRounds: 3, controllerSessionId: 'sid-c', branch: 'acctv/t-1', worktree: 'w', baseRef: 'abc',
-  pendingWait: ['acctv:T-1:dev-1'], report: null, diffStat: null, createdAt: 1000, updatedAt: 1000, ...over,
+  pendingWait: ['acctv:T-1:dev-1'], report: null, diffStat: null, merge: null, createdAt: 1000, updatedAt: 1000, ...over,
 });
 
 const managed = (over: Partial<ManagedAgent> = {}): ManagedAgent => ({

@@ -2,7 +2,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { postJson, useLive } from '../lib/liveStore';
-import { previewLabel, reportBlocks, statusAction, ticketDuration, ticketStatusText, type Inline } from '../lib/tickets';
+import { canMerge, mergeText, previewLabel, reportBlocks, statusAction, ticketDuration, ticketStatusText, type Inline } from '../lib/tickets';
 import { fmtDuration } from '../lib/format';
 import type { Ticket } from '@/src/tickets/model';
 import styles from './TicketHeader.module.css';
@@ -57,9 +57,12 @@ export default function TicketHeader() {
   const [guiding, setGuiding] = useState(false);
   const [guidance, setGuidance] = useState('');
   const [copied, setCopied] = useState<string | null>(null);
+  const [mergeOpen, setMergeOpen] = useState(false);
+  const [targets, setTargets] = useState<string[] | null>(null);
+  const [target, setTarget] = useState('');
   const reportRef = useRef<HTMLElement>(null);
 
-  useEffect(() => { setError(null); setGuiding(false); setGuidance(''); }, [id]);
+  useEffect(() => { setError(null); setGuiding(false); setGuidance(''); setMergeOpen(false); setTargets(null); }, [id]);
   if (!t) return null;
 
   const st = ticketStatusText(t);
@@ -79,6 +82,18 @@ export default function TicketHeader() {
     catch (e) { setError(e instanceof Error ? e.message : String(e)); }
     finally { setBusy(false); }
   };
+  const openMerge = async () => {
+    setMergeOpen(true); setTargets(null); setError(null);
+    try {
+      const r = await fetch(`/api/tickets/${t.id}/merge-targets`);
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error((j as { error?: string }).error ?? `HTTP ${r.status}`);
+      const m = j as { branches: string[]; defaultTarget: string | null };
+      setTargets(m.branches.filter((b) => b !== t.branch));
+      setTarget(m.defaultTarget ?? '');
+    } catch (e) { setMergeOpen(false); setError(e instanceof Error ? e.message : String(e)); }
+  };
+  const merged = mergeText(t.merge);
   const copy = (key: string, text: string) => {
     void navigator.clipboard?.writeText(text).then(() => { setCopied(key); setTimeout(() => setCopied(null), 1500); }).catch(() => {});
   };
@@ -117,6 +132,9 @@ export default function TicketHeader() {
               onClick={() => { if (confirm(`Huỷ ticket ${t.id}? Các agent đang chạy sẽ bị dừng, worktree được giữ lại.`)) void act('cancel', {}); }}
             >Huỷ ticket</button>
           )}
+          {canMerge(t) && !mergeOpen && (
+            <button type="button" className={styles.btn} disabled={busy} onClick={() => void openMerge()}>Merge vào nhánh…</button>
+          )}
           {removable && (
             <button
               type="button" className={styles.btn} disabled={busy}
@@ -134,6 +152,41 @@ export default function TicketHeader() {
             <span>worktree {t.worktree} <button type="button" className={styles.copy} aria-label="Sao chép đường dẫn worktree" onClick={() => copy('w', t.worktree!)}>{copied === 'w' ? 'đã chép' : 'chép'}</button></span>
           )}
         </div>
+      )}
+      {merged && t.merge && (
+        <div className={styles.merge} data-tone={merged.tone} role={t.merge.result === 'conflict' ? 'status' : undefined}>
+          <span className="mono">{merged.text}</span>
+          {t.merge.result === 'conflict' && (
+            <>
+              <div>Sửa các file sau trong <code className="mono">{t.dir}</code> rồi commit (hoặc <code className="mono">git merge --abort</code> để huỷ):</div>
+              <ul className={`${styles.files} mono`}>{t.merge.conflicts.map((f) => <li key={f}>{f}</li>)}</ul>
+            </>
+          )}
+        </div>
+      )}
+      {mergeOpen && (
+        <form
+          className={styles.mergeForm}
+          onSubmit={(e) => { e.preventDefault(); if (target) void act('merge', { target }, () => setMergeOpen(false)); }}
+        >
+          {targets === null ? <span className={styles.dur}>đang đọc nhánh…</span> : targets.length === 0 ? (
+            <span className={styles.dur}>Dự án không có nhánh nào khác để merge vào.</span>
+          ) : (
+            <>
+              <label className={styles.mergeLabel}>
+                Merge <code className="mono">{t.branch}</code> vào
+                <select className={styles.select} value={target} onChange={(e) => setTarget(e.target.value)} aria-label="Nhánh đích">
+                  {targets.map((b) => <option key={b} value={b}>{b}</option>)}
+                </select>
+              </label>
+              <span className={styles.hint}>Chạy trong <code className="mono">{t.dir}</code>. Phần dang dở trong worktree được commit trước. Có xung đột thì để nguyên cho bạn xử lý.</span>
+            </>
+          )}
+          <span className={styles.actions}>
+            <button type="submit" className={styles.btn} disabled={busy || !target || !targets?.length}>{busy ? 'Đang merge…' : 'Merge'}</button>
+            <button type="button" className={styles.btn} onClick={() => setMergeOpen(false)}>Đóng</button>
+          </span>
+        </form>
       )}
       {t.status === 'done' && t.diffStat && <pre className={`${styles.diff} mono`}>{t.diffStat}</pre>}
       {t.status === 'escalated' && (

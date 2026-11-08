@@ -2,7 +2,7 @@ import { describe, expect, test } from 'vitest';
 import type { AgentInfo } from '@/src/core/model';
 import type { Ticket } from '@/src/tickets/model';
 import type { WaitSpan } from '@/src/tickets/model';
-import { agentWorkMs, ticketDuration, controllerIdOf, isExternal, isStartingUp, layoutWaits, managedStateText, replayRange, reportBlocks, roleOverrides, statusAction, ticketStatusText } from '@/app/lib/tickets';
+import { canMerge, mergeText, agentWorkMs, ticketDuration, controllerIdOf, isExternal, isStartingUp, layoutWaits, managedStateText, replayRange, reportBlocks, roleOverrides, statusAction, ticketStatusText } from '@/app/lib/tickets';
 
 const t = (o: Partial<Ticket>): Ticket => ({ id: 'T-1', status: 'draft', round: 0, maxRounds: 3, ...o } as Ticket);
 
@@ -151,5 +151,25 @@ describe('thời gian ticket và subagent', () => {
     expect(ticketDuration(tk('awaiting_approval'), [], waits, 121_000)).toEqual({ totalMs: 120_000, approvalMs: 60_000, live: true });
     // chưa có agent và đã huỷ: dùng updatedAt
     expect(ticketDuration(tk('cancelled'), [], [], 9e12).totalMs).toBe(98_000);
+  });
+});
+
+describe('merge', () => {
+  test('canMerge: ticket đã dừng và có nhánh', () => {
+    for (const status of ['done', 'escalated', 'cancelled'] as const) expect(canMerge(t({ status, branch: 'acctv/T-1' }))).toBe(true);
+    for (const status of ['draft', 'planning', 'awaiting_approval', 'running'] as const) expect(canMerge(t({ status, branch: 'acctv/T-1' }))).toBe(false);
+    expect(canMerge(t({ status: 'done', branch: null }))).toBe(false);
+  });
+  test('mergeText', () => {
+    const at = new Date(2026, 10, 8, 9, 5, 7).getTime();
+    expect(mergeText(null)).toBeNull();
+    expect(mergeText({ target: 'main', at, result: 'merged', head: 'abcdef1234', fastForward: true, upToDate: false }))
+      .toEqual({ tone: 'ok', text: 'đã merge vào main @ abcdef1 (fast-forward) · 09:05:07' });
+    expect(mergeText({ target: 'dev', at, result: 'merged', head: 'abcdef1234', fastForward: false, upToDate: false }))
+      .toEqual({ tone: 'ok', text: 'đã merge vào dev @ abcdef1 · 09:05:07' });
+    expect(mergeText({ target: 'main', at, result: 'merged', head: 'abcdef1234', fastForward: false, upToDate: true })!.text)
+      .toBe('main đã có sẵn mọi thay đổi của nhánh ticket, không có gì mới để merge · 09:05:07');
+    expect(mergeText({ target: 'main', at, result: 'conflict', conflicts: ['a.ts'] }))
+      .toEqual({ tone: 'crit', text: 'merge vào main bị xung đột · 09:05:07' });
   });
 });

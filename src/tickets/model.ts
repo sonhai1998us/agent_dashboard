@@ -29,6 +29,11 @@ export interface Plan {
   preview?: { mode: 'dev' | 'prod' };
 }
 
+/** merged: đã vào nhánh đích tại `head`. conflict: merge dở trong thư mục dự án, chờ người dùng xử lý `conflicts`. */
+export type TicketMerge =
+  | { target: string; at: number; result: 'merged'; head: string; fastForward: boolean; upToDate: boolean }
+  | { target: string; at: number; result: 'conflict'; conflicts: string[] };
+
 export interface Ticket {
   id: string;
   seq: number;
@@ -48,6 +53,8 @@ export interface Ticket {
   pendingWait: string[] | null;
   report: string | null;
   diffStat: string | null;
+  /** Lần merge nhánh ticket vào nhánh của người dùng gần nhất (nút Merge). */
+  merge: TicketMerge | null;
   createdAt: number;
   updatedAt: number;
 }

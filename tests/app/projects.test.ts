@@ -13,7 +13,7 @@ function ag(id: string, o: Partial<AgentInfo> = {}): AgentInfo {
 function tk(id: string, dir: string, o: Partial<Ticket> = {}): Ticket {
   return {
     id, seq: 1, title: id, description: '', dir, status: 'done', overrides: {}, plan: null, feedback: null, round: 0, maxRounds: 3,
-    controllerSessionId: '', branch: null, worktree: null, baseRef: null, pendingWait: null, report: null, diffStat: null,
+    controllerSessionId: '', branch: null, worktree: null, baseRef: null, pendingWait: null, report: null, diffStat: null, merge: null,
     createdAt: 0, updatedAt: 0, ...o,
   } as Ticket;
 }
