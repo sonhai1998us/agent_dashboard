@@ -166,6 +166,10 @@ describe('turn', () => {
     }
     expect(systemPrompt('controller', { worktree: 'wt', files: [], denyBash: [] })).not.toContain('Thư mục nháp');
   });
+  it('video/ảnh nhiều bản: làm 1 bản mẫu, người dùng duyệt rồi mới làm tiếp', () => {
+    expect(systemPrompt('controller', { worktree: 'wt', files: [], denyBash: [] })).toMatch(/chỉ làm 1 bản mẫu trước; ghi trong task rằng Dev dừng lại xin người dùng duyệt bản mẫu/);
+    expect(systemPrompt('dev', { worktree: 'wt', files: ['a.ts'], denyBash: [] })).toMatch(/render 1 bản mẫu trước, rồi gọi request_user_action \(title "Duyệt bản mẫu"/);
+  });
   it('Dev được dặn không cho python đọc stdin', () => {
     expect(systemPrompt('dev', { worktree: 'wt', files: ['a.ts'], denyBash: [] })).toMatch(/python trên máy này treo khi stdin rỗng/);
   });
