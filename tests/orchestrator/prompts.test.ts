@@ -152,6 +152,9 @@ describe('turn', () => {
     const p = systemPrompt('dev', { worktree: 'wt', files: ['a.ts'], denyBash: [] });
     expect(p).toMatch(/bằng Edit hoặc Write, không ghi file bằng lệnh Bash/);
   });
+  it('Dev được dặn không cho python đọc stdin', () => {
+    expect(systemPrompt('dev', { worktree: 'wt', files: ['a.ts'], denyBash: [] })).toMatch(/python trên máy này treo khi stdin rỗng/);
+  });
 });
 
 describe('lệnh nền trong prompt worker', () => {

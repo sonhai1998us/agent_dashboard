@@ -241,6 +241,54 @@ describe('Bash chạy nền bị chặn cho worker', () => {
   });
 });
 
+describe('python đọc script từ stdin hoặc mở REPL bị chặn (python 3.14 trên Windows treo khi stdin rỗng)', () => {
+  const blocked = [
+    "python3 - <<'EOF' 2>/dev/null || node -e \"\nconsole.log(1)\n\"\nEOF",
+    'python -',
+    'python3 -u - < script.py',
+    'python3 <<EOF\nprint(1)\nEOF',
+    'python < x.py',
+    'cat x.py | python3',
+    'cat x.py | python3 -',
+    'python',
+    'python3 -i',
+    'py',
+    'py -3 -',
+    'npm test && python3',
+    'C:/Python/python.exe -',
+    'python.exe',
+    'python3.14 -',
+    'FOO=1 python3 -',
+    'echo hi; python3 -',
+  ];
+  const allowed = [
+    'python3 script.py',
+    'python -c "print(1)"',
+    'python3 -m pytest -q',
+    'python3 --version',
+    'python3 -u tools/gen.py < input.txt',
+    'cat data.json | python3 -m json.tool',
+    'echo python',
+    'grep -r python src',
+    'npm run python-build',
+    'node -e "console.log(1)"',
+  ];
+  it.each(['dev', 'qc', 'controller'] as const)('%s: các dạng treo bị chặn kèm hướng dẫn', (role) => {
+    for (const command of blocked) {
+      const d = checkTool(mk(role), 'Bash', { command }, root);
+      expect(d, command).toMatchObject({ allow: false, scope: false });
+      expect((d as { reason: string }).reason, command).toMatch(/^\[acctv-guard\] python đọc script từ stdin/);
+    }
+  });
+  it('dev: các dạng có script, -c, -m vẫn chạy được', () => {
+    for (const command of allowed) expect(checkTool(mk('dev'), 'Bash', { command }, root).allow, command).toBe(true);
+  });
+  it('controller: PowerShell cũng bị chặn', () => {
+    expect(checkTool(mk('controller'), 'PowerShell', { command: 'python -' }, root).allow).toBe(false);
+    expect(checkTool(mk('controller'), 'PowerShell', { command: 'python -c "print(1)"' }, root).allow).toBe(true);
+  });
+});
+
 describe('checkTool: controller có quyền như người dùng', () => {
   const home = WIN ? String.raw`C:\Users\me\.acctv` : '/home/me/.acctv';
   const claude = WIN ? String.raw`C:\Users\me\.claude` : '/home/me/.claude';

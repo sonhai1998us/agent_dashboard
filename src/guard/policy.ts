@@ -100,7 +100,34 @@ export function readableRule(src: string): string {
 const CHAIN = /[;&|<>`\n\r]|\$\(|--output/i;
 const hasGit = (rel: string) => rel.split('/').some((seg) => cmp(seg) === '.git');
 
-/** Lệnh shell: chặn lệnh nền, lệnh quá dài và lệnh khớp denyBash. null = cho qua. */
+/**
+ * python/python3/python3.14/py ở vị trí đầu lệnh (đầu chuỗi, sau ; & | ( ` xuống dòng hay $(, bỏ qua gán biến FOO=1),
+ * kèm đường dẫn và .exe tuỳ ý.
+ */
+const PY_CMD = /(?:^|[;&|(`\n\r]|\$\()\s*(?:\w+=\S*\s+)*(?:[^\s;&|()`'"<>]*[\\/])?(?:python(?:\d+(?:\.\d+)?)?|py)(?:\.exe)?(?=$|[\s;&|)<`])/gi;
+const SEG_END = /[;&|)\n\r`]/;
+const PY_INFO = new Set(['-V', '-VV', '--version', '-h', '--help']);
+const PY_STDIN = 'python đọc script từ stdin hoặc mở REPL (python -, python <<EOF, … | python, python không đối số) bị chặn: '
+  + 'trên máy này python gặp stdin rỗng sẽ mở REPL và treo tới khi lệnh hết hạn. '
+  + 'Hãy ghi script bằng Write rồi chạy `python file.py`, dùng `python -c "…"`, hoặc dùng `node -e`.';
+
+/** Lệnh gọi python mà không có script, -c hay -m: python đọc stdin (heredoc rỗng vì quote nhiều dòng, pipe) hoặc mở REPL. */
+function pythonReadsStdin(cmd: string): boolean {
+  for (const m of cmd.matchAll(PY_CMD)) {
+    const rest = cmd.slice(m.index + m[0].length);
+    const end = rest.search(SEG_END);
+    const args = (end < 0 ? rest : rest.slice(0, end)).trim().split(/\s+/).filter(Boolean);
+    let runsScript = false;
+    for (const a of args) {
+      if (a === '-' || a === '-i' || a.startsWith('<')) break;
+      if (a === '-c' || a === '-m' || PY_INFO.has(a) || !a.startsWith('-')) { runsScript = true; break; }
+    }
+    if (!runsScript) return true;
+  }
+  return false;
+}
+
+/** Lệnh shell: chặn lệnh nền, lệnh quá dài, python đọc stdin và lệnh khớp denyBash. null = cho qua. */
 function shellDeny(p: GuardPolicy, input: unknown): GuardDecision | null {
   const cmd = strField(input, 'command');
   if (cmd === undefined) return deny('lệnh bị cấm (thiếu command)');
@@ -113,6 +140,7 @@ function shellDeny(p: GuardPolicy, input: unknown): GuardDecision | null {
   }
   // Chặn trước khi chạy regex: guard chạy đồng bộ trong server, lệnh khổng lồ không được làm treo event loop.
   if (cmd.length > MAX_COMMAND) return deny(`lệnh quá dài (> ${MAX_COMMAND} ký tự); hãy ghi nội dung bằng Write rồi chạy file`);
+  if (pythonReadsStdin(cmd)) return deny(PY_STDIN);
   for (const re of p.denyBash) if (re.test(cmd)) return deny(`lệnh bị cấm (${re.source})`);
   return null;
 }

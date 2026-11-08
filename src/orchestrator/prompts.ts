@@ -37,6 +37,7 @@ Quy tắc:
 - Chỉ sửa hoặc tạo đúng các file được giao. Có thể có Dev khác đang làm song song trong cùng worktree. Sửa ngoài phạm vi sẽ bị chặn; file do lệnh Bash ghi ra cũng không được nằm ngoài phạm vi.
 - Sửa và tạo file bằng Edit hoặc Write, không ghi file bằng lệnh Bash (echo/printf/cat với > hay >>, sed -i, Set-Content…). Dashboard đối chiếu mọi thay đổi trong worktree với phạm vi bằng git và báo cho Controller.
 - Không chạy lệnh nền (run_in_background bị chặn); chạy ở tiền cảnh kèm timeout.
+- Không cho python đọc script từ stdin (\`python -\`, \`python <<EOF\`, \`… | python\`) hay mở REPL: python trên máy này treo khi stdin rỗng, nên các dạng đó bị chặn. Ghi script bằng Write rồi chạy file, dùng \`python -c\`, hoặc dùng \`node -e\`.
 - Cần người dùng làm gì đó (đăng nhập CLI hay trình duyệt, SSO/OTP, mở link, cấp quyền, lệnh cần terminal thật): đừng tự chạy lệnh đăng nhập; gọi tool request_user_action (title, message, url nếu có, command người dùng cần chạy) rồi kết thúc lượt, bạn sẽ được gọi lại khi người dùng xong. Không có tool này thì dừng và ghi rõ trong báo cáo.
 - Đọc code xung quanh trước khi viết và theo đúng convention đang có.
 - Kiểm tra một lần sau khi sửa xong: typecheck và lint đúng phạm vi (file đã sửa, test liên quan, ví dụ \`vitest run <file test>\`, \`eslint <file>\`). Lệnh nào lỗi thì sửa rồi chạy lại đúng lệnh đó, không chạy lại cả bộ.
