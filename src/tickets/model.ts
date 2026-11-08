@@ -29,6 +29,13 @@ export interface Plan {
   preview?: { mode: 'dev' | 'prod' };
 }
 
+/** Ảnh góp ý (nút Góp ý để làm tiếp): giới hạn dùng chung cho server và giao diện. */
+export const FEEDBACK_IMAGES_MAX = 6;
+export const FEEDBACK_IMAGE_BYTES = 5 * 1024 * 1024;
+export const FEEDBACK_TEXT_MAX = 10_000;
+/** MIME → đuôi file khi lưu */
+export const FEEDBACK_EXT: Record<string, string> = { 'image/png': '.png', 'image/jpeg': '.jpg', 'image/webp': '.webp', 'image/gif': '.gif' };
+
 /** merged: đã vào nhánh đích tại `head`. conflict: merge dở trong thư mục dự án, chờ người dùng xử lý `conflicts`. */
 export type TicketMerge =
   | { target: string; at: number; result: 'merged'; head: string; fastForward: boolean; upToDate: boolean }

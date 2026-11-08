@@ -8,7 +8,11 @@ import { agentMetrics, globalMetrics, type AgentMetrics } from '@/src/core/metri
 import { gitInfo, gitInit } from '@/src/git/git';
 import { handleMcp } from '@/src/orchestrator/mcp';
 import { maskProjects, unmaskProjects } from '@/src/preview/config';
-import { OrchestratorError } from '@/src/orchestrator/orchestrator';
+import { OrchestratorError, type FeedbackImage } from '@/src/orchestrator/orchestrator';
+import { FEEDBACK_IMAGE_BYTES, FEEDBACK_IMAGES_MAX } from '@/src/tickets/model';
+
+/** Body góp ý: tối đa FEEDBACK_IMAGES_MAX ảnh base64 (×4/3) cộng phần chữ. */
+const FEEDBACK_BODY_MAX = Math.ceil(FEEDBACK_IMAGES_MAX * FEEDBACK_IMAGE_BYTES * 4 / 3) + 1_000_000;
 import type { AgentKind, Effort, Plan, Role, Ticket } from '@/src/tickets/model';
 import type { Core } from './core';
 
@@ -271,6 +275,23 @@ const ROUTES: Route[] = [
     run: async ({ req, core, params: [id] }) => ok(await core.orchestrator.continueTicket(id, text(objBody(await readJson(req)).guidance, 'guidance', 5000))),
   },
   { method: 'POST', re: /^\/api\/tickets\/([^/]+)\/remove-worktree$/, run: async ({ core, params: [id] }) => ok(await core.orchestrator.removeWorktree(id)) },
+  {
+    // góp ý cho ticket đã xong: { text, images: [{ name, type, data (base64) }] }
+    method: 'POST', re: /^\/api\/tickets\/([^/]+)\/feedback$/,
+    run: async ({ req, core, params: [id] }) => {
+      const b = objBody(await readJson(req, FEEDBACK_BODY_MAX));
+      if (b.text !== undefined && typeof b.text !== 'string') throw new HttpError(400, 'text phải là chuỗi');
+      const raw = b.images ?? [];
+      if (!Array.isArray(raw)) throw new HttpError(400, 'images phải là mảng');
+      if (raw.length > FEEDBACK_IMAGES_MAX) throw new HttpError(400, `Tối đa ${FEEDBACK_IMAGES_MAX} ảnh mỗi lần góp ý`);
+      const images: FeedbackImage[] = raw.map((im, i) => {
+        if (!isObj(im) || typeof im.type !== 'string' || typeof im.data !== 'string') throw new HttpError(400, `images[${i}] phải là { name, type, data }`);
+        const name = typeof im.name === 'string' && im.name.trim() ? im.name.trim().slice(0, 200) : `ảnh ${i + 1}`;
+        return { name, type: im.type, data: Buffer.from(im.data, 'base64') };
+      });
+      return ok(await core.orchestrator.feedback(id, (b.text as string | undefined) ?? '', images));
+    },
+  },
   { method: 'GET', re: /^\/api\/tickets\/([^/]+)\/merge-targets$/, run: async ({ core, params: [id] }) => ok(await core.orchestrator.mergeTargets(id)) },
   {
     method: 'POST', re: /^\/api\/tickets\/([^/]+)\/merge$/,

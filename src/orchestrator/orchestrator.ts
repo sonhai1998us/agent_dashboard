@@ -5,7 +5,7 @@ import type { Store } from '@/src/core/store';
 import type { Hub } from '@/src/core/hub';
 import { isManagedId, type AgentInfo, type Alert, type NormalizedEvent } from '@/src/core/model';
 import type { TicketStore } from '@/src/tickets/store';
-import { TERMINAL_STATES, type UserAction, type AgentKind, type ManagedAgent, type ManagedState, type Plan, type Role, type RoleSpec, type Ticket, type TicketStatus, type WaitSpan, type WorkRole } from '@/src/tickets/model';
+import { FEEDBACK_EXT, FEEDBACK_IMAGE_BYTES, FEEDBACK_IMAGES_MAX, FEEDBACK_TEXT_MAX, TERMINAL_STATES, type UserAction, type AgentKind, type ManagedAgent, type ManagedState, type Plan, type Role, type RoleSpec, type Ticket, type TicketStatus, type WaitSpan, type WorkRole } from '@/src/tickets/model';
 import { branchName, filesOverlap, transition, validatePlan, type TicketEvent } from '@/src/tickets/flow';
 import { CAPTURE_TOOL, checkTool, matchEntry, USER_ACTION_TOOL, type GuardPolicy } from '@/src/guard/policy';
 import type { PreviewManager } from '@/src/preview/manager';
@@ -13,7 +13,7 @@ import type { PreviewStatus } from '@/src/preview/server';
 import { resolveProject } from '@/src/preview/config';
 import { redact } from '@/src/preview/captureArgs';
 import { runShell } from '@/src/preview/dbReset';
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { inside } from '@/src/core/paths';
 import type { Runner, RunHandle, RunResult, RunSink, RunSpec } from '@/src/runner/types';
 import { USER_ACTION_LIMITS, type ToolImpl, type ToolResult } from './mcp';
@@ -29,6 +29,9 @@ export interface OrchestratorDeps {
 }
 
 const CAPTURE_ROLES: WorkRole[] = ['dev', 'designer', 'qc'];
+/** Ảnh chụp màn hình người dùng gửi kèm góp ý (nút Góp ý để làm tiếp). */
+export interface FeedbackImage { name: string; type: string; data: Buffer }
+
 const RESET_DB_MS = 300_000;
 /** File server preview (next dev/build) tự sinh trong worktree: không tính là thay đổi ngoài phạm vi. */
 const PREVIEW_GENERATED = new Set(['next-env.d.ts']);
@@ -188,6 +191,7 @@ export class Orchestrator {
     if (!plan) throw new OrchestratorError(409, 'Ticket chưa có kế hoạch');
     // chuyển trạng thái trước mọi await: lần duyệt đồng thời thứ hai nhận 409
     this.move(ticketId, 'approve', { plan });
+    if (t.branch) return this.approveAgain(t, plan);
     const wt = this.deps.git.worktreePath(this.deps.cfg.home, t.dir, ticketId);
     let branch: string;
     let baseRef: string;
@@ -210,6 +214,71 @@ export class Orchestrator {
     this.log(ticketId, `Người dùng duyệt kế hoạch; nhánh ${branch}`);
     this.runControllerTurn(ticketId, turn.approved(plan, wt));
     return this.mustTicket(ticketId);
+  }
+
+  /** Kế hoạch sửa sau góp ý: làm tiếp trên nhánh cũ; worktree đã bị xoá thì tạo lại từ nhánh. Kế hoạch mới có đủ số vòng mặc định. */
+  private async approveAgain(t: Ticket, plan: Plan): Promise<Ticket> {
+    const T = t.id;
+    const branch = t.branch!;
+    const wt = t.worktree ?? this.deps.git.worktreePath(this.deps.cfg.home, t.dir, T);
+    const fresh = !existsSync(wt);
+    if (fresh) {
+      try {
+        await this.deps.git.attachWorktree(t.dir, branch, wt);
+      } catch (e) {
+        if (this.mustTicket(T).status === 'running') this.save(T, { status: 'awaiting_approval', plan: t.plan });
+        this.log(T, `Không tạo lại được worktree: ${errMsg(e)}`);
+        throw new OrchestratorError(400, `Không tạo lại được worktree từ nhánh ${branch}: ${errMsg(e)}`);
+      }
+      this.log(T, `Đã tạo lại worktree ${wt} từ nhánh ${branch}`);
+    }
+    const maxRounds = t.round + this.settings.maxRounds;
+    this.save(T, { worktree: wt, maxRounds });
+    if (this.mustTicket(T).status !== 'running') return this.mustTicket(T);
+    this.closeWaits(controllerId(T));
+    this.log(T, `Người dùng duyệt kế hoạch sửa; làm tiếp trên nhánh ${branch} (tối đa ${maxRounds} vòng)`);
+    this.runControllerTurn(T, turn.approved(plan, wt, { again: true, fresh }));
+    return this.mustTicket(T);
+  }
+
+  /** Người dùng xem kết quả ticket đã xong, góp ý (chữ và/hoặc ảnh): Controller lập kế hoạch sửa để người dùng duyệt. */
+  async feedback(ticketId: string, text: string, images: FeedbackImage[]): Promise<Ticket> {
+    const t = this.mustTicket(ticketId);
+    if (t.status !== 'done') throw new OrchestratorError(409, 'Chỉ góp ý để làm tiếp khi ticket đã xong');
+    const body = isStr(text) ? text.trim() : '';
+    if (!body && !images.length) throw new OrchestratorError(400, 'Cần nhận xét hoặc ít nhất một ảnh');
+    if (body.length > FEEDBACK_TEXT_MAX) throw new OrchestratorError(400, `Nhận xét tối đa ${FEEDBACK_TEXT_MAX} ký tự`);
+    if (images.length > FEEDBACK_IMAGES_MAX) throw new OrchestratorError(400, `Tối đa ${FEEDBACK_IMAGES_MAX} ảnh mỗi lần góp ý`);
+    for (const im of images) {
+      if (!FEEDBACK_EXT[im.type]) throw new OrchestratorError(400, `Ảnh ${im.name}: chỉ nhận png, jpg, webp, gif`);
+      if (im.data.length > FEEDBACK_IMAGE_BYTES) throw new OrchestratorError(400, `Ảnh ${im.name} lớn hơn 5MB`);
+    }
+    if (this.merging.has(ticketId) || this.removing.has(ticketId)) throw new OrchestratorError(409, 'Ticket đang merge hoặc xoá worktree; thử lại sau');
+    const dir = this.feedbackDir(ticketId);
+    const stamp = this.now();
+    const paths: string[] = [];
+    try {
+      if (images.length) mkdirSync(dir, { recursive: true });
+      images.forEach((im, i) => {
+        const p = path.join(dir, `${stamp}-${i + 1}${FEEDBACK_EXT[im.type]}`);
+        writeFileSync(p, im.data);
+        paths.push(p);
+      });
+    } catch (e) {
+      throw new OrchestratorError(400, `Không lưu được ảnh góp ý: ${errMsg(e)}`);
+    }
+    this.move(ticketId, 'feedback', { pendingWait: null });
+    const st = this.ctrl(ticketId);
+    st.nudges = 0;
+    st.retries = 0;
+    this.closeWaits(controllerId(ticketId));
+    this.log(ticketId, `Người dùng góp ý để làm tiếp${images.length ? ` (${images.length} ảnh)` : ''}`);
+    this.runControllerTurn(ticketId, turn.feedback(body, paths, dir));
+    return this.mustTicket(ticketId);
+  }
+
+  private feedbackDir(T: string): string {
+    return path.join(this.deps.cfg.home, 'runs', T, 'feedback');
   }
 
   async revise(ticketId: string, feedback: string): Promise<Ticket> {
@@ -959,8 +1028,8 @@ export class Orchestrator {
     const capture = this.hasCapture(m.runner, role);
     const shots = this.capturesDir(id);
     if (capture) mkdirSync(shots, { recursive: true });
-    // agent chỉ đọc được ảnh capture của chính nó
-    this.guards.set(id, { token, policy: this.policy(role, wt, capture ? [shots] : [], m.files) });
+    // agent chỉ đọc được ảnh capture của chính nó, cùng ảnh góp ý của người dùng cho ticket
+    this.guards.set(id, { token, policy: this.policy(role, wt, [...(capture ? [shots] : []), this.feedbackDir(t.id)], m.files) });
     const spec: RunSpec = {
       agentId: id, ticketId: t.id, role, agent: m.runner, label: `${ROLE_LABEL[role]}-${m.ordinal}`, parentId: controllerId(t.id),
       cwd: wt, model: m.model, effort: m.effort, prompt: workerPrompt(m, t.plan, wt),

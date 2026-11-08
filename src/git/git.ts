@@ -133,6 +133,12 @@ export async function mergeBranch(repo: string, target: string, branch: string, 
   return { kind: 'merged', head, fastForward: head === tip && head !== before, upToDate: head === before };
 }
 
+/** Tạo lại worktree cho nhánh đã có (worktree cũ đã bị xoá). */
+export async function attachWorktree(repo: string, branch: string, wtPath: string): Promise<void> {
+  await git(repo, ['worktree', 'prune']);
+  await git(repo, ['worktree', 'add', wtPath, branch]);
+}
+
 export async function removeWorktree(repo: string, wtPath: string): Promise<void> {
   await git(repo, ['worktree', 'remove', '--force', wtPath]);
 }

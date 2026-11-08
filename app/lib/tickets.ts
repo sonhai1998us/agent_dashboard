@@ -1,5 +1,5 @@
 import { isManagedId, type AgentInfo } from '@/src/core/model';
-import type { ManagedState, Role, RoleSpec, Ticket, TicketMerge, WaitSpan } from '@/src/tickets/model';
+import { FEEDBACK_EXT, FEEDBACK_IMAGE_BYTES, FEEDBACK_IMAGES_MAX, type ManagedState, type Role, type RoleSpec, type Ticket, type TicketMerge, type WaitSpan } from '@/src/tickets/model';
 import { fmtClock, fmtDuration } from './format';
 import type { PreviewStatus } from '@/src/preview/server';
 
@@ -166,4 +166,15 @@ export function mergeText(m: TicketMerge | null | undefined): { tone: 'ok' | 'cr
   if (m.result === 'conflict') return { tone: 'crit', text: `merge vào ${m.target} bị xung đột · ${fmtClock(m.at)}` };
   if (m.upToDate) return { tone: 'ok', text: `${m.target} đã có sẵn mọi thay đổi của nhánh ticket, không có gì mới để merge · ${fmtClock(m.at)}` };
   return { tone: 'ok', text: `đã merge vào ${m.target} @ ${m.head.slice(0, 7)}${m.fastForward ? ' (fast-forward)' : ''} · ${fmtClock(m.at)}` };
+}
+
+/** Nút Góp ý để làm tiếp: chỉ ticket đã xong. */
+export const canFeedback = (t: Ticket): boolean => t.status === 'done';
+
+/** Lý do không nhận ảnh góp ý (sai định dạng, quá lớn, quá số lượng); null = nhận. `count`: số ảnh đã có. */
+export function feedbackFileError(f: { name: string; type: string; size: number }, count: number): string | null {
+  if (count >= FEEDBACK_IMAGES_MAX) return `Tối đa ${FEEDBACK_IMAGES_MAX} ảnh mỗi lần góp ý`;
+  if (!FEEDBACK_EXT[f.type]) return `${f.name}: chỉ nhận ảnh png, jpg, webp, gif`;
+  if (f.size > FEEDBACK_IMAGE_BYTES) return `${f.name}: ảnh lớn hơn 5MB`;
+  return null;
 }

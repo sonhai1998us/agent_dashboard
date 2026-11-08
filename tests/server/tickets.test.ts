@@ -142,6 +142,12 @@ test('duyệt hai lần song song → một 200, một 409; revise/continue/canc
   expect((await post('/api/tickets/T-1/revise', { feedback: 'sửa' })).status).toBe(409);
   expect((await post('/api/tickets/T-1/continue', { guidance: 'tiếp' })).status).toBe(409);
   expect((await post('/api/tickets/T-1/continue', { guidance: 'x'.repeat(5001) })).status).toBe(400);
+  // góp ý: chỉ khi ticket đã xong; body sai dạng → 400
+  const fb = await post('/api/tickets/T-1/feedback', { text: 'lệch', images: [{ name: 'a.png', type: 'image/png', data: Buffer.from('x').toString('base64') }] });
+  expect(fb.status).toBe(409);
+  expect(fb.json.error).toMatch(/đã xong/);
+  expect((await post('/api/tickets/T-1/feedback', { text: 'x', images: 'a.png' })).status).toBe(400);
+  expect((await post('/api/tickets/T-1/feedback', { text: 'x', images: [{ name: 'a.png' }] })).status).toBe(400);
   expect((await post('/api/tickets/T-1/remove-worktree')).status).toBe(409);
   const c = await post('/api/tickets/T-1/cancel');
   expect(c.status).toBe(200);

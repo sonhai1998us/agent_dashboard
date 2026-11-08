@@ -158,10 +158,20 @@ export const turn = {
   first: (t: Ticket): string =>
     `Ticket ${t.id}: ${t.title}\n\nMô tả:\n${t.description}\n\nThư mục dự án: ${t.dir}${overridesText(t)}\n\n` +
     'Hãy đọc code liên quan, lập kế hoạch rồi gọi propose_plan. Sau đó kết thúc lượt.',
-  approved: (plan: Plan, worktree: string): string =>
-    `Kế hoạch đã được duyệt. Worktree của ticket: ${worktree}\n\nKế hoạch được duyệt (người dùng có thể đã sửa):\n${JSON.stringify(plan, null, 2)}\n\n` +
-    'Worktree mới tạo chưa cài dependency: Dev đầu tiên cần cài trong worktree (vd. `npm ci` hoặc `npm install`) trước khi các Dev song song chạy build/test.\n\n' +
+  /** `again`: kế hoạch sửa sau góp ý, làm tiếp trên nhánh cũ. `fresh`: worktree vừa tạo (chưa có dependency). */
+  approved: (plan: Plan, worktree: string, opts: { again?: boolean; fresh?: boolean } = {}): string =>
+    `${opts.again ? 'Kế hoạch sửa đã được duyệt. Làm tiếp trên cùng nhánh: mọi thay đổi trước vẫn còn trong worktree.' : 'Kế hoạch đã được duyệt.'} Worktree của ticket: ${worktree}\n\n` +
+    `Kế hoạch được duyệt (người dùng có thể đã sửa):\n${JSON.stringify(plan, null, 2)}\n\n` +
+    ((opts.fresh ?? true) ? 'Worktree mới tạo chưa cài dependency: Dev đầu tiên cần cài trong worktree (vd. `npm ci` hoặc `npm install`) trước khi các Dev song song chạy build/test.\n\n' : '') +
     'Hãy giao việc bằng spawn_agent theo các gói, rồi gọi wait_agents và kết thúc lượt.',
+  feedback: (text: string, images: string[], imageDir: string): string =>
+    'Người dùng đã xem kết quả của ticket và chưa vừa ý.' + (text ? ` Góp ý:\n${text}` : '') + '\n\n' +
+    (images.length
+      ? `Ảnh chụp màn hình người dùng đính kèm (xem bằng Read):\n${images.map((p) => `- ${p}`).join('\n')}\n\n` +
+        `Các agent của ticket đọc được thư mục ${imageDir}; khi giao việc hãy ghi đường dẫn ảnh liên quan vào task.\n\n`
+      : '') +
+    'Worktree và nhánh giữ nguyên, mọi thay đổi trước đó vẫn còn. Hãy xem góp ý' + (images.length ? ', ảnh' : '') +
+    ' và code liên quan, lập kế hoạch sửa rồi gọi propose_plan. Người dùng sẽ duyệt kế hoạch trước khi làm. Sau đó kết thúc lượt.',
   revised: (feedback: string): string =>
     `Người dùng góp ý về kế hoạch:\n${feedback}\n\nHãy sửa kế hoạch theo góp ý rồi gọi lại propose_plan, sau đó kết thúc lượt.`,
   agentsDone: (reports: AgentReport[], round: number, maxRounds: number, outOfScope: string[] = []): string =>

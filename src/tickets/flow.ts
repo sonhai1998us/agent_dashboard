@@ -2,7 +2,7 @@ import { matchEntry } from '@/src/guard/policy';
 import type { Settings } from '@/src/core/config';
 import type { AgentKind, Effort, Plan, RoleSpec, TicketStatus, WorkRole } from './model';
 
-export type TicketEvent = 'start_planning' | 'plan_proposed' | 'approve' | 'revise' | 'finish_done' | 'finish_escalated' | 'continue' | 'continue_planning' | 'cancel';
+export type TicketEvent = 'start_planning' | 'plan_proposed' | 'approve' | 'revise' | 'finish_done' | 'finish_escalated' | 'continue' | 'continue_planning' | 'feedback' | 'cancel';
 
 const TABLE: Record<string, TicketStatus> = {
   'draft:start_planning': 'planning',
@@ -14,6 +14,8 @@ const TABLE: Record<string, TicketStatus> = {
   'running:finish_escalated': 'escalated',
   'escalated:continue': 'running',
   'escalated:continue_planning': 'planning',
+  // người dùng xem kết quả, góp ý: Controller lập kế hoạch sửa trên cùng worktree
+  'done:feedback': 'planning',
   'planning:cancel': 'cancelled',
   'awaiting_approval:cancel': 'cancelled',
   'running:cancel': 'cancelled',

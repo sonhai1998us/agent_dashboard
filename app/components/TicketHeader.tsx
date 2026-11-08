@@ -2,9 +2,10 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { postJson, useLive } from '../lib/liveStore';
-import { canMerge, mergeText, previewLabel, reportBlocks, statusAction, ticketDuration, ticketStatusText, type Inline } from '../lib/tickets';
+import { canFeedback, canMerge, mergeText, previewLabel, reportBlocks, statusAction, ticketDuration, ticketStatusText, type Inline } from '../lib/tickets';
 import { fmtDuration } from '../lib/format';
 import type { Ticket } from '@/src/tickets/model';
+import FeedbackForm from './FeedbackForm';
 import styles from './TicketHeader.module.css';
 
 function Parts({ parts }: { parts: Inline[] }) {
@@ -60,9 +61,10 @@ export default function TicketHeader() {
   const [mergeOpen, setMergeOpen] = useState(false);
   const [targets, setTargets] = useState<string[] | null>(null);
   const [target, setTarget] = useState('');
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
   const reportRef = useRef<HTMLElement>(null);
 
-  useEffect(() => { setError(null); setGuiding(false); setGuidance(''); setMergeOpen(false); setTargets(null); }, [id]);
+  useEffect(() => { setError(null); setGuiding(false); setGuidance(''); setMergeOpen(false); setTargets(null); setFeedbackOpen(false); }, [id]);
   if (!t) return null;
 
   const st = ticketStatusText(t);
@@ -125,6 +127,9 @@ export default function TicketHeader() {
           {t.status === 'awaiting_approval' && <Link href={`/tickets/${t.id}/plan`} className={styles.btn}>Duyệt kế hoạch</Link>}
           {t.status === 'escalated' && !guiding && (
             <button type="button" className={styles.btn} onClick={() => setGuiding(true)}>Tiếp tục kèm chỉ đạo</button>
+          )}
+          {canFeedback(t) && !feedbackOpen && (
+            <button type="button" className={styles.btn} onClick={() => setFeedbackOpen(true)}>Góp ý để làm tiếp</button>
           )}
           {cancellable && (
             <button
@@ -202,6 +207,7 @@ export default function TicketHeader() {
           <Report text={t.report} />
         </details>
       )}
+      {feedbackOpen && canFeedback(t) && <FeedbackForm ticketId={t.id} onClose={() => setFeedbackOpen(false)} />}
       {guiding && (
         <form
           className={styles.guide}

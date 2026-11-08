@@ -2,7 +2,7 @@ import { describe, expect, test } from 'vitest';
 import type { AgentInfo } from '@/src/core/model';
 import type { Ticket } from '@/src/tickets/model';
 import type { WaitSpan } from '@/src/tickets/model';
-import { canMerge, mergeText, agentWorkMs, ticketDuration, controllerIdOf, isExternal, isStartingUp, layoutWaits, managedStateText, replayRange, reportBlocks, roleOverrides, statusAction, ticketStatusText } from '@/app/lib/tickets';
+import { canFeedback, feedbackFileError, canMerge, mergeText, agentWorkMs, ticketDuration, controllerIdOf, isExternal, isStartingUp, layoutWaits, managedStateText, replayRange, reportBlocks, roleOverrides, statusAction, ticketStatusText } from '@/app/lib/tickets';
 
 const t = (o: Partial<Ticket>): Ticket => ({ id: 'T-1', status: 'draft', round: 0, maxRounds: 3, ...o } as Ticket);
 
@@ -171,5 +171,20 @@ describe('merge', () => {
       .toBe('main đã có sẵn mọi thay đổi của nhánh ticket, không có gì mới để merge · 09:05:07');
     expect(mergeText({ target: 'main', at, result: 'conflict', conflicts: ['a.ts'] }))
       .toEqual({ tone: 'crit', text: 'merge vào main bị xung đột · 09:05:07' });
+  });
+});
+
+describe('góp ý', () => {
+  test('canFeedback: chỉ ticket đã xong', () => {
+    expect(canFeedback(t({ status: 'done' }))).toBe(true);
+    for (const status of ['escalated', 'cancelled', 'running', 'planning'] as const) expect(canFeedback(t({ status }))).toBe(false);
+  });
+  test('feedbackFileError', () => {
+    const f = (type: string, size = 10, name = 'a') => ({ name, type, size });
+    expect(feedbackFileError(f('image/png'), 0)).toBeNull();
+    expect(feedbackFileError(f('image/jpeg'), 5)).toBeNull();
+    expect(feedbackFileError(f('image/png'), 6)).toBe('Tối đa 6 ảnh mỗi lần góp ý');
+    expect(feedbackFileError(f('image/svg+xml', 10, 'x.svg'), 0)).toBe('x.svg: chỉ nhận ảnh png, jpg, webp, gif');
+    expect(feedbackFileError(f('image/png', 5 * 1024 * 1024 + 1, 'big.png'), 0)).toBe('big.png: ảnh lớn hơn 5MB');
   });
 });

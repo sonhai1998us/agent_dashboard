@@ -37,6 +37,7 @@ describe('transition', () => {
     ['running', 'finish_escalated', 'escalated'],
     ['escalated', 'continue', 'running'],
     ['escalated', 'continue_planning', 'planning'],
+    ['done', 'feedback', 'planning'],
     ['planning', 'cancel', 'cancelled'],
     ['awaiting_approval', 'cancel', 'cancelled'],
     ['running', 'cancel', 'cancelled'],
