@@ -322,11 +322,12 @@ describe('điều khiển agent', () => {
     await orch.mcpTools(t3).spawn_agent({ role: 'dev', task: 'a', files: ['src/a.ts'] });
     for (let i = 0; i < 4; i++) {
       const n = runsOf(env, ids(t3).ctrl).length;
-      runOf(env, ids(t3).ctrl)!.finish({ rateLimited: true, isError: true });
+      runOf(env, ids(t3).ctrl)!.finish({ rateLimited: true, isError: true, text: i < 3 ? '' : "You've hit your session limit · resets 1:30pm" });
       await orch.idle();
       if (i < 3) await vi.waitFor(() => expect(runsOf(env, ids(t3).ctrl)).toHaveLength(n + 1));
     }
-    expect(tickets.getTicket(t3)).toMatchObject({ status: 'escalated', report: 'Controller bị giới hạn: hết lượt thử' });
+    // báo cáo nêu nguyên văn lỗi của CLI để người dùng biết khi nào hạn mức mở lại
+    expect(tickets.getTicket(t3)).toMatchObject({ status: 'escalated', report: "Controller bị giới hạn: hết lượt thử. Lỗi cuối: You've hit your session limit · resets 1:30pm" });
     expect(tickets.getManaged(ids(t3).ctrl)).toMatchObject({ state: 'failed', stopReason: 'bị giới hạn: hết lượt thử' });
     expect(runOf(env, w3)!.killed).toBe(true);
     expect(tickets.getManaged(w3)).toMatchObject({ state: 'stopped', stopReason: ESCALATED });

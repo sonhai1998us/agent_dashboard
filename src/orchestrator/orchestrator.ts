@@ -924,7 +924,8 @@ export class Orchestrator {
       this.saveManaged(id, { state: 'failed', stopReason: LIMIT_EXHAUSTED });
       this.log(T, `Controller ${LIMIT_EXHAUSTED} → escalated`);
       this.endController(T);
-      await this.escalate(T, `Controller ${LIMIT_EXHAUSTED}`);
+      // nguyên văn lỗi CLI (vd. "resets 1:30pm") cho người dùng biết khi nào tiếp tục được
+      await this.escalate(T, `Controller ${LIMIT_EXHAUSTED}${r.text?.trim() ? `. Lỗi cuối: ${r.text.trim()}` : ''}`);
       return;
     }
     st.retries = 0;

@@ -2,12 +2,14 @@ import { parseClaudeLine, type ClaudeFileCtx } from '@/src/adapters/claude/parse
 import type { NormalizedEvent } from '@/src/core/model';
 import type { RunSpec } from './types';
 
-export const RATE_LIMIT_RE = /rate.?limit|usage limit|quota|\b429\b|\b529\b|overloaded/i;
+/** Lỗi giới hạn/hạn mức. "You've hit your session limit · resets 1:30pm": Claude báo hết hạn mức phiên. */
+export const RATE_LIMIT_RE = /rate.?limit|usage limit|session limit|hit your \w+ limit|quota|\b429\b|\b529\b|overloaded/i;
 
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 const RUNNER_OWNED = ['parentId', 'status', 'label', 'startedAt'];
 
-export interface StreamCtx { claude: ClaudeFileCtx; pendingEdits: Map<string, string>; changedFiles: Set<string> }
+/** `apiLimited`: lượt này đã gặp message assistant lỗi giới hạn (error "rate_limit"); kết quả lượt tính là bị giới hạn. */
+export interface StreamCtx { claude: ClaudeFileCtx; pendingEdits: Map<string, string>; changedFiles: Set<string>; apiLimited: boolean }
 
 export interface StreamOut {
   events: NormalizedEvent[];
@@ -21,6 +23,7 @@ export function newStreamCtx(spec: Pick<RunSpec, 'agentId' | 'sessionId' | 'labe
     claude: { agentId: spec.agentId, sessionId: spec.sessionId, parentId: null, role: null, label: spec.label, lastTs: null, resumed: spec.resume },
     pendingEdits: new Map(),
     changedFiles: new Set(),
+    apiLimited: false,
   };
 }
 
@@ -70,14 +73,20 @@ export function parseStreamLine(line: string, ctx: StreamCtx, now: number): Stre
         }
       }
     }
-    return rec.type === 'assistant' ? { events, limited: false } : { events };
+    if (rec.type !== 'assistant') return { events };
+    // Claude CLI ghi lỗi API thành message assistant: error "rate_limit", text "You've hit your session limit…"
+    if (rec.error !== undefined && RATE_LIMIT_RE.test(String(rec.error))) {
+      ctx.apiLimited = true;
+      return { events, limited: true };
+    }
+    return { events, limited: false };
   }
 
   if (rec.type === 'result') {
     const isError = rec.is_error === true || rec.subtype !== 'success';
     const text = String(rec.result ?? '');
     const costUsd = typeof rec.total_cost_usd === 'number' ? rec.total_cost_usd : null;
-    return { events: [], result: { isError, text, costUsd, rateLimited: isError && RATE_LIMIT_RE.test(text) } };
+    return { events: [], result: { isError, text, costUsd, rateLimited: ctx.apiLimited || (isError && RATE_LIMIT_RE.test(text)) } };
   }
 
   if (rec.type === 'rate_limit_event') {

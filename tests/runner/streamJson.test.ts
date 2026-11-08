@@ -60,6 +60,18 @@ describe('parseStreamLine', () => {
     const line = JSON.stringify({ type: 'result', subtype: 'success', is_error: true, result: 'Claude AI usage limit reached' });
     expect(parseStreamLine(line, newStreamCtx(spec), T0).result).toMatchObject({ isError: true, rateLimited: true });
   });
+  it('hết hạn mức phiên (assistant error rate_limit + result "session limit") → limited và rateLimited', () => {
+    const c = newStreamCtx(spec);
+    const msg = "You've hit your session limit · resets 1:30pm (Asia/Ho_Chi_Minh)";
+    const a = JSON.stringify({ type: 'assistant', error: 'rate_limit', isApiErrorMessage: true, message: { content: [{ type: 'text', text: msg }] } });
+    expect(parseStreamLine(a, c, T0).limited).toBe(true);
+    const r = JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: msg });
+    expect(parseStreamLine(r, c, T0 + 1).result).toMatchObject({ rateLimited: true, text: msg });
+  });
+  it('result báo "session limit" dù không có message lỗi trước đó vẫn là rateLimited', () => {
+    const line = JSON.stringify({ type: 'result', subtype: 'success', is_error: true, result: "You've hit your session limit · resets 1:30pm" });
+    expect(parseStreamLine(line, newStreamCtx(spec), T0).result).toMatchObject({ rateLimited: true });
+  });
   it('ignores unknown types', () => {
     expect(parseStreamLine('{"type":"foo"}', newStreamCtx(spec), T0)).toEqual({ events: [] });
   });
