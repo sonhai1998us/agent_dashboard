@@ -56,6 +56,11 @@ describe('góp ý để làm tiếp cho ticket đã xong', () => {
     expect(shots[1]).toMatch(/\.jpg$/);
     expect(readFileSync(shots[0]).equals(PNG)).toBe(true);
     expect(logs(T)).toContain('Người dùng góp ý để làm tiếp (2 ảnh)');
+    // lịch sử góp ý: chữ và tên file ảnh đã lưu
+    const hist = env.tickets.listFeedback(T);
+    expect(hist).toHaveLength(1);
+    expect(hist[0]).toMatchObject({ kind: 'result', text: 'Nút tắt tiếng chồng lên chữ' });
+    expect(hist[0].images.map((n) => join(dir, n))).toEqual(shots);
 
     // chỉ ảnh, không chữ cũng được — nhưng ticket đang lập kế hoạch thì không nhận góp ý mới
     await expect(env.orch.feedback(T, '', [img()])).rejects.toMatchObject({ status: 409 });
@@ -106,5 +111,27 @@ describe('góp ý để làm tiếp cho ticket đã xong', () => {
     expect(g(wt!, 'symbolic-ref', '--short', 'HEAD').trim()).toBe(branch);
     expect(existsSync(join(wt!, 'src', 'a.ts'))).toBe(true);
     expect(env.runs[m].spec.prompt).toContain('chưa cài dependency');
+  });
+
+  it('lịch sử góp ý gồm góp ý kế hoạch, góp ý làm tiếp và chỉ đạo; mới nhất trước', async () => {
+    const T = await toDone();
+    await env.orch.feedback(T, 'lần 1', []);
+    await env.orch.mcpTools(T).propose_plan({ plan: validPlan() });
+    runOf(env, ids(T).ctrl)!.finish({});
+    await env.orch.idle();
+    await env.orch.revise(T, 'kế hoạch thiếu test');
+    await env.orch.mcpTools(T).propose_plan({ plan: validPlan() });
+    runOf(env, ids(T).ctrl)!.finish({});
+    await env.orch.idle();
+    await env.orch.approve(T);
+    await env.orch.mcpTools(T).finish({ status: 'escalated', report: 'cần quyết' });
+    runOf(env, ids(T).ctrl)!.finish({});
+    await env.orch.idle();
+    expect(env.tickets.getTicket(T)!.status).toBe('escalated');
+    await env.orch.continueTicket(T, 'thử cách khác');
+    expect(env.tickets.listFeedback(T).map((f) => [f.kind, f.text])).toEqual([
+      ['guidance', 'thử cách khác'], ['plan', 'kế hoạch thiếu test'], ['result', 'lần 1'],
+    ]);
+    expect(env.tickets.listFeedback('T-99')).toEqual([]);
   });
 });

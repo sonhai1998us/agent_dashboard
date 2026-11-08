@@ -124,18 +124,26 @@ export default function ProjectTree() {
           const bodyId = `proj-${g.key || 'unknown'}`;
           return (
             <div key={g.key} className={styles.group}>
-              <button
-                type="button" data-row data-project={g.key}
-                className={`${styles.folder} ${!open && hasSel ? styles.sel : ''}`}
-                aria-expanded={open} aria-controls={bodyId}
-                title={g.dir || undefined}
-                onClick={() => toggle(g.key)}
-              >
-                <span className={styles.chev} aria-hidden="true">{open ? '▾' : '▸'}</span>
-                <span className={styles.fname}>{g.name}</span>
-                {g.active && <span className={styles.live} aria-label="đang có việc chạy">●</span>}
-                <span className={styles.count}>{g.tickets.length + g.sessions.length}</span>
-              </button>
+              <div className={styles.folderRow}>
+                <button
+                  type="button" data-row data-project={g.key}
+                  className={`${styles.folder} ${!open && hasSel ? styles.sel : ''}`}
+                  aria-expanded={open} aria-controls={bodyId}
+                  title={g.dir || undefined}
+                  onClick={() => toggle(g.key)}
+                >
+                  <span className={styles.chev} aria-hidden="true">{open ? '▾' : '▸'}</span>
+                  <span className={styles.fname}>{g.name}</span>
+                  {g.active && <span className={styles.live} aria-label="đang có việc chạy">●</span>}
+                  <span className={styles.count}>{g.tickets.length + g.sessions.length}</span>
+                </button>
+                {g.dir && (
+                  <Link
+                    href={`/tickets/new?dir=${encodeURIComponent(g.dir)}`} className={styles.add}
+                    aria-label={`Ticket mới trong ${g.name}`} title={`Ticket mới trong ${g.dir}`}
+                  >+</Link>
+                )}
+              </div>
 
               {open && (
                 <div id={bodyId} className={styles.body}>

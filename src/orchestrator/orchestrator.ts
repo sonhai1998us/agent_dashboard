@@ -272,6 +272,7 @@ export class Orchestrator {
     st.nudges = 0;
     st.retries = 0;
     this.closeWaits(controllerId(ticketId));
+    this.deps.tickets.addFeedback(ticketId, stamp, 'result', body, paths.map((p) => path.basename(p)));
     this.log(ticketId, `Người dùng góp ý để làm tiếp${images.length ? ` (${images.length} ảnh)` : ''}`);
     this.runControllerTurn(ticketId, turn.feedback(body, paths, dir));
     return this.mustTicket(ticketId);
@@ -287,6 +288,7 @@ export class Orchestrator {
     const fb = isStr(feedback) ? feedback.trim() : '';
     if (!fb) throw new OrchestratorError(400, 'Góp ý không được rỗng');
     this.move(ticketId, 'revise', { feedback: fb });
+    this.deps.tickets.addFeedback(ticketId, this.now(), 'plan', fb, []);
     this.closeWaits(controllerId(ticketId));
     this.log(ticketId, 'Người dùng góp ý kế hoạch');
     this.runControllerTurn(ticketId, turn.revised(fb));
@@ -318,6 +320,7 @@ export class Orchestrator {
     const maxRounds = t.maxRounds + 1;
     // chưa có worktree = kế hoạch chưa từng được duyệt → quay lại lập kế hoạch
     this.move(ticketId, t.worktree ? 'continue' : 'continue_planning', { maxRounds });
+    this.deps.tickets.addFeedback(ticketId, this.now(), 'guidance', text, []);
     const st = this.ctrl(ticketId);
     st.nudges = 0;
     st.retries = 0;

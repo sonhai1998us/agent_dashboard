@@ -300,6 +300,20 @@ test('preview: trạng thái trong GET ticket, nút tắt server, ảnh capture,
     expect((await fetch(srv!.url + p)).status, p).toBe(404);
   }
 
+  // lịch sử góp ý và ảnh góp ý
+  expect((await call('GET', '/api/tickets/T-1/feedback-history')).json).toEqual([]);
+  expect((await call('GET', '/api/tickets/T-9/feedback-history')).status).toBe(404);
+  const fbDir = path.join(cfg.home, 'runs', 'T-1', 'feedback');
+  fs.mkdirSync(fbDir, { recursive: true });
+  fs.writeFileSync(path.join(fbDir, '17-1.jpg'), png);
+  const shot = await fetch(`${srv!.url}/api/tickets/T-1/feedback-images/17-1.jpg`);
+  expect(shot.status).toBe(200);
+  expect(shot.headers.get('content-type')).toBe('image/jpeg');
+  expect(Buffer.from(await shot.arrayBuffer())).toEqual(png);
+  for (const p of ['/api/tickets/T-1/feedback-images/17-2.jpg', '/api/tickets/T-1/feedback-images/x.svg', '/api/tickets/T-1/feedback-images/..%2F..%2Fconfig.json', '/api/tickets/..%2Fx/feedback-images/17-1.jpg']) {
+    expect((await fetch(srv!.url + p)).status, p).toBe(404);
+  }
+
   const proj = {
     dev: { command: 'next dev -p {port}' }, prod: { build: 'next build', start: 'next start -p {port}' }, defaultMode: 'dev', env: {}, readyPath: '/',
     accounts: [{ name: 'owner', description: '', username: 'o@x', password: 'pw-42' }],

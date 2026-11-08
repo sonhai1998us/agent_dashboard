@@ -4,8 +4,9 @@ import Link from 'next/link';
 import { postJson, useLive } from '../lib/liveStore';
 import { canFeedback, canMerge, mergeText, previewLabel, reportBlocks, statusAction, ticketDuration, ticketStatusText, type Inline } from '../lib/tickets';
 import { fmtDuration } from '../lib/format';
-import type { Ticket } from '@/src/tickets/model';
+import type { FeedbackEntry, Ticket } from '@/src/tickets/model';
 import FeedbackForm from './FeedbackForm';
+import FeedbackHistory from './FeedbackHistory';
 import styles from './TicketHeader.module.css';
 
 function Parts({ parts }: { parts: Inline[] }) {
@@ -62,9 +63,22 @@ export default function TicketHeader() {
   const [targets, setTargets] = useState<string[] | null>(null);
   const [target, setTarget] = useState('');
   const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [history, setHistory] = useState<FeedbackEntry[]>([]);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const updatedAt = t?.updatedAt;
   const reportRef = useRef<HTMLElement>(null);
 
-  useEffect(() => { setError(null); setGuiding(false); setGuidance(''); setMergeOpen(false); setTargets(null); setFeedbackOpen(false); }, [id]);
+  useEffect(() => { setError(null); setGuiding(false); setGuidance(''); setMergeOpen(false); setTargets(null); setFeedbackOpen(false); setHistoryOpen(false); setHistory([]); }, [id]);
+  // góp ý mới luôn đổi trạng thái ticket (updatedAt) → đọc lại lịch sử
+  useEffect(() => {
+    if (!id) return;
+    let stale = false;
+    fetch(`/api/tickets/${encodeURIComponent(id)}/feedback-history`)
+      .then((r) => (r.ok ? r.json() as Promise<FeedbackEntry[]> : []))
+      .then((list) => { if (!stale) setHistory(list); })
+      .catch(() => {});
+    return () => { stale = true; };
+  }, [id, updatedAt]);
   if (!t) return null;
 
   const st = ticketStatusText(t);
@@ -130,6 +144,9 @@ export default function TicketHeader() {
           )}
           {canFeedback(t) && !feedbackOpen && (
             <button type="button" className={styles.btn} onClick={() => setFeedbackOpen(true)}>Góp ý để làm tiếp</button>
+          )}
+          {history.length > 0 && !historyOpen && (
+            <button type="button" className={styles.btn} onClick={() => setHistoryOpen(true)}>Lịch sử góp ý ({history.length})</button>
           )}
           {cancellable && (
             <button
@@ -207,6 +224,7 @@ export default function TicketHeader() {
           <Report text={t.report} />
         </details>
       )}
+      {historyOpen && history.length > 0 && <FeedbackHistory ticketId={t.id} items={history} onClose={() => setHistoryOpen(false)} />}
       {feedbackOpen && canFeedback(t) && <FeedbackForm ticketId={t.id} onClose={() => setFeedbackOpen(false)} />}
       {guiding && (
         <form

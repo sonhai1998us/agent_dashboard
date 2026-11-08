@@ -35,6 +35,21 @@ export const FEEDBACK_IMAGE_BYTES = 5 * 1024 * 1024;
 export const FEEDBACK_TEXT_MAX = 10_000;
 /** MIME → đuôi file khi lưu */
 export const FEEDBACK_EXT: Record<string, string> = { 'image/png': '.png', 'image/jpeg': '.jpg', 'image/webp': '.webp', 'image/gif': '.gif' };
+/** Tên file ảnh góp ý trong runs/T/feedback (`<giờ>-<thứ tự><đuôi>`). */
+export const FEEDBACK_FILE = /^\d+-\d+\.(png|jpg|webp|gif)$/;
+
+/** plan: góp ý kế hoạch lúc chờ duyệt. result: góp ý để làm tiếp khi ticket đã xong. guidance: chỉ đạo khi cho ticket escalated chạy tiếp. */
+export type FeedbackKind = 'plan' | 'result' | 'guidance';
+
+/** Một lần người dùng góp ý cho Controller (lịch sử góp ý). */
+export interface FeedbackEntry {
+  id: number;
+  at: number;
+  kind: FeedbackKind;
+  text: string;
+  /** tên file ảnh trong runs/T/feedback */
+  images: string[];
+}
 
 /** merged: đã vào nhánh đích tại `head`. conflict: merge dở trong thư mục dự án, chờ người dùng xử lý `conflicts`. */
 export type TicketMerge =

@@ -9,7 +9,7 @@ import { gitInfo, gitInit } from '@/src/git/git';
 import { handleMcp } from '@/src/orchestrator/mcp';
 import { maskProjects, unmaskProjects } from '@/src/preview/config';
 import { OrchestratorError, type FeedbackImage } from '@/src/orchestrator/orchestrator';
-import { FEEDBACK_IMAGE_BYTES, FEEDBACK_IMAGES_MAX } from '@/src/tickets/model';
+import { FEEDBACK_EXT, FEEDBACK_FILE, FEEDBACK_IMAGE_BYTES, FEEDBACK_IMAGES_MAX } from '@/src/tickets/model';
 
 /** Body góp ý: tối đa FEEDBACK_IMAGES_MAX ảnh base64 (×4/3) cộng phần chữ. */
 const FEEDBACK_BODY_MAX = Math.ceil(FEEDBACK_IMAGES_MAX * FEEDBACK_IMAGE_BYTES * 4 / 3) + 1_000_000;
@@ -290,6 +290,21 @@ const ROUTES: Route[] = [
         return { name, type: im.type, data: Buffer.from(im.data, 'base64') };
       });
       return ok(await core.orchestrator.feedback(id, (b.text as string | undefined) ?? '', images));
+    },
+  },
+  { method: 'GET', re: /^\/api\/tickets\/([^/]+)\/feedback-history$/, run: ({ core, params: [id] }) => (mustTicket(core, id), ok(core.tickets.listFeedback(id))) },
+  {
+    method: 'GET', re: /^\/api\/tickets\/([^/]+)\/feedback-images\/([^/]+)$/,
+    run: ({ core, params: [ticket, file] }) => {
+      if (!/^T-\d+$/.test(ticket) || !FEEDBACK_FILE.test(file)) throw new HttpError(404, 'not found');
+      const runs = path.join(core.cfg.home, 'runs');
+      const abs = path.join(runs, ticket, 'feedback', file);
+      if (!inside(abs, runs)) throw new HttpError(404, 'not found');
+      let body: Buffer;
+      try { body = fs.readFileSync(abs); } catch { throw new HttpError(404, 'not found'); }
+      const ext = path.extname(file);
+      const type = Object.keys(FEEDBACK_EXT).find((k) => FEEDBACK_EXT[k] === ext) ?? 'application/octet-stream';
+      return { status: 200, body, contentType: type };
     },
   },
   { method: 'GET', re: /^\/api\/tickets\/([^/]+)\/merge-targets$/, run: async ({ core, params: [id] }) => ok(await core.orchestrator.mergeTargets(id)) },

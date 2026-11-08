@@ -27,14 +27,14 @@ async function json<T>(url: string, init?: RequestInit): Promise<{ status: numbe
   return { status: res.status, body: (await res.json().catch(() => ({}))) as T };
 }
 
-export default function NewTicketForm() {
+export default function NewTicketForm({ initialDir = '' }: { initialDir?: string }) {
   const router = useRouter();
   const tickets = useLive((s) => s.tickets);
   const dirs = useMemo(() => recentDirs(Object.values(tickets)), [tickets]);
 
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [dir, setDir] = useState('');
+  const [dir, setDir] = useState(initialDir);
   const [git, setGit] = useState<GitInfo | null>(null);
   const [checking, setChecking] = useState(false);
   const [settings, setSettings] = useState<SettingsRes['settings'] | null>(null);

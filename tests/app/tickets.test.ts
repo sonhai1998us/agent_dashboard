@@ -2,7 +2,7 @@ import { describe, expect, test } from 'vitest';
 import type { AgentInfo } from '@/src/core/model';
 import type { Ticket } from '@/src/tickets/model';
 import type { WaitSpan } from '@/src/tickets/model';
-import { canFeedback, feedbackFileError, canMerge, mergeText, agentWorkMs, ticketDuration, controllerIdOf, isExternal, isStartingUp, layoutWaits, managedStateText, replayRange, reportBlocks, roleOverrides, statusAction, ticketStatusText } from '@/app/lib/tickets';
+import { FEEDBACK_KIND_LABEL, fmtDateTime, canFeedback, feedbackFileError, canMerge, mergeText, agentWorkMs, ticketDuration, controllerIdOf, isExternal, isStartingUp, layoutWaits, managedStateText, replayRange, reportBlocks, roleOverrides, statusAction, ticketStatusText } from '@/app/lib/tickets';
 
 const t = (o: Partial<Ticket>): Ticket => ({ id: 'T-1', status: 'draft', round: 0, maxRounds: 3, ...o } as Ticket);
 
@@ -186,5 +186,16 @@ describe('góp ý', () => {
     expect(feedbackFileError(f('image/png'), 6)).toBe('Tối đa 6 ảnh mỗi lần góp ý');
     expect(feedbackFileError(f('image/svg+xml', 10, 'x.svg'), 0)).toBe('x.svg: chỉ nhận ảnh png, jpg, webp, gif');
     expect(feedbackFileError(f('image/png', 5 * 1024 * 1024 + 1, 'big.png'), 0)).toBe('big.png: ảnh lớn hơn 5MB');
+  });
+});
+
+describe('lịch sử góp ý', () => {
+  test('fmtDateTime: cùng năm bỏ năm, khác năm thêm năm', () => {
+    const at = new Date(2026, 10, 8, 9, 5).getTime();
+    expect(fmtDateTime(at, new Date(2026, 11, 31).getTime())).toBe('08/11 09:05');
+    expect(fmtDateTime(at, new Date(2027, 0, 1).getTime())).toBe('08/11/2026 09:05');
+  });
+  test('mỗi loại góp ý có nhãn', () => {
+    expect(Object.keys(FEEDBACK_KIND_LABEL).sort()).toEqual(['guidance', 'plan', 'result']);
   });
 });

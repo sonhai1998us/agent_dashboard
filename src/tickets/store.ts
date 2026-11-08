@@ -1,7 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite';
 import type { Store } from '@/src/core/store';
 import { DEFAULT_SETTINGS } from '@/src/core/config';
-import type { ManagedAgent, Plan, Ticket, WaitSpan } from './model';
+import type { FeedbackEntry, FeedbackKind, ManagedAgent, Plan, Ticket, WaitSpan } from './model';
 
 /** Kế hoạch lưu trước khi có vai explorer: thêm vai đó với count 0 để mọi chỗ đọc plan.roles đều đủ vai. */
 function withAllRoles(p: Plan | null): Plan | null {
@@ -23,6 +23,9 @@ CREATE TABLE IF NOT EXISTS managed_agents (agent_id TEXT PRIMARY KEY, ticket_id 
 CREATE INDEX IF NOT EXISTS idx_managed_ticket ON managed_agents(ticket_id);
 CREATE TABLE IF NOT EXISTS waits (id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, kind TEXT NOT NULL, started_at INTEGER NOT NULL, ended_at INTEGER);
 CREATE TABLE IF NOT EXISTS ticket_log (id INTEGER PRIMARY KEY AUTOINCREMENT, ticket_id TEXT NOT NULL, at INTEGER NOT NULL, text TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS ticket_feedback (id INTEGER PRIMARY KEY AUTOINCREMENT, ticket_id TEXT NOT NULL, at INTEGER NOT NULL,
+  kind TEXT NOT NULL, text TEXT NOT NULL, images TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_feedback_ticket ON ticket_feedback(ticket_id);
 `;
 
 const json = (v: unknown): string | null => (v === null || v === undefined ? null : JSON.stringify(v));
@@ -162,5 +165,16 @@ export class TicketStore {
   listLog(ticketId: string): { at: number; text: string }[] {
     return (this.db.prepare('SELECT at, text FROM ticket_log WHERE ticket_id = ? ORDER BY id').all(ticketId) as Row[])
       .map((r) => ({ at: r.at, text: r.text }));
+  }
+
+  addFeedback(ticketId: string, at: number, kind: FeedbackKind, text: string, images: string[]): void {
+    this.db.prepare('INSERT INTO ticket_feedback (ticket_id, at, kind, text, images) VALUES (?, ?, ?, ?, ?)')
+      .run(ticketId, at, kind, text, JSON.stringify(images));
+  }
+
+  /** Mới nhất trước. */
+  listFeedback(ticketId: string): FeedbackEntry[] {
+    return (this.db.prepare('SELECT * FROM ticket_feedback WHERE ticket_id = ? ORDER BY id DESC').all(ticketId) as Row[])
+      .map((r) => ({ id: r.id, at: r.at, kind: r.kind, text: r.text, images: unjson<string[]>(r.images) ?? [] }));
   }
 }

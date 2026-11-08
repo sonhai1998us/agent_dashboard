@@ -49,3 +49,13 @@
 .shotX:hover { background: var(--sel); }
 .drop { min-height: 64px; flex: 1 1 220px; max-width: 360px; border: 1px dashed var(--border); border-radius: 4px; background: transparent; color: var(--muted); font: inherit; font-size: 11px; padding: 6px 10px; cursor: pointer; text-align: center; }
 .drop:hover, .drop[data-over] { border-color: var(--run); color: var(--fg); background: var(--sel); }
+.history { margin-top: 6px; border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font-size: 12px; max-height: 45vh; overflow: auto; }
+.historyHead { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--muted); }
+.historyList { list-style: none; margin: 0; padding: 0; }
+.historyItem { padding: 6px 0; border-top: 1px solid var(--border); }
+.historyItem:first-child { border-top: 0; }
+.historyMeta { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; color: var(--muted); font-size: 11px; }
+.kind { padding: 0 6px; border-radius: 999px; border: 1px solid var(--border); color: var(--fg); }
+.kind[data-kind='result'] { border-color: var(--run); }
+.historyText { margin: 4px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+a.shot { display: block; }

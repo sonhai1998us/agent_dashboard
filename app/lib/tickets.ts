@@ -1,5 +1,5 @@
 import { isManagedId, type AgentInfo } from '@/src/core/model';
-import { FEEDBACK_EXT, FEEDBACK_IMAGE_BYTES, FEEDBACK_IMAGES_MAX, type ManagedState, type Role, type RoleSpec, type Ticket, type TicketMerge, type WaitSpan } from '@/src/tickets/model';
+import { FEEDBACK_EXT, FEEDBACK_IMAGE_BYTES, FEEDBACK_IMAGES_MAX, type FeedbackKind, type ManagedState, type Role, type RoleSpec, type Ticket, type TicketMerge, type WaitSpan } from '@/src/tickets/model';
 import { fmtClock, fmtDuration } from './format';
 import type { PreviewStatus } from '@/src/preview/server';
 
@@ -177,4 +177,18 @@ export function feedbackFileError(f: { name: string; type: string; size: number 
   if (!FEEDBACK_EXT[f.type]) return `${f.name}: chỉ nhận ảnh png, jpg, webp, gif`;
   if (f.size > FEEDBACK_IMAGE_BYTES) return `${f.name}: ảnh lớn hơn 5MB`;
   return null;
+}
+
+export const FEEDBACK_KIND_LABEL: Record<FeedbackKind, string> = {
+  plan: 'Góp ý kế hoạch',
+  result: 'Góp ý để làm tiếp',
+  guidance: 'Chỉ đạo khi tiếp tục',
+};
+
+/** "08/11 14:05" — năm khác năm nay thì thêm năm. */
+export function fmtDateTime(ms: number, now = Date.now()): string {
+  const d = new Date(ms);
+  const p = (n: number) => String(n).padStart(2, '0');
+  const year = d.getFullYear() === new Date(now).getFullYear() ? '' : `/${d.getFullYear()}`;
+  return `${p(d.getDate())}/${p(d.getMonth() + 1)}${year} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
