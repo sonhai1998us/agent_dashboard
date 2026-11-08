@@ -114,10 +114,14 @@ function previewParts(role: Role, pv: PreviewPromptCtx | undefined): string[] {
   return parts;
 }
 
-export function systemPrompt(role: Role, ctx: { worktree: string | null; files: string[]; denyBash: string[]; checkCommands?: string[]; preview?: PreviewPromptCtx }): string {
+export function systemPrompt(role: Role, ctx: { worktree: string | null; files: string[]; denyBash: string[]; checkCommands?: string[]; preview?: PreviewPromptCtx; scratch?: string }): string {
   const body = role === 'controller' ? CONTROLLER : role === 'dev' ? DEV : role === 'explorer' ? EXPLORER : REVIEWER(role);
   const parts = [`ROLE: ${role}`, body];
   if (ctx.worktree) parts.push(`Worktree của ticket: ${ctx.worktree}`);
+  if (role !== 'controller' && ctx.scratch) {
+    parts.push(`Thư mục nháp riêng: ${ctx.scratch}
+File tạm (ảnh hay khung hình xuất ra để xem, script nháp, log) ghi vào đây, không ghi vào worktree (sẽ bị commit) hay thư mục tạm của hệ thống (bị chặn đọc). Dashboard không commit thư mục này.`);
+  }
   if (role === 'dev' && ctx.files.length) parts.push(`File được sửa:\n${bullets(ctx.files)}`);
   if (role === 'qc' || role === 'designer') {
     const c = checkList(ctx.checkCommands ?? []);

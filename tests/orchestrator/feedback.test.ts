@@ -78,6 +78,15 @@ describe('góp ý để làm tiếp cho ticket đã xong', () => {
     const dev = [...env.runs].reverse().find((r) => r.spec.role === 'dev')!;
     const read = env.orch.guard(dev.spec.agentId, dev.spec.guard.token, { tool_name: 'Read', tool_input: { file_path: shots[0] }, cwd: dev.spec.cwd });
     expect(read).toEqual({ allow: true });
+
+    // Dev có thư mục nháp riêng ngoài worktree: tạo sẵn, đọc/ghi được, được chỉ trong prompt
+    const scratch = join(env.cfg.home, 'runs', T, dev.spec.agentId.split(':')[2], 'scratch');
+    expect(existsSync(scratch)).toBe(true);
+    expect(dev.spec.addDirs).toContain(scratch);
+    expect(dev.spec.systemPrompt).toContain(`Thư mục nháp riêng: ${scratch}`);
+    const gd = (tool_name: string, file_path: string) => env.orch.guard(dev.spec.agentId, dev.spec.guard.token, { tool_name, tool_input: { file_path }, cwd: dev.spec.cwd });
+    expect(gd('Write', join(scratch, 'stills', 'a.png'))).toEqual({ allow: true });
+    expect(gd('Read', join(scratch, 'stills', 'a.png'))).toEqual({ allow: true });
   });
 
   it('worktree đã bị xoá: tạo lại từ nhánh cũ khi duyệt kế hoạch sửa', async () => {

@@ -289,6 +289,36 @@ describe('python đọc script từ stdin hoặc mở REPL bị chặn (python 3
   });
 });
 
+describe('thư mục nháp của worker', () => {
+  const scratch = WIN ? 'C:\\h\\runs\\T-1\\dev-1\\scratch' : '/h/runs/T-1/dev-1/scratch';
+  const tmp = WIN ? 'C:\\Users\\me\\AppData\\Local\\Temp\\x.png' : '/tmp/x.png';
+  const withScratch = (role: Role): GuardPolicy => ({ ...mk(role), readRoots: [scratch], scratch });
+  const inS = `${scratch}${sep}stills${sep}f000.png`;
+  it('dev đọc và ghi được trong thư mục nháp', () => {
+    expect(checkTool(withScratch('dev'), 'Read', { file_path: inS }, root).allow).toBe(true);
+    expect(checkTool(withScratch('dev'), 'Write', { file_path: inS }, root).allow).toBe(true);
+    expect(checkTool(withScratch('dev'), 'Edit', { file_path: `${scratch}${sep}tmp.mjs` }, root).allow).toBe(true);
+  });
+  it('vai chỉ đọc: đọc được, không ghi được', () => {
+    expect(checkTool(withScratch('qc'), 'Read', { file_path: inS }, root).allow).toBe(true);
+    expect(checkTool(withScratch('qc'), 'Write', { file_path: inS }, root).allow).toBe(false);
+  });
+  it('chặn ngoài phạm vi thì chỉ tới thư mục nháp', () => {
+    const r = checkTool(withScratch('dev'), 'Read', { file_path: tmp }, root);
+    expect(r.allow).toBe(false);
+    expect((r as { reason: string }).reason).toContain(`thư mục nháp ${scratch}`);
+    const w = checkTool(withScratch('dev'), 'Write', { file_path: tmp }, root);
+    expect(w).toMatchObject({ allow: false, scope: true });
+    expect((w as { reason: string }).reason).toContain(`thư mục nháp ${scratch}`);
+    // ghi file nằm trong worktree nhưng ngoài phạm vi: vẫn bị chặn như cũ
+    expect(checkTool(withScratch('dev'), 'Write', { file_path: `${root}${sep}src${sep}x.ts` }, root).allow).toBe(false);
+  });
+  it('không có thư mục nháp: lý do giữ như cũ', () => {
+    const r = checkTool(mk('dev'), 'Read', { file_path: tmp }, root);
+    expect((r as { reason: string }).reason).not.toContain('thư mục nháp');
+  });
+});
+
 describe('checkTool: controller có quyền như người dùng', () => {
   const home = WIN ? String.raw`C:\Users\me\.acctv` : '/home/me/.acctv';
   const claude = WIN ? String.raw`C:\Users\me\.claude` : '/home/me/.claude';

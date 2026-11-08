@@ -159,6 +159,13 @@ describe('turn', () => {
     const p = systemPrompt('dev', { worktree: 'wt', files: ['a.ts'], denyBash: [] });
     expect(p).toMatch(/bằng Edit hoặc Write, không ghi file bằng lệnh Bash/);
   });
+  it('worker được chỉ thư mục nháp; Controller thì không', () => {
+    for (const r of ['dev', 'qc', 'designer', 'explorer'] as const) {
+      const p = systemPrompt(r, { worktree: 'wt', files: [], denyBash: [], scratch: 'D:\\h\\runs\\T-1\\x\\scratch' });
+      expect(p, r).toContain('Thư mục nháp riêng: D:\\h\\runs\\T-1\\x\\scratch');
+    }
+    expect(systemPrompt('controller', { worktree: 'wt', files: [], denyBash: [] })).not.toContain('Thư mục nháp');
+  });
   it('Dev được dặn không cho python đọc stdin', () => {
     expect(systemPrompt('dev', { worktree: 'wt', files: ['a.ts'], denyBash: [] })).toMatch(/python trên máy này treo khi stdin rỗng/);
   });

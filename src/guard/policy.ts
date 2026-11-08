@@ -10,6 +10,8 @@ export interface GuardPolicy {
   checkCommands: RegExp[];
   /** Controller: thư mục không được ghi (dữ liệu dashboard, ~/.claude, ~/.codex). */
   protectedRoots?: string[];
+  /** Worker: thư mục nháp riêng ngoài worktree (không vào git). Đọc được (nằm trong readRoots); Dev ghi được bằng Write/Edit. */
+  scratch?: string;
 }
 /** `explicit`: hook trả "allow" tường minh (tool không nằm trong --allowedTools, vd. tool MCP của người dùng). */
 export type GuardDecision = { allow: true; explicit?: true } | { allow: false; reason: string; scope: boolean };
@@ -127,6 +129,10 @@ function pythonReadsStdin(cmd: string): boolean {
   return false;
 }
 
+/** Gợi ý kèm lý do chặn đọc/ghi ngoài phạm vi: file tạm thì dùng thư mục nháp. */
+const scratchHint = (p: GuardPolicy): string =>
+  p.scratch ? `. File tạm (ảnh xuất, khung hình, script nháp, log) hãy ghi và đọc trong thư mục nháp ${p.scratch}` : '';
+
 /** Lệnh shell: chặn lệnh nền, lệnh quá dài, python đọc stdin và lệnh khớp denyBash. null = cho qua. */
 function shellDeny(p: GuardPolicy, input: unknown): GuardDecision | null {
   const cmd = strField(input, 'command');
@@ -189,7 +195,7 @@ export function checkTool(p: GuardPolicy, toolName: string, input: unknown, cwd:
       }
       const target = resolve(strField(input, 'file_path', 'path') ?? base);
       const ok = [p.root, ...p.readRoots].some((r) => relInside(r, target) !== null);
-      return ok ? { allow: true } : deny(`ngoài thư mục làm việc: ${target}`);
+      return ok ? { allow: true } : deny(`ngoài thư mục làm việc: ${target}${scratchHint(p)}`);
     }
     case 'Edit':
     case 'Write':
@@ -200,7 +206,11 @@ export function checkTool(p: GuardPolicy, toolName: string, input: unknown, cwd:
       if (!raw) return deny('ngoài phạm vi: (thiếu đường dẫn)', true);
       const abs = resolve(raw);
       const rel = relInside(p.root, abs);
-      if (rel === null) return deny(`ngoài phạm vi: ${abs}`, true);
+      if (rel === null) {
+        // file tạm (ảnh xuất, script nháp…) ghi vào thư mục nháp, không vào worktree
+        if (p.scratch && relInside(p.scratch, abs) !== null) return { allow: true };
+        return deny(`ngoài phạm vi: ${abs}${scratchHint(p)}`, true);
+      }
       if (rel && hasGit(rel)) return deny(`ngoài phạm vi: ${rel}`, true);
       if (rel && p.allowedFiles.some((g) => sameRel(g, rel) || matchEntry(g, rel))) return { allow: true };
       return deny(`ngoài phạm vi: ${rel || abs}`, true);

@@ -1029,19 +1029,22 @@ export class Orchestrator {
     const capture = this.hasCapture(m.runner, role);
     const shots = this.capturesDir(id);
     if (capture) mkdirSync(shots, { recursive: true });
-    // agent chỉ đọc được ảnh capture của chính nó, cùng ảnh góp ý của người dùng cho ticket
-    this.guards.set(id, { token, policy: this.policy(role, wt, [...(capture ? [shots] : []), this.feedbackDir(t.id)], m.files) });
+    // file tạm của agent: ngoài worktree để không lọt vào snapshot git
+    const scratch = path.join(this.runDir(id), 'scratch');
+    mkdirSync(scratch, { recursive: true });
+    // agent chỉ đọc được ảnh capture và thư mục nháp của chính nó, cùng ảnh góp ý của người dùng cho ticket
+    this.guards.set(id, { token, policy: { ...this.policy(role, wt, [...(capture ? [shots] : []), scratch, this.feedbackDir(t.id)], m.files), scratch } });
     const spec: RunSpec = {
       agentId: id, ticketId: t.id, role, agent: m.runner, label: `${ROLE_LABEL[role]}-${m.ordinal}`, parentId: controllerId(t.id),
       cwd: wt, model: m.model, effort: m.effort, prompt: workerPrompt(m, t.plan, wt),
       systemPrompt: systemPrompt(role, {
-        worktree: wt, files: m.files, denyBash: this.settings.denyBash, checkCommands: this.settings.checkCommands,
+        worktree: wt, files: m.files, denyBash: this.settings.denyBash, checkCommands: this.settings.checkCommands, scratch,
         preview: this.deps.preview && CAPTURE_ROLES.includes(role)
           ? { mode: this.previewMode(t), accounts: this.deps.preview.accountsFor(t.dir), capture, ticketId: t.id }
           : undefined,
       }),
       sessionId: m.sessionId, resume: false, ...this.workerTools(m.runner, role),
-      addDirs: [], runDir: this.runDir(id),
+      addDirs: [scratch], runDir: this.runDir(id),
       // claude: MCP riêng của worker (request_user_action), xác thực bằng token guard; codex chưa nối MCP
       mcp: m.runner === 'claude' ? { url: `http://127.0.0.1:${port}/mcp?agent=${encodeURIComponent(id)}`, token } : null,
       // Explorer, Designer đọc thiết kế / tài liệu qua MCP và connector của người dùng (Figma…); guard chỉ cho tool đọc
