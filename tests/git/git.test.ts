@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync, readFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { gitInfo, createWorktree, snapshotCommit, diffStat, removeWorktree, gitInit, worktreePath, uniqueBranch, worktreeChanges, GIT_TIMEOUT_MS, listBranches, mergeBranch } from '@/src/git/git';
+import { gitInfo, createWorktree, snapshotCommit, diffStat, removeWorktree, gitInit, worktreePath, uniqueBranch, worktreeChanges, GIT_TIMEOUT_MS, listBranches, mergeBranch, squashBranch } from '@/src/git/git';
 
 const g = (dir: string, ...a: string[]) => execFileSync('git', ['-C', dir, ...a], { encoding: 'utf8' });
 
@@ -231,5 +231,34 @@ describe('merge nhánh ticket vào nhánh của người dùng', () => {
     await expect(mergeBranch(r, 'khong-co', 'acctv/T-1', 'x')).rejects.toThrow(/khong-co/);
     await expect(mergeBranch(r, '-main', 'acctv/T-1', 'x')).rejects.toThrow(/không hợp lệ/);
     expect(g(r, 'symbolic-ref', '--short', 'HEAD').trim()).toBe('main');
+  });
+
+  it('squash: đưa thay đổi vào phần đã stage, chưa commit, HEAD giữ nguyên', async () => {
+    const r = mkRepo();
+    const before = head(r);
+    writeFileSync(join(r, 'x.txt'), 'chưa stage\n');
+    expect(await squashBranch(r, 'main', 'acctv/T-1')).toEqual({ kind: 'staged', files: ['b.txt'] });
+    expect(head(r)).toBe(before);
+    expect(hasMergeHead(r)).toBe(false);
+    expect(g(r, 'diff', '--cached', '--name-only').trim()).toBe('b.txt');
+    expect(readFileSync(join(r, 'x.txt'), 'utf8')).toBe('chưa stage\n');
+    // chưa commit phần đã đưa vào → lần sau bị từ chối
+    await expect(squashBranch(r, 'main', 'acctv/T-1')).rejects.toThrow(/đã stage/);
+  });
+
+  it('squash: nhánh đích đã có sẵn → không có gì để đưa vào', async () => {
+    const r = mkRepo();
+    await mergeBranch(r, 'main', 'acctv/T-1', 'x');
+    expect(await squashBranch(r, 'main', 'acctv/T-1')).toEqual({ kind: 'staged', files: [] });
+  });
+
+  it('squash: xung đột để nguyên cho người dùng', async () => {
+    const r = mkRepo();
+    g(r, 'switch', '-q', 'acctv/T-1');
+    commitOn(r, 'a.txt', 'từ ticket\n', 'ticket sửa a');
+    g(r, 'switch', '-q', 'main');
+    commitOn(r, 'a.txt', 'từ main\n', 'main sửa a');
+    expect(await squashBranch(r, 'main', 'acctv/T-1')).toEqual({ kind: 'conflict', conflicts: ['a.txt'] });
+    expect(readFileSync(join(r, 'a.txt'), 'utf8')).toContain('>>>>>>> acctv/T-1');
   });
 });

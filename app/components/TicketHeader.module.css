@@ -59,3 +59,5 @@
 .kind[data-kind='result'] { border-color: var(--run); }
 .historyText { margin: 4px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 a.shot { display: block; }
+.modes { display: flex; flex-wrap: wrap; gap: 4px 14px; flex-basis: 100%; font-size: 12px; }
+.modes label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }

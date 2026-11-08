@@ -149,6 +149,9 @@ test('duyệt hai lần song song → một 200, một 409; revise/continue/canc
   expect((await post('/api/tickets/T-1/feedback', { text: 'x', images: 'a.png' })).status).toBe(400);
   expect((await post('/api/tickets/T-1/feedback', { text: 'x', images: [{ name: 'a.png' }] })).status).toBe(400);
   expect((await post('/api/tickets/T-1/remove-worktree')).status).toBe(409);
+  // merge: mode sai → 400; ticket còn chạy → 409
+  expect((await post('/api/tickets/T-1/merge', { target: 'main', mode: 'rebase' })).status).toBe(400);
+  expect((await post('/api/tickets/T-1/merge', { target: 'main', mode: 'squash' })).status).toBe(409);
   const c = await post('/api/tickets/T-1/cancel');
   expect(c.status).toBe(200);
   expect(c.json.status).toBe('cancelled');

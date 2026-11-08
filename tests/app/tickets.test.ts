@@ -171,6 +171,8 @@ describe('merge', () => {
       .toBe('main đã có sẵn mọi thay đổi của nhánh ticket, không có gì mới để merge · 09:05:07');
     expect(mergeText({ target: 'main', at, result: 'conflict', conflicts: ['a.ts'] }))
       .toEqual({ tone: 'crit', text: 'merge vào main bị xung đột · 09:05:07' });
+    expect(mergeText({ target: 'main', at, result: 'staged', files: ['a.ts', 'b.ts'] })!.text).toBe('đã đưa 2 file vào main, chưa commit · 09:05:07');
+    expect(mergeText({ target: 'main', at, result: 'staged', files: [] })!.text).toBe('main đã có sẵn mọi thay đổi của nhánh ticket, không có gì mới để đưa vào · 09:05:07');
   });
 });
 

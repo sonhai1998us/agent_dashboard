@@ -112,25 +112,53 @@ export type MergeResult = { kind: 'merged'; head: string; fastForward: boolean; 
  * Xung đột: để nguyên merge dở cho người dùng tự xử lý. Git từ chối (vd. thay đổi chưa commit sẽ bị ghi đè): ném lỗi.
  */
 export async function mergeBranch(repo: string, target: string, branch: string, message: string): Promise<MergeResult> {
+  await switchForMerge(repo, target);
+  const before = (await git(repo, ['rev-parse', 'HEAD'])).trim();
+  const tip = (await git(repo, ['rev-parse', '--verify', `refs/heads/${branch}`])).trim();
+  // theo tên nhánh để dấu xung đột ghi `>>>>>>> acctv/T-…` thay vì mã commit
+  const conflicts = await mergeOrConflicts(repo, ['merge', '--no-edit', '-m', message, branch]);
+  if (conflicts) return { kind: 'conflict', conflicts };
+  const head = (await git(repo, ['rev-parse', 'HEAD'])).trim();
+  return { kind: 'merged', head, fastForward: head === tip && head !== before, upToDate: head === before };
+}
+
+/** `files` rỗng: nhánh đích đã chứa sẵn nhánh ticket, không có gì để đưa vào. */
+export type SquashResult = { kind: 'staged'; files: string[] } | { kind: 'conflict'; conflicts: string[] };
+
+/**
+ * Đưa toàn bộ thay đổi của `branch` vào nhánh `target` mà chưa commit (`git merge --squash`): thay đổi nằm ở phần
+ * đã stage để người dùng xem trong IDE rồi tự commit. Từ chối khi đang có thay đổi đã stage (lẫn với phần đưa vào).
+ */
+export async function squashBranch(repo: string, target: string, branch: string): Promise<SquashResult> {
+  await switchForMerge(repo, target);
+  const staged = await git(repo, ['diff', '--cached', '--quiet']).then(() => false, () => true);
+  if (staged) throw new Error('Thư mục dự án đang có thay đổi đã stage (có thể từ lần đưa vào trước chưa commit); commit hoặc bỏ stage rồi thử lại');
+  const conflicts = await mergeOrConflicts(repo, ['merge', '--squash', branch]);
+  if (conflicts) return { kind: 'conflict', conflicts };
+  const files = (await git(repo, ['-c', 'core.quotepath=false', 'diff', '--cached', '--name-only', '-z'])).split('\0').filter(Boolean);
+  return { kind: 'staged', files };
+}
+
+async function switchForMerge(repo: string, target: string): Promise<void> {
   if (!target || target.startsWith('-')) throw new Error(`Tên nhánh đích không hợp lệ: ${target}`);
   const refExists = (ref: string) => git(repo, ['rev-parse', '--verify', '-q', ref]).then(() => true, () => false);
   if (await refExists('MERGE_HEAD')) throw new Error('Thư mục dự án đang có một merge dở dang; xử lý xong (commit hoặc git merge --abort) rồi thử lại');
   if (!(await refExists(`refs/heads/${target}`))) throw new Error(`Không có nhánh ${target} trong ${repo}`);
   const current = (await git(repo, ['symbolic-ref', '--short', '-q', 'HEAD']).catch(() => '')).trim();
   if (current !== target) await git(repo, ['switch', target]);
-  const before = (await git(repo, ['rev-parse', 'HEAD'])).trim();
-  const tip = (await git(repo, ['rev-parse', '--verify', `refs/heads/${branch}`])).trim();
+}
+
+/** Chạy lệnh merge; xung đột → danh sách file xung đột, lỗi khác → ném. */
+async function mergeOrConflicts(repo: string, args: string[]): Promise<string[] | null> {
   try {
-    // theo tên nhánh để dấu xung đột ghi `>>>>>>> acctv/T-…` thay vì mã commit
-    await git(repo, ['merge', '--no-edit', '-m', message, branch], GIT_TIMEOUT_MS.commit);
+    await git(repo, args, GIT_TIMEOUT_MS.commit);
+    return null;
   } catch (e) {
     const conflicts = (await git(repo, ['-c', 'core.quotepath=false', 'diff', '--name-only', '--diff-filter=U', '-z']).catch(() => ''))
       .split('\0').filter(Boolean);
-    if (conflicts.length) return { kind: 'conflict', conflicts };
+    if (conflicts.length) return conflicts;
     throw e;
   }
-  const head = (await git(repo, ['rev-parse', 'HEAD'])).trim();
-  return { kind: 'merged', head, fastForward: head === tip && head !== before, upToDate: head === before };
 }
 
 /** Tạo lại worktree cho nhánh đã có (worktree cũ đã bị xoá). */

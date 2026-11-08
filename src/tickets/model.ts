@@ -51,10 +51,17 @@ export interface FeedbackEntry {
   images: string[];
 }
 
-/** merged: đã vào nhánh đích tại `head`. conflict: merge dở trong thư mục dự án, chờ người dùng xử lý `conflicts`. */
+/** commit: merge có commit (fast-forward được thì fast-forward). squash: đưa thay đổi vào phần đã stage, người dùng tự commit. */
+export type MergeMode = 'commit' | 'squash';
+
+/**
+ * merged: đã vào nhánh đích tại `head`. staged (squash): `files` đã stage trong thư mục dự án, chưa commit; rỗng = không có gì mới.
+ * conflict: merge dở trong thư mục dự án, chờ người dùng xử lý `conflicts`.
+ */
 export type TicketMerge =
   | { target: string; at: number; result: 'merged'; head: string; fastForward: boolean; upToDate: boolean }
-  | { target: string; at: number; result: 'conflict'; conflicts: string[] };
+  | { target: string; at: number; result: 'staged'; files: string[] }
+  | { target: string; at: number; result: 'conflict'; conflicts: string[]; squash?: boolean };
 
 export interface Ticket {
   id: string;

@@ -5,7 +5,7 @@ import type { Store } from '@/src/core/store';
 import type { Hub } from '@/src/core/hub';
 import { isManagedId, type AgentInfo, type Alert, type NormalizedEvent } from '@/src/core/model';
 import type { TicketStore } from '@/src/tickets/store';
-import { FEEDBACK_EXT, FEEDBACK_IMAGE_BYTES, FEEDBACK_IMAGES_MAX, FEEDBACK_TEXT_MAX, TERMINAL_STATES, type UserAction, type AgentKind, type ManagedAgent, type ManagedState, type Plan, type Role, type RoleSpec, type Ticket, type TicketStatus, type WaitSpan, type WorkRole } from '@/src/tickets/model';
+import { FEEDBACK_EXT, FEEDBACK_IMAGE_BYTES, FEEDBACK_IMAGES_MAX, FEEDBACK_TEXT_MAX, TERMINAL_STATES, type UserAction, type AgentKind, type ManagedAgent, type ManagedState, type MergeMode, type Plan, type Role, type RoleSpec, type Ticket, type TicketStatus, type WaitSpan, type WorkRole } from '@/src/tickets/model';
 import { branchName, filesOverlap, transition, validatePlan, type TicketEvent } from '@/src/tickets/flow';
 import { CAPTURE_TOOL, checkTool, matchEntry, USER_ACTION_TOOL, type GuardPolicy } from '@/src/guard/policy';
 import type { PreviewManager } from '@/src/preview/manager';
@@ -378,8 +378,9 @@ export class Orchestrator {
    * Merge nhánh ticket vào `target` ngay trong thư mục dự án của người dùng. Phần dang dở trong worktree được snapshot trước.
    * Xung đột không phải lỗi: merge dở được để nguyên cho người dùng xử lý, ticket ghi lại danh sách file.
    */
-  async mergeTicket(ticketId: string, target: string): Promise<Ticket> {
+  async mergeTicket(ticketId: string, target: string, mode: MergeMode = 'commit'): Promise<Ticket> {
     const t = this.mustTicket(ticketId);
+    if (mode !== 'commit' && mode !== 'squash') throw new OrchestratorError(400, 'Kiểu merge phải là commit hoặc squash');
     if (!ENDED_TICKET.includes(t.status)) throw new OrchestratorError(409, 'Chỉ merge khi ticket đã xong, escalated hoặc đã huỷ');
     if (!t.branch) throw new OrchestratorError(409, 'Ticket chưa có nhánh');
     const to = isStr(target) ? target.trim() : '';
@@ -393,17 +394,26 @@ export class Orchestrator {
         const dirty = await this.deps.git.gitInfo(t.worktree).then((i) => i.dirty, () => true);
         if (dirty) throw new OrchestratorError(409, 'Không commit được snapshot; worktree còn thay đổi chưa lưu. Xử lý rồi thử lại.');
       }
-      let res: Awaited<ReturnType<typeof this.deps.git.mergeBranch>>;
+      const squash = mode === 'squash';
+      let res: Awaited<ReturnType<typeof this.deps.git.mergeBranch>> | Awaited<ReturnType<typeof this.deps.git.squashBranch>>;
       try {
-        res = await this.deps.git.mergeBranch(t.dir, to, t.branch, `Merge ${ticketId}: ${t.title}`);
+        res = squash
+          ? await this.deps.git.squashBranch(t.dir, to, t.branch)
+          : await this.deps.git.mergeBranch(t.dir, to, t.branch, `Merge ${ticketId}: ${t.title}`);
       } catch (e) {
-        this.log(ticketId, `Không merge được ${t.branch} vào ${to}: ${errMsg(e)}`);
-        throw new OrchestratorError(400, `Không merge được vào ${to}: ${errMsg(e)}`);
+        this.log(ticketId, `Không ${squash ? 'đưa' : 'merge'} được ${t.branch} vào ${to}: ${errMsg(e)}`);
+        throw new OrchestratorError(400, `Không ${squash ? 'đưa thay đổi' : 'merge'} được vào ${to}: ${errMsg(e)}`);
       }
       const at = this.now();
       if (res.kind === 'conflict') {
-        this.log(ticketId, `Merge ${t.branch} vào ${to} bị xung đột (${res.conflicts.join(', ')}); sửa trong ${t.dir} rồi commit`);
-        return this.save(ticketId, { merge: { target: to, at, result: 'conflict', conflicts: res.conflicts } });
+        this.log(ticketId, `${squash ? 'Đưa thay đổi' : 'Merge'} ${t.branch} vào ${to} bị xung đột (${res.conflicts.join(', ')}); sửa trong ${t.dir} rồi commit`);
+        return this.save(ticketId, { merge: { target: to, at, result: 'conflict', conflicts: res.conflicts, ...(squash ? { squash: true } : {}) } });
+      }
+      if (res.kind === 'staged') {
+        this.log(ticketId, res.files.length
+          ? `Đã đưa thay đổi của ${t.branch} vào ${to}, chưa commit (${res.files.length} file đã stage trong ${t.dir})`
+          : `Đưa thay đổi ${t.branch} vào ${to}: ${to} đã có sẵn mọi thay đổi, không có gì mới`);
+        return this.save(ticketId, { merge: { target: to, at, result: 'staged', files: res.files } });
       }
       this.log(ticketId, res.upToDate
         ? `Merge ${t.branch} vào ${to}: ${to} đã có sẵn mọi thay đổi, không có gì mới`

@@ -4,10 +4,14 @@ import Link from 'next/link';
 import { postJson, useLive } from '../lib/liveStore';
 import { canFeedback, canMerge, mergeText, previewLabel, reportBlocks, statusAction, ticketDuration, ticketStatusText, type Inline } from '../lib/tickets';
 import { fmtDuration } from '../lib/format';
-import type { FeedbackEntry, Ticket } from '@/src/tickets/model';
+import type { FeedbackEntry, MergeMode, Ticket } from '@/src/tickets/model';
 import FeedbackForm from './FeedbackForm';
 import FeedbackHistory from './FeedbackHistory';
 import styles from './TicketHeader.module.css';
+
+const MERGE_MODE_KEY = 'acctv.merge.mode';
+const loadMode = (): MergeMode => { try { return localStorage.getItem(MERGE_MODE_KEY) === 'squash' ? 'squash' : 'commit'; } catch { return 'commit'; } };
+const saveMode = (m: MergeMode): void => { try { localStorage.setItem(MERGE_MODE_KEY, m); } catch { /* bộ nhớ trình duyệt bị chặn: chỉ mất lựa chọn */ } };
 
 function Parts({ parts }: { parts: Inline[] }) {
   return (
@@ -62,6 +66,7 @@ export default function TicketHeader() {
   const [mergeOpen, setMergeOpen] = useState(false);
   const [targets, setTargets] = useState<string[] | null>(null);
   const [target, setTarget] = useState('');
+  const [mode, setMode] = useState<MergeMode>('commit');
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [history, setHistory] = useState<FeedbackEntry[]>([]);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -99,7 +104,7 @@ export default function TicketHeader() {
     finally { setBusy(false); }
   };
   const openMerge = async () => {
-    setMergeOpen(true); setTargets(null); setError(null);
+    setMergeOpen(true); setTargets(null); setError(null); setMode(loadMode());
     try {
       const r = await fetch(`/api/tickets/${t.id}/merge-targets`);
       const j = await r.json().catch(() => ({}));
@@ -180,8 +185,14 @@ export default function TicketHeader() {
           <span className="mono">{merged.text}</span>
           {t.merge.result === 'conflict' && (
             <>
-              <div>Sửa các file sau trong <code className="mono">{t.dir}</code> rồi commit (hoặc <code className="mono">git merge --abort</code> để huỷ):</div>
+              <div>Sửa các file sau trong <code className="mono">{t.dir}</code> rồi commit (hoặc <code className="mono">{t.merge.squash ? 'git reset --merge' : 'git merge --abort'}</code> để huỷ):</div>
               <ul className={`${styles.files} mono`}>{t.merge.conflicts.map((f) => <li key={f}>{f}</li>)}</ul>
+            </>
+          )}
+          {t.merge.result === 'staged' && t.merge.files.length > 0 && (
+            <>
+              <div>Các file đã stage trong <code className="mono">{t.dir}</code>. Xem trong Source Control của IDE rồi tự commit (hoặc <code className="mono">git reset --merge</code> để bỏ):</div>
+              <ul className={`${styles.files} mono`}>{t.merge.files.slice(0, 20).map((f) => <li key={f}>{f}</li>)}{t.merge.files.length > 20 && <li>… và {t.merge.files.length - 20} file nữa</li>}</ul>
             </>
           )}
         </div>
@@ -189,7 +200,7 @@ export default function TicketHeader() {
       {mergeOpen && (
         <form
           className={styles.mergeForm}
-          onSubmit={(e) => { e.preventDefault(); if (target) void act('merge', { target }, () => setMergeOpen(false)); }}
+          onSubmit={(e) => { e.preventDefault(); if (target) { saveMode(mode); void act('merge', { target, mode }, () => setMergeOpen(false)); } }}
         >
           {targets === null ? <span className={styles.dur}>đang đọc nhánh…</span> : targets.length === 0 ? (
             <span className={styles.dur}>Dự án không có nhánh nào khác để merge vào.</span>
@@ -201,11 +212,15 @@ export default function TicketHeader() {
                   {targets.map((b) => <option key={b} value={b}>{b}</option>)}
                 </select>
               </label>
+              <span className={styles.modes} role="radiogroup" aria-label="Kiểu merge">
+                <label><input type="radio" name="merge-mode" checked={mode === 'commit'} onChange={() => setMode('commit')} /> Merge và commit luôn</label>
+                <label><input type="radio" name="merge-mode" checked={mode === 'squash'} onChange={() => setMode('squash')} /> Chỉ đưa thay đổi vào, chưa commit (xem trong IDE rồi tự commit)</label>
+              </span>
               <span className={styles.hint}>Chạy trong <code className="mono">{t.dir}</code>. Phần dang dở trong worktree được commit trước. Có xung đột thì để nguyên cho bạn xử lý.</span>
             </>
           )}
           <span className={styles.actions}>
-            <button type="submit" className={styles.btn} disabled={busy || !target || !targets?.length}>{busy ? 'Đang merge…' : 'Merge'}</button>
+            <button type="submit" className={styles.btn} disabled={busy || !target || !targets?.length}>{busy ? 'Đang merge…' : mode === 'squash' ? 'Đưa vào' : 'Merge'}</button>
             <button type="button" className={styles.btn} onClick={() => setMergeOpen(false)}>Đóng</button>
           </span>
         </form>

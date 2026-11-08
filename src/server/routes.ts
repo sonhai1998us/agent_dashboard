@@ -310,7 +310,12 @@ const ROUTES: Route[] = [
   { method: 'GET', re: /^\/api\/tickets\/([^/]+)\/merge-targets$/, run: async ({ core, params: [id] }) => ok(await core.orchestrator.mergeTargets(id)) },
   {
     method: 'POST', re: /^\/api\/tickets\/([^/]+)\/merge$/,
-    run: async ({ req, core, params: [id] }) => ok(await core.orchestrator.mergeTicket(id, text(objBody(await readJson(req)).target, 'target', 255))),
+    run: async ({ req, core, params: [id] }) => {
+      const b = objBody(await readJson(req));
+      const mode = b.mode ?? 'commit';
+      if (mode !== 'commit' && mode !== 'squash') throw new HttpError(400, 'mode phải là commit hoặc squash');
+      return ok(await core.orchestrator.mergeTicket(id, text(b.target, 'target', 255), mode));
+    },
   },
   {
     method: 'POST', re: /^\/api\/agents\/([^/]+)\/stop$/,

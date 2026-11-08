@@ -466,6 +466,28 @@ describe('điều khiển agent', () => {
     expect(tickets.getTicket(T)!.merge!.result).toBe('conflict');
   });
 
+  it('merge kiểu squash: thay đổi nằm ở phần đã stage của thư mục dự án, HEAD giữ nguyên', async () => {
+    const { orch, tickets } = env;
+    const main = g(env.repo, 'symbolic-ref', '--short', 'HEAD').trim();
+    const T = await toRunning(env);
+    await orch.cancel(T);
+    await orch.idle();
+    const { branch, worktree: wt } = tickets.getTicket(T)!;
+    const before = g(env.repo, 'rev-parse', 'HEAD').trim();
+    writeFileSync(join(wt!, 'src', 'moi.ts'), 'export const m = 1;\n');
+    await expect(orch.mergeTicket(T, main, 'rebase' as never)).rejects.toMatchObject({ status: 400 });
+    const t1 = await orch.mergeTicket(T, main, 'squash');
+    expect(t1.merge).toMatchObject({ target: main, result: 'staged', files: ['src/moi.ts'] });
+    expect(g(env.repo, 'rev-parse', 'HEAD').trim()).toBe(before);
+    expect(g(env.repo, 'diff', '--cached', '--name-only').trim()).toBe('src/moi.ts');
+    expect(logs(env, T).some((l) => l.startsWith(`Đã đưa thay đổi của ${branch} vào ${main}, chưa commit (1 file`))).toBe(true);
+    // chưa commit phần đã đưa vào → từ chối lần sau
+    await expect(orch.mergeTicket(T, main, 'squash')).rejects.toMatchObject({ status: 400, message: expect.stringContaining('đã stage') });
+    // người dùng commit xong, đưa lại: đã có hết
+    g(env.repo, 'commit', '-qm', 'tự commit');
+    expect((await orch.mergeTicket(T, main, 'squash')).merge).toMatchObject({ result: 'staged', files: [] });
+  });
+
   it('merge: ticket chưa có nhánh → 409', async () => {
     const t0 = await env.orch.createTicket({ title: 'x', description: 'y', dir: env.repo });
     await env.orch.cancel(t0.id);

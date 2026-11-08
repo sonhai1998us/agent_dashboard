@@ -164,6 +164,11 @@ export const canMerge = (t: Ticket): boolean => (t.status === 'done' || t.status
 export function mergeText(m: TicketMerge | null | undefined): { tone: 'ok' | 'crit'; text: string } | null {
   if (!m) return null;
   if (m.result === 'conflict') return { tone: 'crit', text: `merge vào ${m.target} bị xung đột · ${fmtClock(m.at)}` };
+  if (m.result === 'staged') {
+    return m.files.length
+      ? { tone: 'ok', text: `đã đưa ${m.files.length} file vào ${m.target}, chưa commit · ${fmtClock(m.at)}` }
+      : { tone: 'ok', text: `${m.target} đã có sẵn mọi thay đổi của nhánh ticket, không có gì mới để đưa vào · ${fmtClock(m.at)}` };
+  }
   if (m.upToDate) return { tone: 'ok', text: `${m.target} đã có sẵn mọi thay đổi của nhánh ticket, không có gì mới để merge · ${fmtClock(m.at)}` };
   return { tone: 'ok', text: `đã merge vào ${m.target} @ ${m.head.slice(0, 7)}${m.fastForward ? ' (fast-forward)' : ''} · ${fmtClock(m.at)}` };
 }
