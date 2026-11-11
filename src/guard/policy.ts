@@ -65,7 +65,9 @@ export function matchEntry(entry: string, path: string): boolean {
 
 const WIN = process.platform === 'win32';
 const P = WIN ? nodePath.win32 : nodePath.posix;
-const cmp = (s: string) => (WIN ? s.toLowerCase() : s);
+// ổ đĩa mặc định của macOS (APFS) cũng không phân biệt hoa thường: `.GIT` chính là `.git`
+const FOLD = WIN || process.platform === 'darwin';
+const cmp = (s: string) => (FOLD ? s.toLowerCase() : s);
 
 const deny = (reason: string, scope = false): GuardDecision => ({ allow: false, reason: `[acctv-guard] ${reason}`, scope });
 const strField = (input: unknown, ...keys: string[]): string | undefined => {
@@ -80,7 +82,7 @@ const strField = (input: unknown, ...keys: string[]): string | undefined => {
 /** Đường dẫn tương đối (dùng `/`) nếu `abs` nằm trong `root`, ngược lại null. */
 function relInside(root: string, abs: string): string | null {
   const a = P.resolve(root);
-  const r = WIN ? P.relative(a.toLowerCase(), abs.toLowerCase()) : P.relative(a, abs);
+  const r = FOLD ? P.relative(a.toLowerCase(), abs.toLowerCase()) : P.relative(a, abs);
   if (r === '') return '';
   if (r === '..' || r.startsWith('..' + P.sep) || r.startsWith('../') || P.isAbsolute(r)) return null;
   // lấy phần tương đối từ đường dẫn gốc (giữ nguyên hoa/thường)

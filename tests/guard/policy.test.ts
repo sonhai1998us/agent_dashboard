@@ -340,6 +340,10 @@ describe('checkTool: controller có quyền như người dùng', () => {
     ok('WebFetch', { url: 'https://example.com' });
     ok('Agent', { prompt: 'x' });
   });
+  it.runIf(process.platform === 'darwin')('darwin: thư mục được bảo vệ không phân biệt hoa thường', () => {
+    no('Write', { file_path: '/home/me/.CLAUDE/settings.json' }, /được bảo vệ/);
+    no('Edit', { file_path: '/HOME/me/.acctv/config.json' }, /được bảo vệ/);
+  });
   it('ghi file ngoài thư mục được bảo vệ', () => {
     ok('Write', { file_path: 'notes.md' });
     ok('Edit', { file_path: other });

@@ -53,8 +53,12 @@ export function liveMetrics(core: Core, now: number) {
 export function readJson(req: http.IncomingMessage, limitBytes = 1_000_000): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const tooBig = (): void => {
-      req.resume(); // bỏ phần còn lại
-      reject(new HttpError(413, `body vượt quá ${limitBytes} byte`));
+      const err = new HttpError(413, `body vượt quá ${limitBytes} byte`);
+      // đọc bỏ hết phần còn lại rồi mới trả lời: trả 413 rồi đóng kết nối khi client còn đang gửi thì client nhận ECONNRESET/EPIPE thay vì 413
+      if (req.complete) return reject(err);
+      req.on('end', () => reject(err));
+      req.on('close', () => reject(err));
+      req.resume();
     };
     if (Number(req.headers['content-length'] ?? 0) > limitBytes) return tooBig();
     const chunks: Buffer[] = [];
