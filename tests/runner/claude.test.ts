@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, realpathSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import * as proc from '@/src/runner/proc';
@@ -20,7 +20,8 @@ const streamLines = readFileSync('tests/fixtures/claude/stream.jsonl', 'utf8').s
 const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 
 function setup(script: unknown) {
-  const root = mkdtempSync(path.join(tmpdir(), 'acctv-run-'));
+  // realpath: trên macOS tmpdir là /var/… nhưng tiến trình con thấy cwd thật /private/var/…
+  const root = realpathSync(mkdtempSync(path.join(tmpdir(), 'acctv-run-')));
   const cwd = path.join(root, 'dự án có dấu cách');
   mkdirSync(cwd);
   const scriptFile = path.join(root, 'script.json');

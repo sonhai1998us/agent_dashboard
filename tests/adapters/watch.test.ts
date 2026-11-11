@@ -8,6 +8,7 @@ import { Store } from '@/src/core/store';
 import type { HubEvent } from '@/src/core/model';
 import { createClaudeWatcher } from '@/src/adapters/claude/watch';
 import { createCodexWatcher } from '@/src/adapters/codex/watch';
+import { createTailCore } from '@/src/adapters/watchBase';
 
 let tmp: string;
 let cfg: Config;
@@ -420,12 +421,35 @@ test('lưới an toàn: mỗi tick liveness, file của agent hoạt động tro
   expect(store.getOffset(mainFile())?.lines).toBe(3);
 });
 
+test('lưới an toàn: file mới mà sự kiện fs bị mất vẫn được rescan tìm ra và đọc; file cũ hơn backfill thì không', async () => {
+  const dir = path.join(cfg.claudeDir, 'projects', 'proj');
+  const reads: string[] = [];
+  // không start(): không có watcher fs nào, chỉ rescan mới tìm được file
+  const core = createTailCore<{ id: string }>({
+    root: path.join(cfg.claudeDir, 'projects'), match: (f) => f.endsWith('.jsonl'),
+    makeCtx: (f) => ({ id: f }), parse: (l) => { reads.push(l); return []; },
+    store, onEvents: () => {}, backfillMs: 3600_000, agentId: (c) => c.id,
+  });
+  fs.writeFileSync(path.join(dir, 'new.jsonl'), 'moi\n');
+  fs.writeFileSync(path.join(dir, 'old.jsonl'), 'cu\n');
+  const past = new Date(Date.now() - 2 * 3600_000);
+  fs.utimesSync(path.join(dir, 'old.jsonl'), past, past);
+  core.rescan(() => false);
+  await waitFor(() => reads.includes('moi'));
+  core.rescan(() => false); // file đã biết: không đọc lại
+  await new Promise((r) => setTimeout(r, 50));
+  expect(reads).toEqual(['moi']);
+  await core.stop();
+});
+
 test('file mới tạo ngay sau start luôn được đọc (10 lần, mỗi lần thư mục mới)', async () => {
   // Hồi quy: chế độ polling dựa vào mtime của thư mục, NTFS không luôn đổi mtime khi tạo file → mất file mới.
+  // macOS: FSEvents có thể làm rơi sự kiện ngay sau `ready`; tick liveness ngắn để lưới an toàn bắt lại.
   for (let i = 0; i < 10; i++) {
     const dir = path.join(cfg.claudeDir, 'projects', `p${i}`);
     fs.mkdirSync(dir, { recursive: true });
-    const w = claudeWatcher();
+    const w = createClaudeWatcher(cfg, store, () => {}, { livenessMs: 100 });
+    closers.push(() => w.stop());
     await w.start(); await w.backfilled();
     fs.writeFileSync(path.join(dir, `sess-n${i}.jsonl`), fxClaude('main.jsonl'));
     await waitFor(() => store.getAgent(`claude:sess-n${i}`) !== undefined, 5000);

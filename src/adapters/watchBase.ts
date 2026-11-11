@@ -55,8 +55,9 @@ export interface TailCore {
   /** Resolves when the running backfill (if any) has finished. */
   backfilled(): Promise<void>;
   /**
-   * Safety net for dropped fs events: re-stats every known file whose agent `isActive` and
-   * re-reads it when its size differs from the saved offset.
+   * Safety net for dropped fs events: reads files under root never seen before (within the backfill
+   * window), and re-stats every known file whose agent `isActive`, re-reading it when its size
+   * differs from the saved offset.
    */
   rescan(isActive: (agentId: string) => boolean): void;
   /** Files read so far with their ctx. */
@@ -88,6 +89,8 @@ export function createTailCore<Ctx>(spec: TailWatcherSpec<Ctx>): TailCore {
   const retryMs = spec.options?.retryMs ?? DEFAULT_RETRY_MS;
   const failures = new Map<string, number>(); // file -> consecutive failed reads
   const retryTimers = new Map<string, NodeJS.Timeout>();
+  /** File đã gặp khi duyệt thư mục (đã đọc, hoặc bỏ qua vì cũ hơn backfill): rescan chỉ stat file chưa gặp. */
+  const known = new Set<string>();
   let fsw: ReturnType<typeof chokidar.watch> | null = null;
   let stopped = false;
 
@@ -175,6 +178,7 @@ export function createTailCore<Ctx>(spec: TailWatcherSpec<Ctx>): TailCore {
     const recent: { f: string; m: number }[] = [];
     for (const f of all) {
       if (!spec.match(f)) continue;
+      known.add(f);
       try {
         const m = fs.statSync(f).mtimeMs;
         if (m >= cutoff) recent.push({ f, m });
@@ -248,6 +252,18 @@ export function createTailCore<Ctx>(spec: TailWatcherSpec<Ctx>): TailCore {
     entries: () => ctxs.entries(),
     rescan(isActive) {
       if (stopped) return;
+      // sự kiện fs có thể mất hẳn (macOS: FSEvents chỉ chạy thật một lúc sau `ready` của chokidar): tìm cả file mới
+      const all: string[] = [];
+      walk(spec.root, all);
+      const cutoff = Date.now() - spec.backfillMs;
+      for (const f of all) {
+        if (known.has(f) || ctxs.has(f) || queues.has(f) || !spec.match(f)) continue;
+        try {
+          const m = fs.statSync(f).mtimeMs;
+          known.add(f);
+          if (m >= cutoff) void enqueue(f);
+        } catch { /* biến mất giữa chừng: tick sau xét lại */ }
+      }
       for (const [file, ctx] of ctxs) {
         if (queues.has(file) || retryTimers.has(file)) continue; // a read is already pending
         const id = spec.agentId?.(ctx);

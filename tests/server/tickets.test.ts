@@ -83,6 +83,13 @@ async function toAwaiting(): Promise<void> {
   await waitFor(async () => (await call('GET', '/api/tickets/T-1')).json.ticket.status === 'awaiting_approval');
 }
 
+test('body quá cỡ: client luôn nhận 413, không bị đóng kết nối khi còn đang gửi (ECONNRESET/EPIPE)', async () => {
+  await start();
+  const big = JSON.stringify({ title: 'x', dir: repo, description: 'a'.repeat(1_100_000) });
+  // trước khi sửa: khoảng 40% lần fetch thất bại vì server đóng kết nối giữa lúc client gửi body
+  for (let i = 0; i < 30; i++) expect((await post('/api/tickets', big)).status).toBe(413);
+});
+
 test('POST /api/tickets: 201 planning; 415; Origin lạ 403; không phải repo 400; validate input', async () => {
   await start();
   const ok = await post('/api/tickets', { title: 'Thêm trang', dir: repo });
