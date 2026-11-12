@@ -173,6 +173,17 @@ export class TicketStore {
       .run(ticketId, at, kind, text, JSON.stringify(images));
   }
 
+  /** Xoá ticket cùng log, góp ý, agent được quản lý và khoảng chờ của chúng. Không đụng bảng agents/calls (Store). */
+  deleteTicket(ticketId: string): void {
+    this.store.transaction(() => {
+      for (const t of ['tickets', 'ticket_log', 'ticket_feedback', 'managed_agents']) {
+        this.db.prepare(`DELETE FROM ${t} WHERE ${t === 'tickets' ? 'id' : 'ticket_id'} = ?`).run(ticketId);
+      }
+      const p = `acctv:${ticketId}:`;
+      this.db.prepare('DELETE FROM waits WHERE substr(agent_id, 1, ?) = ?').run(p.length, p);
+    });
+  }
+
   /** Mới nhất trước. */
   listFeedback(ticketId: string): FeedbackEntry[] {
     return (this.db.prepare('SELECT * FROM ticket_feedback WHERE ticket_id = ? ORDER BY id DESC').all(ticketId) as Row[])

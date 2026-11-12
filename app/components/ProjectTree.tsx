@@ -3,10 +3,17 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import Link from 'next/link';
 import type { AgentInfo, Alert, Source } from '@/src/core/model';
 import { selectAgent, selectTicket, useLive } from '../lib/liveStore';
-import { isExternal, ticketStatusText } from '../lib/tickets';
+import { canDeleteSession, canDeleteTicket, isExternal, ticketStatusText } from '../lib/tickets';
 import { buildRoots } from '../lib/tree';
 import { groupByProject } from '../lib/projects';
+import DeleteDialog, { type DeleteRequest } from './DeleteDialog';
 import styles from './ProjectTree.module.css';
+
+/** khoá chọn: `t:<ticket id>` hoặc `s:<agent id>` */
+const reqOf = (keys: string[]): DeleteRequest => ({
+  tickets: keys.filter((k) => k.startsWith('t:')).map((k) => k.slice(2)),
+  sessions: keys.filter((k) => k.startsWith('s:')).map((k) => k.slice(2)),
+});
 
 type Tone = 'run' | 'wait' | 'ended' | 'warn' | 'crit';
 
@@ -44,6 +51,9 @@ export default function ProjectTree() {
   const [source, setSource] = useState<'all' | Source>('all');
   const [onlyRunning, setOnlyRunning] = useState(false);
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
+  const [selecting, setSelecting] = useState(false);
+  const [picked, setPicked] = useState<Set<string>>(() => new Set());
+  const [del, setDel] = useState<DeleteRequest | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => { setCollapsed(loadCollapsed()); }, []);
@@ -64,6 +74,30 @@ export default function ProjectTree() {
     const tickets = Object.values(ticketsMap).filter((t) => !onlyRunning || RUNNING_TICKET.has(t.status));
     return groupByProject(tickets, sessions);
   }, [agentsMap, ticketsMap, source, onlyRunning]);
+
+  /** khoá xoá được của từng nhóm đang hiện; mục đã chọn nhưng biến mất hoặc chạy lại thì không tính */
+  const deletable = useMemo(() => new Map(groups.map((g) => [g.key, [
+    ...g.tickets.filter(canDeleteTicket).map((t) => `t:${t.id}`),
+    ...g.sessions.filter(canDeleteSession).map((a) => `s:${a.id}`),
+  ]])), [groups]);
+  const chosen = [...deletable.values()].flat().filter((k) => picked.has(k));
+
+  const pick = (keys: string[], on: boolean) => setPicked((prev) => {
+    const next = new Set(prev);
+    for (const k of keys) if (on) next.add(k); else next.delete(k);
+    return next;
+  });
+  const check = (k: string, ok: boolean, label: string) => (
+    <input
+      type="checkbox" className={styles.check} aria-label={label} disabled={!ok}
+      title={ok ? undefined : 'Đang chạy: không xoá được'}
+      checked={ok && picked.has(k)} onChange={(e) => pick([k], e.target.checked)}
+    />
+  );
+  const trash = (req: DeleteRequest, label: string) => (
+    <button type="button" className={styles.trash} aria-label={label} title={label} onClick={() => setDel(req)}>🗑</button>
+  );
+  const stopSelecting = () => { setSelecting(false); setPicked(new Set()); };
 
   const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
     const items = Array.from(listRef.current?.querySelectorAll<HTMLButtonElement>('button[data-row]') ?? []);
@@ -95,6 +129,10 @@ export default function ProjectTree() {
         <label className={styles.f}>
           <input type="checkbox" checked={onlyRunning} onChange={(e) => setOnlyRunning(e.target.checked)} /> đang chạy
         </label>
+        <button
+          type="button" className={styles.selBtn} aria-pressed={selecting}
+          onClick={() => (selecting ? stopSelecting() : setSelecting(true))}
+        >{selecting ? 'Xong' : 'Chọn để xoá'}</button>
       </div>
 
       {/* màn hẹp (dưới 1024px): cột trái thành một select, nhóm theo project */}
@@ -125,6 +163,18 @@ export default function ProjectTree() {
           return (
             <div key={g.key} className={styles.group}>
               <div className={styles.folderRow}>
+                {selecting && (() => {
+                  const keys = deletable.get(g.key) ?? [];
+                  const n = keys.filter((k) => picked.has(k)).length;
+                  return (
+                    <input
+                      type="checkbox" className={styles.check} aria-label={`Chọn mọi mục xoá được trong ${g.name}`}
+                      disabled={!keys.length} checked={!!keys.length && n === keys.length}
+                      ref={(el) => { if (el) el.indeterminate = n > 0 && n < keys.length; }}
+                      onChange={(e) => pick(keys, e.target.checked)}
+                    />
+                  );
+                })()}
                 <button
                   type="button" data-row data-project={g.key}
                   className={`${styles.folder} ${!open && hasSel ? styles.sel : ''}`}
@@ -153,18 +203,22 @@ export default function ProjectTree() {
                     const sel = selTicket === t.id;
                     return (
                       <div key={t.id} className={styles.item}>
-                        <button
-                          data-row type="button"
-                          className={`${styles.row} ${sel ? styles.sel : ''} ${st.tone === 'ended' ? styles.dim : ''}`}
-                          aria-current={sel ? 'true' : undefined}
-                          onClick={() => selectTicket(t.id)}
-                        >
-                          <span className={styles.ico} data-tone={st.tone} aria-hidden="true">{st.icon}</span>
-                          <span className={styles.txt}>
-                            <span className={styles.l1}><span className={styles.label}>{t.title}</span></span>
-                            <span className={styles.meta}><span className="mono">{t.id}</span> <span data-tone={st.tone} className={styles.st}>{st.text}</span></span>
-                          </span>
-                        </button>
+                        <div className={styles.line}>
+                          {selecting && check(`t:${t.id}`, canDeleteTicket(t), `Chọn ${t.id}`)}
+                          <button
+                            data-row type="button"
+                            className={`${styles.row} ${sel ? styles.sel : ''} ${st.tone === 'ended' ? styles.dim : ''}`}
+                            aria-current={sel ? 'true' : undefined}
+                            onClick={() => selectTicket(t.id)}
+                          >
+                            <span className={styles.ico} data-tone={st.tone} aria-hidden="true">{st.icon}</span>
+                            <span className={styles.txt}>
+                              <span className={styles.l1}><span className={styles.label}>{t.title}</span></span>
+                              <span className={styles.meta}><span className="mono">{t.id}</span> <span data-tone={st.tone} className={styles.st}>{st.text}</span></span>
+                            </span>
+                          </button>
+                          {!selecting && canDeleteTicket(t) && trash({ tickets: [t.id], sessions: [] }, `Xoá ${t.id}`)}
+                        </div>
                         {t.status === 'awaiting_approval' && (
                           <Link href={`/tickets/${t.id}/plan`} className={styles.approve}>Duyệt kế hoạch →</Link>
                         )}
@@ -177,18 +231,22 @@ export default function ProjectTree() {
                     const st = statusOf(a, alerts);
                     const sel = selAgent === a.id && !selTicket;
                     return (
-                      <button
-                        key={a.id} data-row type="button"
-                        className={`${styles.row} ${sel ? styles.sel : ''} ${st.tone === 'ended' ? styles.dim : ''}`}
-                        aria-current={sel ? 'true' : undefined}
-                        aria-label={`${a.source} ${a.label}, ${st.text}`}
-                        onClick={() => selectAgent(a.id)}
-                      >
-                        <span className={styles.ico} data-tone={st.tone} aria-hidden="true">{st.icon}</span>
-                        <span className={styles.txt}>
-                          <span className={styles.l1}><span className={styles.src}>{a.source}</span> <span className={styles.label}>{a.label}</span></span>
-                        </span>
-                      </button>
+                      <div key={a.id} className={styles.line}>
+                        {selecting && check(`s:${a.id}`, canDeleteSession(a), `Chọn phiên ${a.source} ${a.label}`)}
+                        <button
+                          data-row type="button"
+                          className={`${styles.row} ${sel ? styles.sel : ''} ${st.tone === 'ended' ? styles.dim : ''}`}
+                          aria-current={sel ? 'true' : undefined}
+                          aria-label={`${a.source} ${a.label}, ${st.text}`}
+                          onClick={() => selectAgent(a.id)}
+                        >
+                          <span className={styles.ico} data-tone={st.tone} aria-hidden="true">{st.icon}</span>
+                          <span className={styles.txt}>
+                            <span className={styles.l1}><span className={styles.src}>{a.source}</span> <span className={styles.label}>{a.label}</span></span>
+                          </span>
+                        </button>
+                        {!selecting && canDeleteSession(a) && trash({ tickets: [], sessions: [a.id] }, `Xoá phiên ${a.source} ${a.label}`)}
+                      </div>
                     );
                   })}
                 </div>
@@ -196,7 +254,16 @@ export default function ProjectTree() {
             </div>
           );
         })}
+        {selecting && (
+          <div className={styles.bulk}>
+            <span>Đã chọn {chosen.length}</span>
+            <button type="button" className={styles.bulkBtn} disabled={!chosen.length} onClick={() => setDel(reqOf(chosen))}>
+              Xoá {chosen.length} mục…
+            </button>
+          </div>
+        )}
       </div>
+      <DeleteDialog req={del} onClose={(deleted) => { setDel(null); if (deleted) stopSelecting(); }} />
     </nav>
   );
 }

@@ -1,0 +1,6 @@
+.dlg { border-color: var(--err); }
+.list { margin: 8px 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; font-size: 12px; line-height: 1.45; word-break: break-word; }
+.muted { color: var(--muted); }
+.warn { margin-top: 3px; padding: 4px 8px; border-left: 3px solid var(--warn); color: var(--warn); }
+.danger { background: var(--err); border-color: var(--err); color: var(--on-run); font-weight: 600; }
+.danger:hover:not(:disabled) { background: var(--err); filter: brightness(1.1); }

@@ -180,6 +180,36 @@ describe('reduce: tickets', () => {
     expect(s.tickets['T-1'].status).toBe('running');
     expect(s.tickets['T-2']).toBeDefined();
   });
+  test('snapshot bỏ ticket không còn trên server (đã xoá lúc mất kết nối), giữ ticket tạo sau snapshot', () => {
+    let s = reduce(initialState(), { type: 'ticket', ticket: ticket({ updatedAt: 20 }) });
+    s = reduce(s, { type: 'ticket', ticket: ticket({ id: 'T-3', updatedAt: 150 }) });
+    s = reduce(s, snap(100, []));
+    expect(Object.keys(s.tickets)).toEqual(['T-3']);
+  });
+  test('removed bỏ ticket, agent, managed, wait, call, alert và bỏ chọn', () => {
+    let s = reduce(initialState(), { type: 'ticket', ticket: ticket() });
+    s = reduce(s, { type: 'ticket', ticket: ticket({ id: 'T-10' }) });
+    s = reduce(s, { type: 'managed', managed: { agentId: 'acctv:T-1:dev-1', ticketId: 'T-1' } as never });
+    s = reduce(s, { type: 'managed', managed: { agentId: 'acctv:T-10:dev-1', ticketId: 'T-10' } as never });
+    s = reduce(s, { type: 'wait', wait: { id: 'w1', agentId: 'acctv:T-1:controller' } as never });
+    s = reduce(s, { type: 'wait', wait: { id: 'w2', agentId: 'acctv:T-10:controller' } as never });
+    for (const id of ['acctv:T-1:controller', 'claude:x', 'claude:y']) s = reduce(s, { type: 'agent', agent: agent(id) });
+    s = reduce(s, { type: 'call', call: call('c1', 1, { agentId: 'claude:x' }) });
+    s = reduce(s, { type: 'alert', alert: alert({ agentId: 'claude:x' }) });
+    s = reduce(s, { type: 'selectTicket', id: 'T-1' });
+    s = reduce(s, { type: 'removed', ticketIds: ['T-1'], agentIds: ['acctv:T-1:controller'] });
+    expect(Object.keys(s.tickets)).toEqual(['T-10']);
+    expect(Object.keys(s.managed)).toEqual(['acctv:T-10:dev-1']);
+    expect(Object.keys(s.waits)).toEqual(['w2']);
+    expect(s.selectedTicketId).toBeNull();
+    expect(s.selectedAgentId).toBeNull();
+    s = reduce(s, { type: 'select', id: 'claude:x' });
+    s = reduce(s, { type: 'removed', ticketIds: [], agentIds: ['claude:x'] });
+    expect(Object.keys(s.agents).sort()).toEqual(['claude:y']);
+    expect(s.calls['claude:x']).toBeUndefined();
+    expect(s.alerts).toEqual({});
+    expect(s.selectedAgentId).toBeNull();
+  });
   test('managed và wait được thay theo id', () => {
     let s = reduce(initialState(), { type: 'managed', managed: { agentId: 'acctv:T-1:dev-1', state: 'running' } as never });
     s = reduce(s, { type: 'managed', managed: { agentId: 'acctv:T-1:dev-1', state: 'done' } as never });

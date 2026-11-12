@@ -76,4 +76,6 @@ export type HubEvent =
   | { type: 'ticket'; ticket: Ticket }
   | { type: 'managed'; managed: ManagedAgent }
   | { type: 'wait'; wait: WaitSpan }
-  | { type: 'preview'; ticketId: string; preview: PreviewStatus };
+  | { type: 'preview'; ticketId: string; preview: PreviewStatus }
+  /** ticket/phiên đã bị xoá hẳn: client bỏ chúng cùng agent, call, cảnh báo liên quan */
+  | { type: 'removed'; ticketIds: string[]; agentIds: string[] };

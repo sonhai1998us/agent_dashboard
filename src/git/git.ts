@@ -171,6 +171,26 @@ export async function removeWorktree(repo: string, wtPath: string): Promise<void
   await git(repo, ['worktree', 'remove', '--force', wtPath]);
 }
 
+/** Bỏ đăng ký các worktree mà thư mục đã mất (sau khi xoá tay). */
+export async function pruneWorktrees(repo: string): Promise<void> {
+  await git(repo, ['worktree', 'prune']);
+}
+
+/** null: không có nhánh này. Ngược lại: số commit của nhánh chưa nằm trong nhánh local nào khác. */
+export async function unmergedCommits(repo: string, branch: string): Promise<number | null> {
+  if (!branch || branch.startsWith('-')) return null;
+  const has = await git(repo, ['rev-parse', '--verify', '-q', `refs/heads/${branch}`]).then(() => true, () => false);
+  if (!has) return null;
+  // --exclude áp cho --branches ngay sau nó, mẫu không kèm refs/heads/
+  const out = await git(repo, ['rev-list', '--count', `refs/heads/${branch}`, '--not', `--exclude=${branch}`, '--branches']);
+  return Number(out.trim()) || 0;
+}
+
+export async function deleteBranch(repo: string, branch: string): Promise<void> {
+  if (!branch || branch.startsWith('-')) throw new Error(`Tên nhánh không hợp lệ: ${branch}`);
+  await git(repo, ['branch', '-D', branch]);
+}
+
 export async function gitInit(dir: string): Promise<void> {
   await git(dir, ['init']);
   await git(dir, ['add', '-A']);
