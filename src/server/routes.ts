@@ -3,6 +3,7 @@ import type http from 'node:http';
 import path from 'node:path';
 import { saveSettings, validateSettings } from '@/src/core/config';
 import { DirError, listDirs } from '@/src/core/dirs';
+import { deleteSession } from '@/src/core/purge';
 import { inside } from '@/src/core/paths';
 import { agentMetrics, globalMetrics, type AgentMetrics } from '@/src/core/metrics';
 import { gitInfo, gitInit } from '@/src/git/git';
@@ -277,6 +278,27 @@ const ROUTES: Route[] = [
   {
     method: 'POST', re: /^\/api\/tickets\/([^/]+)\/continue$/,
     run: async ({ req, core, params: [id] }) => ok(await core.orchestrator.continueTicket(id, text(objBody(await readJson(req)).guidance, 'guidance', 5000))),
+  },
+  {
+    // xoá hẳn ticket/phiên; dryRun: chỉ liệt kê những gì sẽ mất để hỏi xác nhận
+    method: 'POST', re: /^\/api\/delete$/,
+    run: async ({ req, core }) => {
+      const b = objBody(await readJson(req));
+      const ids = (v: unknown, field: string): string[] => {
+        if (v === undefined) return [];
+        if (!Array.isArray(v) || v.length > 500 || !v.every((x) => typeof x === 'string' && x.length > 0 && x.length <= 200)) {
+          throw new HttpError(400, `${field} phải là mảng tối đa 500 id`);
+        }
+        return [...new Set(v as string[])];
+      };
+      const tickets = ids(b.tickets, 'tickets');
+      const sessions = ids(b.sessions, 'sessions');
+      const dryRun = b.dryRun === true;
+      const items = [];
+      for (const id of tickets) items.push(await core.orchestrator.deleteTicket(id, dryRun));
+      for (const id of sessions) items.push(deleteSession(core, id, dryRun));
+      return ok({ items });
+    },
   },
   { method: 'POST', re: /^\/api\/tickets\/([^/]+)\/remove-worktree$/, run: async ({ core, params: [id] }) => ok(await core.orchestrator.removeWorktree(id)) },
   {

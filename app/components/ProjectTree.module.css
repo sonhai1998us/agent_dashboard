@@ -49,3 +49,20 @@
 .add:hover { background: var(--sel); color: var(--fg); }
 .add:focus-visible { outline: 2px solid var(--run); outline-offset: 1px; }
 @media (hover: none) { .add { opacity: 1; } }
+
+/* xoá ticket/phiên */
+.line { display: flex; align-items: flex-start; gap: 2px; }
+.line .row { flex: 1; min-width: 0; }
+.trash { flex: none; width: 22px; height: 22px; margin-top: 2px; display: inline-flex; align-items: center; justify-content: center; background: transparent; border: 0; border-radius: 4px; cursor: pointer; font-size: 12px; opacity: 0; }
+.line:hover .trash, .trash:focus-visible { opacity: 1; }
+.trash:hover { background: color-mix(in srgb, var(--err) 20%, transparent); }
+.trash:focus-visible, .selBtn:focus-visible, .bulkBtn:focus-visible { outline: 2px solid var(--run); outline-offset: 1px; }
+@media (hover: none) { .trash { opacity: .7; } }
+.check { flex: none; margin: 7px 2px 0 4px; accent-color: var(--err); }
+.folderRow .check { margin-top: 0; }
+.selBtn { align-self: flex-start; background: transparent; border: 1px solid var(--border); border-radius: 4px; color: var(--muted); font: inherit; font-size: 11px; padding: 1px 8px; cursor: pointer; }
+.selBtn[aria-pressed='true'] { color: var(--fg); border-color: var(--err); }
+.bulk { position: sticky; bottom: 0; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; margin-top: 6px; padding: 6px 8px; border: 1px solid var(--err); border-radius: 6px; background: var(--card); font-size: 12px; }
+.bulkBtn { background: var(--err); border: 0; border-radius: 4px; color: var(--on-run); font: inherit; font-size: 12px; font-weight: 600; padding: 3px 10px; cursor: pointer; white-space: nowrap; }
+.bulkBtn:disabled { opacity: .5; cursor: default; }
+@media (max-width: 1023px) { .selBtn { display: none; } }

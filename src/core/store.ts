@@ -193,6 +193,25 @@ export class Store {
     });
   }
 
+  /**
+   * Xoá agent `prefix` và mọi agent con (`prefix:…`) cùng calls/alerts của chúng, và offset của các file/thư mục
+   * transcript `files` (gồm file con). Trả về id agent đã xoá.
+   */
+  dropAgentTree(prefix: string, files: string[] = []): string[] {
+    const under = (col: string) => `(${col} = ? OR substr(${col}, 1, ?) = ?)`;
+    const args = (p: string, sep: string) => [p, p.length + sep.length, p + sep];
+    return this.transaction(() => {
+      const ids = (this.db.prepare(`SELECT id FROM agents WHERE ${under('id')}`).all(...args(prefix, ':')) as Row[]).map((r) => r.id as string);
+      for (const [t, col] of [['calls', 'agent_id'], ['alerts', 'agent_id'], ['agents', 'id']]) {
+        this.db.prepare(`DELETE FROM ${t} WHERE ${under(col)}`).run(...args(prefix, ':'));
+      }
+      for (const f of files) {
+        for (const sep of ['/', '\\']) this.db.prepare(`DELETE FROM offsets WHERE ${under('file')}`).run(...args(f, sep));
+      }
+      return ids;
+    });
+  }
+
   getOffset(file: string): { offset: number; lines: number } | undefined {
     const r = this.db.prepare('SELECT offset, lines FROM offsets WHERE file = ?').get(file) as Row | undefined;
     return r ? { offset: r.offset, lines: r.lines } : undefined;

@@ -13,8 +13,9 @@ import type { PreviewStatus } from '@/src/preview/server';
 import { resolveProject } from '@/src/preview/config';
 import { redact } from '@/src/preview/captureArgs';
 import { runShell } from '@/src/preview/dbReset';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { inside } from '@/src/core/paths';
+import { countTranscripts, purgeItem, removePaths, transcriptPaths, type PurgeItem } from '@/src/core/purge';
 import type { Runner, RunHandle, RunResult, RunSink, RunSpec } from '@/src/runner/types';
 import { USER_ACTION_LIMITS, type ToolImpl, type ToolResult } from './mcp';
 import { listPreview, systemPrompt, turn, workerPrompt } from './prompts';
@@ -389,6 +390,64 @@ export class Orchestrator {
     }
     this.log(ticketId, `Đã xoá worktree ${wt}; nhánh ${t.branch} giữ nguyên`);
     return this.save(ticketId, { worktree: null });
+  }
+
+  /**
+   * Xoá hẳn ticket đã kết thúc: worktree, nhánh, runs/<T>, transcript của mọi agent và dữ liệu trên dashboard.
+   * dryRun: chỉ liệt kê để hỏi xác nhận. Lỗi ở một phần không chặn phần còn lại; ticket luôn biến khỏi dashboard.
+   */
+  async deleteTicket(T: string, dryRun: boolean): Promise<PurgeItem> {
+    const t = this.deps.tickets.getTicket(T);
+    const item = purgeItem('ticket', T, t ? `${T} · ${t.title}` : T);
+    if (!t) return { ...item, blocked: 'Không tìm thấy ticket' };
+    const managed = this.deps.tickets.listManaged(T);
+    const ctl = this.ctrls.get(T);
+    if (!ENDED_TICKET.includes(t.status)) item.blocked = 'Ticket chưa kết thúc: huỷ ticket trước rồi xoá';
+    else if (ctl?.handle || ctl?.timer || managed.some((m) => isWorkerLive(m) || this.workers.has(m.agentId))) item.blocked = 'Còn agent đang chạy';
+    else if (this.merging.has(T) || this.removing.has(T)) item.blocked = 'Ticket đang merge hoặc xoá worktree; thử lại sau';
+    if (item.blocked) return item;
+
+    const transcripts = [...new Map(managed.map((m) => [m.sessionId, m.runner]))]
+      .flatMap(([sid, runner]) => (sid ? transcriptPaths(this.deps.cfg, runner, sid) : []));
+    const runs = path.join(this.deps.cfg.home, 'runs', T);
+    const unmerged = t.branch ? await this.deps.git.unmergedCommits(t.dir, t.branch).catch(() => null) : null;
+    if (unmerged !== null) item.what.push(`nhánh ${t.branch}`);
+    if (t.worktree) item.what.push(`worktree ${t.worktree}`);
+    if (existsSync(runs)) item.what.push(`thư mục ${runs}`);
+    item.what.push(`${countTranscripts(transcripts)} file transcript`, 'dữ liệu trên dashboard');
+    const warnings: string[] = [];
+    if (unmerged) {
+      const staged = t.merge?.result === 'staged' ? ` (đã đưa vào ${t.merge.target} dạng chưa commit)` : '';
+      warnings.push(`Nhánh có ${unmerged} commit chưa nằm trong nhánh local nào khác${staged}: xoá là mất code đó.`);
+    }
+    if (t.worktree && (await this.deps.git.gitInfo(t.worktree).then((i) => i.dirty, () => false))) {
+      warnings.push('Worktree còn thay đổi chưa commit: sẽ mất khi xoá.');
+    }
+    item.warning = warnings.join(' ') || null;
+    if (dryRun) return item;
+
+    this.removing.add(T);
+    try {
+      await this.deps.preview?.stop(T);
+      const wt = t.worktree;
+      if (wt) {
+        await this.deps.git.removeWorktree(t.dir, wt).catch(async () => {
+          // git không xoá được (file bị khoá, worktree hỏng): xoá thư mục rồi bỏ đăng ký; chỉ xoá trong thư mục worktree của dashboard
+          if (!inside(wt, path.join(this.deps.cfg.home, 'worktrees'))) throw new Error(`worktree ${wt} nằm ngoài ${this.deps.cfg.home}`);
+          rmSync(wt, { recursive: true, force: true });
+          await this.deps.git.pruneWorktrees(t.dir);
+        }).catch((e) => item.errors.push(`worktree: ${errMsg(e)}`));
+      }
+      if (unmerged !== null) await this.deps.git.deleteBranch(t.dir, t.branch!).catch((e) => item.errors.push(`nhánh: ${errMsg(e)}`));
+      item.errors.push(...removePaths([runs, ...transcripts]));
+      const agentIds = this.deps.store.dropAgentTree(`acctv:${T}`, transcripts);
+      this.deps.tickets.deleteTicket(T);
+      this.ctrls.delete(T);
+      this.deps.hub.publish({ type: 'removed', ticketIds: [T], agentIds });
+    } finally {
+      this.removing.delete(T);
+    }
+    return item;
   }
 
   /** Nhánh đích cho nút Merge: nhánh local của dự án; mặc định main, không có thì nhánh thư mục đang đứng. */

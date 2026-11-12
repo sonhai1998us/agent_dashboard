@@ -73,6 +73,29 @@ export function reduce(s: LiveState, e: LiveAction): LiveState {
     case 'managed': return { ...s, managed: { ...s.managed, [e.managed.agentId]: e.managed } };
     case 'wait': return { ...s, waits: { ...s.waits, [e.wait.id]: e.wait } };
     case 'preview': return { ...s, previews: { ...s.previews, [e.ticketId]: e.preview } };
+    case 'removed': {
+      const gone = new Set(e.agentIds);
+      const tix = new Set(e.ticketIds);
+      const ofTicket = (agentId: string) => e.ticketIds.some((t) => agentId.startsWith(`acctv:${t}:`));
+      const keep = <T,>(o: Record<string, T>, drop: (k: string, v: T) => boolean): Record<string, T> =>
+        Object.fromEntries(Object.entries(o).filter(([k, v]) => !drop(k, v)));
+      const selectedAgentId = s.selectedAgentId && (gone.has(s.selectedAgentId) || ofTicket(s.selectedAgentId)) ? null : s.selectedAgentId;
+      return {
+        ...s,
+        tickets: keep(s.tickets, (k) => tix.has(k)),
+        previews: keep(s.previews, (k) => tix.has(k)),
+        managed: keep(s.managed, (_, m) => tix.has(m.ticketId)),
+        waits: keep(s.waits, (_, w) => gone.has(w.agentId) || ofTicket(w.agentId)),
+        agents: keep(s.agents, (k) => gone.has(k)),
+        calls: keep(s.calls, (k) => gone.has(k)),
+        callsLoadedGen: keep(s.callsLoadedGen, (k) => gone.has(k)),
+        agentMetrics: keep(s.agentMetrics, (k) => gone.has(k)),
+        alerts: keep(s.alerts, (_, a) => gone.has(a.agentId)),
+        selectedTicketId: s.selectedTicketId && tix.has(s.selectedTicketId) ? null : s.selectedTicketId,
+        selectedAgentId,
+        selectedCallId: selectedAgentId ? s.selectedCallId : null,
+      };
+    }
     case 'alert': {
       const alerts = { ...s.alerts };
       if (e.alert.active) alerts[e.alert.id] = e.alert; else delete alerts[e.alert.id];
@@ -93,7 +116,8 @@ export function reduce(s: LiveState, e: LiveAction): LiveState {
         if (s.alerts[id]) alerts[id] = s.alerts[id]; else delete alerts[id];
       }
       const tickets: Record<string, Ticket> = Object.fromEntries((e.tickets ?? []).map((t) => [t.id, t]));
-      for (const [id, cur] of Object.entries(s.tickets)) if (!tickets[id] || cur.updatedAt > tickets[id].updatedAt) tickets[id] = cur;
+      // ticket không có trong snapshot: chỉ giữ nếu mới tạo sau snapshot (ticket cũ hơn là đã bị xoá)
+      for (const [id, cur] of Object.entries(s.tickets)) if (tickets[id] ? cur.updatedAt > tickets[id].updatedAt : cur.updatedAt >= e.generatedAt) tickets[id] = cur;
       const managed = Object.fromEntries((e.managed ?? []).map((m) => [m.agentId, m]));
       const waits = Object.fromEntries((e.waits ?? []).map((w) => [w.id, w]));
       const selectedAgentId = s.selectedAgentId && agents[s.selectedAgentId] ? s.selectedAgentId : null;

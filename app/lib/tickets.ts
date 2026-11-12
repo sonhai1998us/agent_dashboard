@@ -160,6 +160,10 @@ export function ticketDuration(t: Ticket, agents: AgentInfo[], waits: WaitSpan[]
 /** Nút Merge: ticket không còn agent chạy (done, escalated, cancelled) và đã có nhánh. */
 export const canMerge = (t: Ticket): boolean => (t.status === 'done' || t.status === 'escalated' || t.status === 'cancelled') && !!t.branch;
 
+/** Nút xoá: ticket đã kết thúc; phiên không còn chạy. Server kiểm tra lại (agent con, merge đang chạy…). */
+export const canDeleteTicket = (t: Ticket): boolean => t.status === 'done' || t.status === 'escalated' || t.status === 'cancelled';
+export const canDeleteSession = (a: AgentInfo): boolean => a.status === 'idle' || a.status === 'ended';
+
 /** Dòng kết quả lần merge gần nhất trên header ticket. */
 export function mergeText(m: TicketMerge | null | undefined): { tone: 'ok' | 'crit'; text: string } | null {
   if (!m) return null;
