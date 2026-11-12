@@ -23,10 +23,10 @@ Quyền hạn:
 Quy trình:
 1. Lập kế hoạch: đọc ticket và code liên quan. Ticket nhắc tới issue Jira, trang Confluence hay link Figma thì đọc chúng (twg, MCP) trước khi chia việc, nhưng chỉ đủ để chia việc: với Figma dùng get_metadata hoặc get_design_context (excludeScreenshot), tránh get_screenshot và tải asset vì ảnh tốn rất nhiều token; không dùng skill design-to-code. Ước lượng độ khó, chia việc thành các gói. Mỗi gói ghi rõ những file được sửa; các gói Dev chạy song song không được trùng file. Chọn vai, số lượng, model/effort cho từng vai và tiêu chí nghiệm thu. Vai explorer (model rẻ, chỉ đọc, đọc được Figma và MCP của người dùng) lo phần đọc chi tiết: tìm file trong code lớn và trích spec chính xác từ Figma (kích thước, màu, chữ, dữ liệu) cho Dev. Ticket có thiết kế Figma hoặc phải tìm nhiều chỗ trong code thì để explorer count ≥ 1; việc nhỏ đã rõ file thì để 0.
 2. Gọi propose_plan. Khi nó trả lời rằng người dùng đang duyệt, hãy kết thúc lượt ngay, không gọi thêm tool và không viết gì thêm.
-3. Sau khi được duyệt: gọi spawn_agent theo từng gói việc. Nếu kế hoạch có Explorer, giao Explorer tìm file và trích spec Figma trước (đưa fileKey, nodeId), rồi chép báo cáo của nó vào task của Dev. Sau khi duyệt, đừng tự đọc lại Figma hay đọc sâu code: giao Explorer, vì mỗi thứ bạn đọc nằm lại trong context của mọi lượt sau. Task giao Dev phải đủ để làm đúng ngay vòng đầu: chép spec cụ thể (kích thước, màu, chữ, dữ liệu từ Figma/Jira) vào task thay vì chỉ đưa link, và nêu lệnh kiểm tra cần chạy (thường chỉ typecheck và lint phần đã sửa; build toàn dự án chỉ khi tiêu chí nghiệm thu cần). Cho các Dev chạy song song khi tập file không giao nhau. Rồi gọi wait_agents với id các agent vừa giao. Khi wait_agents trả "Đang chờ", kết thúc lượt ngay; bạn sẽ được gọi lại kèm báo cáo.
+3. Sau khi được duyệt: gọi spawn_agent theo từng gói việc. Nếu kế hoạch có Explorer, giao Explorer tìm file và trích spec Figma trước (đưa fileKey, nodeId), rồi giao Dev kèm contextFrom: [id Explorer]: dashboard chèn nguyên văn báo cáo vào prompt của Dev, nên đừng chép lại báo cáo vào task. Sau khi duyệt, đừng tự đọc lại Figma hay đọc sâu code: giao Explorer, vì mỗi thứ bạn đọc nằm lại trong context của mọi lượt sau. Task giao Dev phải đủ để làm đúng ngay vòng đầu: spec cụ thể (kích thước, màu, chữ, dữ liệu từ Figma/Jira) phải tới được Dev, qua contextFrom hoặc ghi trong task, không chỉ đưa link, và nêu lệnh kiểm tra cần chạy (thường chỉ typecheck và lint phần đã sửa; build toàn dự án chỉ khi tiêu chí nghiệm thu cần). Cho các Dev chạy song song khi tập file không giao nhau. Rồi gọi wait_agents với id các agent vừa giao. Khi wait_agents trả "Đang chờ", kết thúc lượt ngay; bạn sẽ được gọi lại kèm báo cáo.
    Sản phẩm render lâu và có nhiều bản (video, bộ ảnh; nhiều ngôn ngữ hay theme): kế hoạch và task Dev chỉ làm 1 bản mẫu trước; ghi trong task rằng Dev dừng lại xin người dùng duyệt bản mẫu rồi mới render các bản còn lại. Không giao render đủ mọi bản ngay từ đầu.
 4. Khi Dev xong: giao Designer (nếu kế hoạch có) và QC review, rồi lại wait_agents. Designer và QC xem trang đang chạy bằng tool capture (dashboard bật server preview). Task giao Designer phải ghi fileKey/nodeId của từng frame Figma cần so cùng viewport tương ứng. Đặt preview.mode là prod trong kế hoạch khi tiêu chí nghiệm thu đụng tới SSR, redirect, middleware hay header; còn lại để mặc định của dự án.
-5. Quyết định vòng mới dựa trên báo cáo review, không tự soi lại toàn bộ. Chỉ giao lại Dev ở vòng sau khi còn lỗi nghiêm trọng hoặc vừa, hoặc chưa đạt tiêu chí nghiệm thu, kèm danh sách lỗi cụ thể (file:dòng). Lỗi nhẹ (lệch vài px, câu chữ, đề xuất thêm) ghi vào báo cáo cuối cho người dùng, không mở vòng mới. Mỗi vòng Dev được tính một lần; có giới hạn số vòng.
+5. Quyết định vòng mới dựa trên báo cáo review, không tự soi lại toàn bộ. Chỉ giao lại Dev ở vòng sau khi còn lỗi nghiêm trọng hoặc vừa, hoặc chưa đạt tiêu chí nghiệm thu: truyền contextFrom: [id QC/Designer] để Dev đọc nguyên văn báo cáo review, task chỉ nêu những lỗi nào cần sửa. Lỗi nhẹ (lệch vài px, câu chữ, đề xuất thêm) ghi vào báo cáo cuối cho người dùng, không mở vòng mới. Mỗi vòng Dev được tính một lần; có giới hạn số vòng.
 6. Dùng get_agent_log khi cần xem một agent đã làm gì hoặc vì sao thất bại / bị dừng.
 7. Kết thúc bằng finish: status "done" khi đạt mọi tiêu chí nghiệm thu, "escalated" khi hết vòng mà vẫn còn lỗi hoặc cần người dùng quyết. Báo cáo cuối nêu đã làm gì, file nào đổi, kết quả kiểm tra và việc còn lại.
 
@@ -135,10 +135,22 @@ File tạm (ảnh hay khung hình xuất ra để xem, script nháp, log) ghi v�
   return parts.join('\n\n');
 }
 
-export function workerPrompt(m: Pick<ManagedAgent, 'task' | 'files' | 'role'>, plan: Plan, worktree: string): string {
+/** Độ dài tối đa của một báo cáo chèn qua contextFrom. */
+export const CONTEXT_MAX = 20_000;
+
+export function workerPrompt(
+  m: Pick<ManagedAgent, 'task' | 'files' | 'role'>, plan: Plan, worktree: string,
+  opts: { context?: { id: string; role: string; text: string }[]; depsNote?: string } = {},
+): string {
   const files = m.files.length ? bullets(m.files) : '(không có — chỉ đọc và kiểm tra)';
+  const ctx = (opts.context ?? []).map((c) => {
+    const cut = c.text.length > CONTEXT_MAX ? `${c.text.slice(0, CONTEXT_MAX)}\n… (cắt bớt ${c.text.length - CONTEXT_MAX} ký tự)` : c.text;
+    return `### Báo cáo của ${c.id} (${c.role})\n${cut}`;
+  });
   return [
     `Việc của bạn (${m.role}):\n${m.task}`,
+    ...(ctx.length ? [`Báo cáo của các agent trước, dashboard chèn nguyên văn để bạn dùng làm ngữ cảnh:\n\n${ctx.join('\n\n')}`] : []),
+    ...(opts.depsNote ? [`${opts.depsNote}\n\nnode_modules có thể thiếu. Lệnh kiểm tra lỗi vì thiếu package thì ghi rõ trong báo cáo; đừng tự cài lại (Dev khác có thể đang chạy song song).`] : []),
     `${m.role === 'dev' ? 'File được sửa' : 'File cần tập trung'}:\n${files}`,
     `Worktree: ${worktree}`,
     `Kế hoạch chung: ${plan.summary}`,
@@ -164,11 +176,15 @@ export const turn = {
   first: (t: Ticket): string =>
     `Ticket ${t.id}: ${t.title}\n\nMô tả:\n${t.description}\n\nThư mục dự án: ${t.dir}${overridesText(t)}\n\n` +
     'Hãy đọc code liên quan, lập kế hoạch rồi gọi propose_plan. Sau đó kết thúc lượt.',
-  /** `again`: kế hoạch sửa sau góp ý, làm tiếp trên nhánh cũ. `fresh`: worktree vừa tạo (chưa có dependency). */
-  approved: (plan: Plan, worktree: string, opts: { again?: boolean; fresh?: boolean } = {}): string =>
+  /**
+   * `again`: kế hoạch sửa sau góp ý, làm tiếp trên nhánh cũ.
+   * `deps`: worktree vừa tạo; 'auto' = dashboard đang cài dependency, 'manual' = Dev phải tự cài, null = không cần.
+   */
+  approved: (plan: Plan, worktree: string, opts: { again?: boolean; deps?: 'auto' | 'manual' | null } = {}): string =>
     `${opts.again ? 'Kế hoạch sửa đã được duyệt. Làm tiếp trên cùng nhánh: mọi thay đổi trước vẫn còn trong worktree.' : 'Kế hoạch đã được duyệt.'} Worktree của ticket: ${worktree}\n\n` +
     `Kế hoạch được duyệt (người dùng có thể đã sửa):\n${JSON.stringify(plan, null, 2)}\n\n` +
-    ((opts.fresh ?? true) ? 'Worktree mới tạo chưa cài dependency: Dev đầu tiên cần cài trong worktree (vd. `npm ci` hoặc `npm install`) trước khi các Dev song song chạy build/test.\n\n' : '') +
+    (opts.deps === 'manual' ? 'Worktree mới tạo chưa cài dependency: Dev đầu tiên cần cài trong worktree (vd. `npm ci` hoặc `npm install`) trước khi các Dev song song chạy build/test.\n\n' : '') +
+    (opts.deps === 'auto' ? 'Dashboard đang cài dependency trong worktree: Explorer chạy được ngay, Dev, Designer, QC tự chờ tới khi cài xong. Đừng giao việc cài dependency.\n\n' : '') +
     'Hãy giao việc bằng spawn_agent theo các gói, rồi gọi wait_agents và kết thúc lượt.',
   feedback: (text: string, images: string[], imageDir: string): string =>
     'Người dùng đã xem kết quả của ticket và chưa vừa ý.' + (text ? ` Góp ý:\n${text}` : '') + '\n\n' +

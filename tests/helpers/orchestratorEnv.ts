@@ -22,7 +22,7 @@ export interface Env {
   reopen(): Orchestrator;
 }
 
-export function makeEnv(opts: { maxParallel?: number; maxRounds?: number; runners?: Partial<Record<AgentKind, Runner | null>>; delays?: OrchestratorDeps['delays']; git?: Partial<typeof git>; preview?: OrchestratorDeps['preview'] } = {}): Env {
+export function makeEnv(opts: { maxParallel?: number; maxRounds?: number; runners?: Partial<Record<AgentKind, Runner | null>>; delays?: OrchestratorDeps['delays']; git?: Partial<typeof git>; preview?: OrchestratorDeps['preview']; installDeps?: OrchestratorDeps['installDeps'] } = {}): Env {
   const root = mkdtempSync(join(tmpdir(), 'acctv-orch-'));
   const repo = join(root, 'Dự án demo');
   mkdirSync(join(repo, 'src'), { recursive: true });
@@ -64,7 +64,7 @@ export function makeEnv(opts: { maxParallel?: number; maxRounds?: number; runner
   let sid = 0;
   const deps: OrchestratorDeps = {
     cfg, store, tickets, hub, ingest, runners, git: { ...git, ...opts.git }, port: () => 4777,
-    now: () => clock.t, newSessionId: () => `sid-${++sid}`, delays: opts.delays, preview: opts.preview,
+    now: () => clock.t, newSessionId: () => `sid-${++sid}`, delays: opts.delays, preview: opts.preview, installDeps: opts.installDeps,
   };
   const orch = new Orchestrator(deps);
   return {

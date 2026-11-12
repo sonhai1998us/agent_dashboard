@@ -14,11 +14,20 @@ const MAX_LINE = 8 * 1024 * 1024;
 const STDERR_KEEP = 4096;
 export const OVERFLOW = '\u0000overflow';
 
+/**
+ * Môi trường cho tiến trình con chạy trong dự án của người dùng (agent, lệnh cài, server preview): của dashboard trừ NODE_ENV.
+ * NODE_ENV=production của dashboard làm jest lỗi ("act is not supported in production builds"), npm ci / yarn install bỏ devDependencies.
+ */
+export function childEnv(): NodeJS.ProcessEnv {
+  const { NODE_ENV: _drop, ...env } = process.env;
+  return env as NodeJS.ProcessEnv; // kiểu ProcessEnv (Next mở rộng) bắt buộc NODE_ENV
+}
+
 export function startProcess(cmd: string, args: string[], opts: { cwd: string; env?: NodeJS.ProcessEnv }): Proc {
   let child: ReturnType<typeof spawn>;
   try {
     child = spawn(cmd, args, {
-      cwd: opts.cwd, env: opts.env ?? process.env, shell: false, windowsHide: true,
+      cwd: opts.cwd, env: opts.env ?? childEnv(), shell: false, windowsHide: true,
       detached: process.platform !== 'win32', stdio: ['pipe', 'pipe', 'pipe'],
     });
   } catch (e) {

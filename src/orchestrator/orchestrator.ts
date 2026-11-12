@@ -19,6 +19,7 @@ import type { Runner, RunHandle, RunResult, RunSink, RunSpec } from '@/src/runne
 import { USER_ACTION_LIMITS, type ToolImpl, type ToolResult } from './mcp';
 import { listPreview, systemPrompt, turn, workerPrompt } from './prompts';
 import { agentLog, agentReport } from './reports';
+import type { DepsResult } from './installDeps';
 
 export interface OrchestratorDeps {
   cfg: Config; store: Store; tickets: TicketStore; hub: Hub; ingest(evs: NormalizedEvent[]): void;
@@ -26,6 +27,8 @@ export interface OrchestratorDeps {
   now?: () => number; newSessionId?: () => string; delays?: { rateLimitMs: number[] };
   /** Server preview + trình duyệt cho tool capture. Không có thì worker không có capture. */
   preview?: Pick<PreviewManager, 'capture' | 'stop' | 'stopAll' | 'killOrphans' | 'accountsFor' | 'status' | 'defaultMode'>;
+  /** Cài dependency cho worktree mới (null: không có gì để cài). Không có thì Controller giao Dev tự cài. */
+  installDeps?: (dir: string, worktree: string) => Promise<DepsResult> | null;
 }
 
 const CAPTURE_ROLES: WorkRole[] = ['dev', 'designer', 'qc'];
@@ -78,6 +81,7 @@ const NO_CLI: Record<AgentKind, string> = { claude: 'Không tìm thấy Claude C
 const RATE_LIMIT_MS = [60000, 120000, 300000];
 const RESUME_PROMPT = 'Tiếp tục công việc đang dở.';
 const LIMIT_EXHAUSTED = 'bị giới hạn: hết lượt thử';
+const CONTEXT_FROM_MAX = 5;
 const CANCELLED = 'ticket bị huỷ';
 const INTERRUPTED = 'bị gián đoạn: dashboard khởi động lại';
 const SHUTDOWN = 'bị gián đoạn: dashboard tắt';
@@ -131,6 +135,10 @@ export class Orchestrator {
   private recovered = false;
   /** agentId → id của khoảng `startup` đang mở (đóng khi tiến trình gửi về dòng đầu tiên hoặc kết thúc). */
   private startups = new Map<string, string>();
+  /** Ticket đang cài dependency: Dev, Designer, QC của nó chờ trong hàng (Explorer chỉ đọc nên chạy ngay). */
+  private installing = new Set<string>();
+  /** Ticket cài dependency lỗi → lời nhắn thêm vào prompt của worker (trừ Explorer). */
+  private depsFailed = new Map<string, string>();
   /** Sau shutdown(): handler thoát, hẹn giờ và sink không còn chạm vào store. */
   private closed = false;
   private now: () => number;
@@ -212,8 +220,32 @@ export class Orchestrator {
     }
     this.closeWaits(controllerId(ticketId));
     this.log(ticketId, `Người dùng duyệt kế hoạch; nhánh ${branch}`);
-    this.runControllerTurn(ticketId, turn.approved(plan, wt));
+    this.runControllerTurn(ticketId, turn.approved(plan, wt, { deps: this.prepareDeps(ticketId, t.dir, wt) }));
     return this.mustTicket(ticketId);
+  }
+
+  /** Worktree mới: cài dependency song song với lượt giao việc của Controller. */
+  private prepareDeps(T: string, dir: string, wt: string): 'auto' | 'manual' | null {
+    if (!this.deps.installDeps) return 'manual';
+    const job = this.deps.installDeps(dir, wt);
+    if (!job) return null;
+    this.installing.add(T);
+    this.depsFailed.delete(T);
+    this.log(T, 'Đang chuẩn bị dependency trong worktree; Dev, Designer, QC chờ tới khi xong');
+    // không đưa vào `bg`: cài có thể mất vài phút, idle() không nên chờ nó
+    void job.then((r) => {
+      if (this.closed) return;
+      const s = `${Math.round(r.ms / 1000)}s`;
+      if (r.ok) this.log(T, r.how === 'clone' ? `Đã nhân bản node_modules từ thư mục dự án (${s})` : `Đã cài dependency bằng \`${r.cmd}\` (${s})`);
+      else {
+        this.depsFailed.set(T, `Dashboard đã chạy \`${r.cmd}\` trong worktree nhưng lỗi:\n${r.detail}`);
+        this.log(T, `Cài dependency lỗi (\`${r.cmd}\`): ${r.detail.split('\n').pop()}`);
+      }
+    }).catch((e) => console.warn(`[acctv] cài dependency ${T}: ${errMsg(e)}`)).finally(() => {
+      this.installing.delete(T);
+      if (!this.closed) this.pump();
+    });
+    return 'auto';
   }
 
   /** Kế hoạch sửa sau góp ý: làm tiếp trên nhánh cũ; worktree đã bị xoá thì tạo lại từ nhánh. Kế hoạch mới có đủ số vòng mặc định. */
@@ -237,7 +269,7 @@ export class Orchestrator {
     if (this.mustTicket(T).status !== 'running') return this.mustTicket(T);
     this.closeWaits(controllerId(T));
     this.log(T, `Người dùng duyệt kế hoạch sửa; làm tiếp trên nhánh ${branch} (tối đa ${maxRounds} vòng)`);
-    this.runControllerTurn(T, turn.approved(plan, wt, { again: true, fresh }));
+    this.runControllerTurn(T, turn.approved(plan, wt, { again: true, deps: fresh ? this.prepareDeps(T, t.dir, wt) : null }));
     return this.mustTicket(T);
   }
 
@@ -699,6 +731,8 @@ export class Orchestrator {
     if (args.agent !== undefined && !AGENTS.includes(args.agent as AgentKind)) return fail('agent phải là claude hoặc codex');
     if (args.effort !== undefined && !EFFORTS.includes(args.effort as string)) return fail('effort phải là low, medium, high, xhigh hoặc max');
     if (args.model !== undefined && !isStr(args.model)) return fail('model phải là chuỗi');
+    const ctx = this.contextFrom(T, args.contextFrom);
+    if (typeof ctx === 'string') return fail(ctx);
 
     const own: Partial<RoleSpec> = {
       agent: args.agent as AgentKind | undefined,
@@ -727,7 +761,7 @@ export class Orchestrator {
     const m: ManagedAgent = {
       agentId: id, ticketId: T, role, ordinal, packageId: isStr(args.packageId) && args.packageId ? args.packageId : null,
       task, files, runner: agent, model, effort, sessionId: this.newSessionId(), state: 'queued', stopReason: null,
-      resultText: null, changedFiles: [], costUsd: null, createdAt: now, endedAt: null, userAction: null,
+      resultText: null, changedFiles: [], costUsd: null, createdAt: now, endedAt: null, userAction: null, contextFrom: ctx,
     };
     this.putManaged(m);
     this.emitAgent({
@@ -740,6 +774,23 @@ export class Orchestrator {
     const ignored = (own.agent !== undefined && own.agent !== agent) || (own.model !== undefined && own.model !== model) || (own.effort !== undefined && own.effort !== effort);
     const note = ignored ? ' Dùng agent/model/effort theo kế hoạch đã duyệt; tham số bạn truyền khác kế hoạch nên bị bỏ qua.' : '';
     return ok(`Đã tạo ${id} (${role}, ${model}/${effort}).${note} Dùng wait_agents để chờ.`);
+  }
+
+  /** Id đầy đủ của các agent đã xong trong ticket có báo cáo; chuỗi = lỗi. Nhận cả id ngắn ("explorer-1"). */
+  private contextFrom(T: string, raw: unknown): string[] | string {
+    if (raw === undefined) return [];
+    if (!Array.isArray(raw) || !raw.every(isStr)) return 'contextFrom phải là mảng id agent';
+    if (raw.length > CONTEXT_FROM_MAX) return `contextFrom tối đa ${CONTEXT_FROM_MAX} agent`;
+    const out: string[] = [];
+    for (const s of raw) {
+      const id = s.startsWith('acctv:') ? s : `acctv:${T}:${s}`;
+      const m = this.deps.tickets.getManaged(id);
+      if (!m || m.ticketId !== T || m.role === 'controller') return `contextFrom: không có agent ${s} trong ticket ${T}`;
+      if (!isTerminal(m.state)) return `contextFrom: ${id} chưa xong; hãy wait_agents trước`;
+      if (!m.resultText?.trim()) return `contextFrom: ${id} không có báo cáo`;
+      if (!out.includes(id)) out.push(id);
+    }
+    return out;
   }
 
   private waitAgents(T: string, args: Record<string, unknown>): ToolResult {
@@ -1022,7 +1073,16 @@ export class Orchestrator {
   private pump(): void {
     // worker đang chờ người dùng không giữ slot
     const active = (): number => [...this.workers.values()].filter((r) => !r.waitingUser).length;
-    while (!this.closed && this.queue.length && active() < this.settings.maxParallel) this.startWorker(this.queue.shift()!);
+    // ticket đang cài dependency: chỉ Explorer (chỉ đọc) được chạy, agent khác giữ chỗ trong hàng
+    const ready = (id: string): boolean => {
+      const m = this.deps.tickets.getManaged(id);
+      return !m || m.role === 'explorer' || !this.installing.has(m.ticketId);
+    };
+    while (!this.closed && active() < this.settings.maxParallel) {
+      const i = this.queue.findIndex(ready);
+      if (i < 0) break;
+      this.startWorker(this.queue.splice(i, 1)[0]);
+    }
   }
 
   private startWorker(id: string): void {
@@ -1049,7 +1109,14 @@ export class Orchestrator {
     this.guards.set(id, { token, policy: { ...this.policy(role, wt, [...(capture ? [shots] : []), scratch, this.feedbackDir(t.id)], m.files), scratch } });
     const spec: RunSpec = {
       agentId: id, ticketId: t.id, role, agent: m.runner, label: `${ROLE_LABEL[role]}-${m.ordinal}`, parentId: controllerId(t.id),
-      cwd: wt, model: m.model, effort: m.effort, prompt: workerPrompt(m, t.plan, wt),
+      cwd: wt, model: m.model, effort: m.effort,
+      prompt: workerPrompt(m, t.plan, wt, {
+        context: (m.contextFrom ?? []).flatMap((cid) => {
+          const c = this.deps.tickets.getManaged(cid);
+          return c?.resultText ? [{ id: cid, role: c.role, text: c.resultText }] : [];
+        }),
+        depsNote: role === 'explorer' ? undefined : this.depsFailed.get(t.id),
+      }),
       systemPrompt: systemPrompt(role, {
         worktree: wt, files: m.files, denyBash: this.settings.denyBash, checkCommands: this.settings.checkCommands, scratch,
         preview: this.deps.preview && CAPTURE_ROLES.includes(role)

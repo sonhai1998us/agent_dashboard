@@ -72,7 +72,9 @@ test('watcher Claude: ghi fixture vào thư mục tạm → Store có agent + ca
 });
 
 test('theo dõi file mới ghi sau khi start (chokidar)', async () => {
-  const w = claudeWatcher();
+  // tick liveness ngắn: macOS có thể làm rơi sự kiện fs ngay sau `ready`, lưới an toàn của rescan bắt lại
+  const w = createClaudeWatcher(cfg, store, () => {}, { livenessMs: 100 });
+  closers.push(() => w.stop());
   await w.start(); await w.backfilled();
   expect(store.getAgent('claude:sess-main')).toBeUndefined();
   fs.writeFileSync(mainFile(), fxClaude('main.jsonl'));

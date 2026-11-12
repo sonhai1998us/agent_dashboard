@@ -111,6 +111,8 @@ export interface ManagedAgent {
   endedAt: number | null;
   /** Việc agent cần người dùng làm (đăng nhập, mở link…); agent ở trạng thái `waiting` cho tới khi người dùng trả lời. */
   userAction: UserAction | null;
+  /** Id các agent đã xong mà báo cáo được dashboard chèn nguyên văn vào prompt của agent này. */
+  contextFrom?: string[];
 }
 
 export interface UserAction {
