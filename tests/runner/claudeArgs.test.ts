@@ -64,7 +64,7 @@ describe('writeRunFiles', () => {
       hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: hook, timeout: 10 }] }] },
     });
     expect(JSON.parse(readFileSync(f.mcpFile, 'utf8')).mcpServers.acctv).toEqual({
-      type: 'http', url: 'http://127.0.0.1:1/mcp', headers: { Authorization: 'Bearer tok' },
+      type: 'http', url: 'http://127.0.0.1:1/mcp', headers: { Authorization: 'Bearer tok' }, timeout: 900_000,
     });
   });
   it('writes empty mcpServers without mcp', () => {

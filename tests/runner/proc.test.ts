@@ -46,6 +46,20 @@ describe('startProcess', () => {
     }
   }, 20000);
 
+  it('không truyền TURBOPACK / __NEXT_* mà Next của dashboard tự gán xuống tiến trình con', async () => {
+    vi.stubEnv('TURBOPACK', 'auto');
+    vi.stubEnv('__NEXT_PRIVATE_ORIGIN', 'http://x');
+    try {
+      const p = startProcess(process.execPath, ['-e', `console.log(JSON.stringify([process.env.TURBOPACK ?? null, process.env.__NEXT_PRIVATE_ORIGIN ?? null]))`], { cwd: process.cwd() });
+      const lines: string[] = [];
+      p.onLine((l) => lines.push(l));
+      await p.exit;
+      expect(lines).toEqual(['[null,null]']);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  }, 20000);
+
   it('keeps only the last 4KB of stderr', async () => {
     const p = startProcess(process.execPath, ['-e', `process.stderr.write('a'.repeat(10000)+'END')`], { cwd: process.cwd() });
     await p.exit;
