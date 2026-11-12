@@ -25,11 +25,14 @@ export interface ProjectPreview {
 
 export const MASK = '••••';
 
-export const NEXT_DEFAULTS: ProjectPreview = {
-  dev: { command: 'pnpm exec next dev -p {port}' },
-  prod: { build: 'pnpm exec next build', start: 'pnpm exec next start -p {port}' },
+/** Cấu hình mặc định cho dự án Next.js; `run`: tiền tố chạy bin cục bộ (`pnpm exec`, `yarn`, `bunx`, `npx`). */
+export const nextDefaults = (run: string): ProjectPreview => ({
+  dev: { command: `${run} next dev -p {port}` },
+  prod: { build: `${run} next build`, start: `${run} next start -p {port}` },
   defaultMode: 'dev',
   env: {},
   readyPath: '/',
   accounts: [],
-};
+});
+
+export const NEXT_DEFAULTS: ProjectPreview = nextDefaults('pnpm exec');

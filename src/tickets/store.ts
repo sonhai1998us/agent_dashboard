@@ -49,7 +49,7 @@ function toManaged(r: Row): ManagedAgent {
     task: r.task, files: unjson(r.files) ?? [], runner: r.runner, model: r.model, effort: r.effort,
     sessionId: r.session_id, state: r.state, stopReason: r.stop_reason ?? null, resultText: r.result_text ?? null,
     changedFiles: unjson(r.changed_files) ?? [], costUsd: r.cost_usd ?? null, createdAt: r.created_at, endedAt: r.ended_at ?? null,
-    userAction: unjson(r.user_action),
+    userAction: unjson(r.user_action), contextFrom: unjson(r.context_from) ?? [],
   };
 }
 
@@ -61,7 +61,7 @@ const TICKET_COLS = [
 ];
 const MANAGED_COLS = [
   'agent_id', 'ticket_id', 'role', 'ordinal', 'package_id', 'task', 'files', 'runner', 'model', 'effort', 'session_id',
-  'state', 'stop_reason', 'result_text', 'changed_files', 'cost_usd', 'created_at', 'ended_at', 'user_action',
+  'state', 'stop_reason', 'result_text', 'changed_files', 'cost_usd', 'created_at', 'ended_at', 'user_action', 'context_from',
 ];
 const placeholders = (cols: string[]): string => cols.map(() => '?').join(', ');
 
@@ -71,7 +71,7 @@ const ticketVals = (t: Ticket): unknown[] => [
 ];
 const managedVals = (m: ManagedAgent): unknown[] => [
   m.agentId, m.ticketId, m.role, m.ordinal, m.packageId, m.task, JSON.stringify(m.files), m.runner, m.model, m.effort, m.sessionId,
-  m.state, m.stopReason, m.resultText, JSON.stringify(m.changedFiles), m.costUsd, m.createdAt, m.endedAt, json(m.userAction ?? null),
+  m.state, m.stopReason, m.resultText, JSON.stringify(m.changedFiles), m.costUsd, m.createdAt, m.endedAt, json(m.userAction ?? null), JSON.stringify(m.contextFrom ?? []),
 ];
 
 export class TicketStore {
@@ -83,6 +83,7 @@ export class TicketStore {
     // DB tạo trước khi có cột này
     const cols = (this.db.prepare('PRAGMA table_info(managed_agents)').all() as Row[]).map((c) => c.name);
     if (!cols.includes('user_action')) this.db.exec('ALTER TABLE managed_agents ADD COLUMN user_action TEXT');
+    if (!cols.includes('context_from')) this.db.exec('ALTER TABLE managed_agents ADD COLUMN context_from TEXT');
     const tcols = (this.db.prepare('PRAGMA table_info(tickets)').all() as Row[]).map((c) => c.name);
     if (!tcols.includes('merge_info')) this.db.exec('ALTER TABLE tickets ADD COLUMN merge_info TEXT');
   }

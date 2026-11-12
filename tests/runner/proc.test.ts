@@ -1,8 +1,9 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { mkdtempSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { startProcess, killTree } from '@/src/runner/proc';
+import { runShell } from '@/src/preview/dbReset';
 
 const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 const until = async (fn: () => boolean, ms: number) => {
@@ -29,6 +30,21 @@ describe('startProcess', () => {
     await p.exit;
     expect(lines).toEqual(['\u0000overflow', '{"next":1}']);
   }, 30000);
+
+  it('không truyền NODE_ENV của dashboard xuống tiến trình con (agent, lệnh cài)', async () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    try {
+      const p = startProcess(process.execPath, ['-e', `console.log(JSON.stringify(process.env.NODE_ENV ?? null))`], { cwd: process.cwd() });
+      const lines: string[] = [];
+      p.onLine((l) => lines.push(l));
+      await p.exit;
+      expect(lines).toEqual(['null']);
+      const r = await runShell(`"${process.execPath}" -e "console.log(process.env.NODE_ENV ?? 'unset')"`, process.cwd(), 20000);
+      expect(r.tail.trim()).toBe('unset');
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  }, 20000);
 
   it('keeps only the last 4KB of stderr', async () => {
     const p = startProcess(process.execPath, ['-e', `process.stderr.write('a'.repeat(10000)+'END')`], { cwd: process.cwd() });

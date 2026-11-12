@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { killTree } from '@/src/runner/proc';
+import { childEnv, killTree } from '@/src/runner/proc';
 
 /** Chạy một lệnh qua shell, gom stdout+stderr (giữ `keep` ký tự cuối), kill cây tiến trình khi quá giờ. */
 export function runShell(cmd: string, cwd: string, timeoutMs: number, keep = 4000): Promise<{ code: number | null; tail: string }> {
@@ -10,7 +10,7 @@ export function runShell(cmd: string, cwd: string, timeoutMs: number, keep = 400
     };
     let c;
     try {
-      c = spawn(cmd, { cwd, shell: true, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+      c = spawn(cmd, { cwd, env: childEnv(), shell: true, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
     } catch (e) {
       resolve({ code: null, tail: e instanceof Error ? e.message : String(e) });
       return;

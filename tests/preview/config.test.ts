@@ -80,10 +80,18 @@ describe('resolveProject', () => {
     expect(resolveProject({ 'D:\\App': cfg }, 'd:\\app\\')).toBe(cfg);
   });
 
-  it('không cấu hình: có next trong package.json → NEXT_DEFAULTS, không có → null', () => {
+  it('không cấu hình: có next trong package.json → lệnh next theo trình quản lý gói của dự án, không có → null', () => {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'acctv-proj-'));
     fs.writeFileSync(path.join(d, 'package.json'), JSON.stringify({ dependencies: { next: '16' } }));
-    expect(resolveProject({}, d)).toEqual(NEXT_DEFAULTS);
+    expect(resolveProject({}, d)).toEqual({
+      ...NEXT_DEFAULTS, dev: { command: 'npx next dev -p {port}' }, prod: { build: 'npx next build', start: 'npx next start -p {port}' },
+    });
+    fs.writeFileSync(path.join(d, 'yarn.lock'), '');
+    expect(resolveProject({}, d)!.dev.command).toBe('yarn next dev -p {port}');
+    fs.writeFileSync(path.join(d, 'package.json'), JSON.stringify({ packageManager: 'pnpm@9.1.0', dependencies: { next: '16' } }));
+    expect(resolveProject({}, d)!.prod.start).toBe('pnpm exec next start -p {port}');
+    fs.writeFileSync(path.join(d, 'package.json'), JSON.stringify({ packageManager: 'yarn@1.22.22+sha512.ab', dependencies: { next: '16' } }));
+    expect(resolveProject({}, d)!.prod.build).toBe('yarn next build');
     const e = fs.mkdtempSync(path.join(os.tmpdir(), 'acctv-proj-'));
     fs.writeFileSync(path.join(e, 'package.json'), JSON.stringify({ dependencies: { react: '19' } }));
     expect(resolveProject({}, e)).toBeNull();

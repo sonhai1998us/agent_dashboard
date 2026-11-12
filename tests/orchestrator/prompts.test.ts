@@ -117,9 +117,11 @@ describe('turn', () => {
     expect(turn.first(t)).toContain('propose_plan');
     expect(turn.approved(plan, 'D:\\wt').startsWith('Kế hoạch đã được duyệt')).toBe(true);
     expect(turn.approved(plan, 'D:\\wt')).toContain('D:\\wt');
-    expect(turn.approved(plan, 'D:\\wt')).toMatch(/chưa cài dependency: Dev đầu tiên cần cài trong worktree \(vd\. `npm ci` hoặc `npm install`\)/);
-    expect(turn.approved(plan, 'D:\\wt', { again: true, fresh: false })).toMatch(/^Kế hoạch sửa đã được duyệt\. Làm tiếp trên cùng nhánh/);
-    expect(turn.approved(plan, 'D:\\wt', { again: true, fresh: false })).not.toContain('chưa cài dependency');
+    expect(turn.approved(plan, 'D:\\wt', { deps: 'manual' })).toMatch(/chưa cài dependency: Dev đầu tiên cần cài trong worktree \(vd\. `npm ci` hoặc `npm install`\)/);
+    expect(turn.approved(plan, 'D:\\wt', { again: true, deps: null })).toMatch(/^Kế hoạch sửa đã được duyệt\. Làm tiếp trên cùng nhánh/);
+    expect(turn.approved(plan, 'D:\\wt', { again: true, deps: null })).not.toContain('chưa cài dependency');
+    expect(turn.approved(plan, 'D:\\wt', { deps: 'auto' })).toMatch(/Dashboard đang cài dependency.*Đừng giao việc cài dependency/);
+    expect(turn.approved(plan, 'D:\\wt', { deps: 'auto' })).not.toContain('chưa cài dependency');
     const fb = turn.feedback('nút lệch', ['D:\\h\\runs\\T-1\\feedback\\1-1.png'], 'D:\\h\\runs\\T-1\\feedback');
     expect(fb).toContain('nút lệch');
     expect(fb).toContain('- D:\\h\\runs\\T-1\\feedback\\1-1.png');

@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
-import { killTree } from '@/src/runner/proc';
+import { childEnv, killTree } from '@/src/runner/proc';
 import { loadEnvFiles } from './envFiles';
 import type { ProjectPreview } from './config';
 
@@ -73,8 +73,7 @@ export async function worktreeSignature(worktree: string): Promise<string> {
 /** Biến môi trường cho server: kế thừa của dashboard (trừ NODE_ENV), rồi file env của dự án, rồi env cấu hình, rồi PORT. */
 function serverEnv(vars: Record<string, string>, project: ProjectPreview, port: number): Record<string, string | undefined> {
   // next tự đặt NODE_ENV theo lệnh; NODE_ENV của dashboard (production/test) làm next dev chạy sai
-  const { NODE_ENV: _drop, ...base } = process.env;
-  return { ...base, ...vars, ...project.env, PORT: String(port) };
+  return { ...childEnv(), ...vars, ...project.env, PORT: String(port) };
 }
 
 export class PreviewServer {

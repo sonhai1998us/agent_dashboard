@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { MASK, NEXT_DEFAULTS, type PreviewAccount, type PreviewLogin, type ProjectPreview } from './defaults';
+import { MASK, NEXT_DEFAULTS, nextDefaults, type PreviewAccount, type PreviewLogin, type ProjectPreview } from './defaults';
 
 export { MASK, NEXT_DEFAULTS, type PreviewAccount, type PreviewLogin, type ProjectPreview };
 
@@ -144,12 +144,25 @@ export function unmaskProjects(
   return errors.length ? { ok: false, errors } : { ok: true, projects: out };
 }
 
+const RUNNERS: Record<string, string> = { pnpm: 'pnpm exec', yarn: 'yarn', bun: 'bunx', npm: 'npx' };
+
+/** Tiền tố chạy bin cục bộ theo trình quản lý gói của dự án: trường packageManager, rồi lockfile, mặc định npx. */
+export function binRunner(dir: string, packageManager?: unknown): string {
+  const declared = typeof packageManager === 'string' ? packageManager.split('@')[0] : '';
+  if (RUNNERS[declared]) return RUNNERS[declared];
+  const has = (f: string) => fs.existsSync(path.join(dir, f));
+  if (has('pnpm-lock.yaml')) return RUNNERS.pnpm;
+  if (has('yarn.lock')) return RUNNERS.yarn;
+  if (has('bun.lock') || has('bun.lockb')) return RUNNERS.bun;
+  return RUNNERS.npm;
+}
+
 export function resolveProject(projects: Record<string, ProjectPreview>, dir: string): ProjectPreview | null {
   const hit = lookup(projects, dir);
   if (hit) return hit;
   try {
     const pkg = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')) as Record<string, Record<string, string> | undefined>;
-    if (pkg.dependencies?.next || pkg.devDependencies?.next) return structuredClone(NEXT_DEFAULTS);
+    if (pkg.dependencies?.next || pkg.devDependencies?.next) return nextDefaults(binRunner(dir, pkg.packageManager));
   } catch {
     // không có hoặc hỏng package.json
   }

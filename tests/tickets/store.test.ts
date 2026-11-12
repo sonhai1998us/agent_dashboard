@@ -26,7 +26,7 @@ const ticket = (over: Partial<Ticket> = {}): Ticket => ({
 const managed = (over: Partial<ManagedAgent> = {}): ManagedAgent => ({
   agentId: 'acctv:T-1:dev-1', ticketId: 'T-1', role: 'dev', ordinal: 1, packageId: 'p1', task: 'do', files: ['a.ts'],
   runner: 'claude', model: 'claude-sonnet-5-5', effort: 'high', sessionId: 'sid-d', state: 'running', stopReason: null,
-  resultText: null, changedFiles: ['a.ts'], costUsd: 0.5, createdAt: 1000, endedAt: null, userAction: null, ...over,
+  resultText: null, changedFiles: ['a.ts'], costUsd: 0.5, createdAt: 1000, endedAt: null, userAction: null, contextFrom: ['acctv:T-1:explorer-1'], ...over,
 });
 
 test('Ticket round-trip đủ plan, overrides, pendingWait', () => {
