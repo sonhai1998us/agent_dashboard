@@ -15,11 +15,14 @@ const STDERR_KEEP = 4096;
 export const OVERFLOW = '\u0000overflow';
 
 /**
- * Môi trường cho tiến trình con chạy trong dự án của người dùng (agent, lệnh cài, server preview): của dashboard trừ NODE_ENV.
+ * Môi trường cho tiến trình con chạy trong dự án của người dùng (agent, lệnh cài, server preview): của dashboard trừ NODE_ENV và biến Next tự gán.
  * NODE_ENV=production của dashboard làm jest lỗi ("act is not supported in production builds"), npm ci / yarn install bỏ devDependencies.
+ * TURBOPACK: Next 16 của dashboard tự gán `auto` khi khởi tạo; Next 14 của dự án coi mọi giá trị là bật Turbopack, nên `next dev` bỏ cấu hình webpack.
  */
 export function childEnv(): NodeJS.ProcessEnv {
-  const { NODE_ENV: _drop, ...env } = process.env;
+  const env = Object.fromEntries(
+    Object.entries(process.env).filter(([k]) => k !== 'NODE_ENV' && k !== 'TURBOPACK' && !k.startsWith('__NEXT_')),
+  );
   return env as NodeJS.ProcessEnv; // kiểu ProcessEnv (Next mở rộng) bắt buộc NODE_ENV
 }
 
