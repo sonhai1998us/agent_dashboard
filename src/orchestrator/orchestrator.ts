@@ -7,7 +7,7 @@ import { isManagedId, type AgentInfo, type Alert, type NormalizedEvent } from '@
 import type { TicketStore } from '@/src/tickets/store';
 import { FEEDBACK_EXT, FEEDBACK_IMAGE_BYTES, FEEDBACK_IMAGES_MAX, FEEDBACK_TEXT_MAX, TERMINAL_STATES, type UserAction, type AgentKind, type ManagedAgent, type ManagedState, type MergeMode, type Plan, type Role, type RoleSpec, type Ticket, type TicketStatus, type WaitSpan, type WorkRole } from '@/src/tickets/model';
 import { branchName, filesOverlap, transition, validatePlan, type TicketEvent } from '@/src/tickets/flow';
-import { CAPTURE_TOOL, checkTool, matchEntry, USER_ACTION_TOOL, type GuardPolicy } from '@/src/guard/policy';
+import { CAPTURE_TOOL, E2E_TOOL, checkTool, matchEntry, USER_ACTION_TOOL, type GuardPolicy } from '@/src/guard/policy';
 import type { PreviewManager } from '@/src/preview/manager';
 import type { PreviewStatus } from '@/src/preview/server';
 import { resolveProject } from '@/src/preview/config';
@@ -20,14 +20,14 @@ import type { Runner, RunHandle, RunResult, RunSink, RunSpec } from '@/src/runne
 import { USER_ACTION_LIMITS, type ToolImpl, type ToolResult } from './mcp';
 import { listPreview, systemPrompt, turn, workerPrompt } from './prompts';
 import { agentLog, agentReport } from './reports';
-import type { DepsResult } from './installDeps';
+import { hasE2eConfig, type DepsResult } from './installDeps';
 
 export interface OrchestratorDeps {
   cfg: Config; store: Store; tickets: TicketStore; hub: Hub; ingest(evs: NormalizedEvent[]): void;
   runners: Partial<Record<AgentKind, Runner>>; git: typeof import('@/src/git/git'); port(): number;
   now?: () => number; newSessionId?: () => string; delays?: { rateLimitMs: number[] };
   /** Server preview + trình duyệt cho tool capture. Không có thì worker không có capture. */
-  preview?: Pick<PreviewManager, 'capture' | 'stop' | 'stopAll' | 'killOrphans' | 'accountsFor' | 'status' | 'defaultMode'>;
+  preview?: Pick<PreviewManager, 'capture' | 'runE2e' | 'stop' | 'stopAll' | 'killOrphans' | 'accountsFor' | 'status' | 'defaultMode'>;
   /** Cài dependency cho worktree mới (null: không có gì để cài). Không có thì Controller giao Dev tự cài. */
   installDeps?: (dir: string, worktree: string) => Promise<DepsResult> | null;
 }
@@ -224,7 +224,7 @@ export class Orchestrator {
     }
     this.closeWaits(controllerId(ticketId));
     this.log(ticketId, `Người dùng duyệt kế hoạch; nhánh ${branch}`);
-    this.runControllerTurn(ticketId, turn.approved(plan, wt, { deps: this.prepareDeps(ticketId, t.dir, wt) }));
+    this.runControllerTurn(ticketId, turn.approved(plan, wt, { deps: this.prepareDeps(ticketId, t.dir, wt), e2e: hasE2eConfig(wt) }));
     return this.mustTicket(ticketId);
   }
 
@@ -273,7 +273,7 @@ export class Orchestrator {
     if (this.mustTicket(T).status !== 'running') return this.mustTicket(T);
     this.closeWaits(controllerId(T));
     this.log(T, `Người dùng duyệt kế hoạch sửa; làm tiếp trên nhánh ${branch} (tối đa ${maxRounds} vòng)`);
-    this.runControllerTurn(T, turn.approved(plan, wt, { again: true, deps: fresh ? this.prepareDeps(T, t.dir, wt) : null }));
+    this.runControllerTurn(T, turn.approved(plan, wt, { again: true, deps: fresh ? this.prepareDeps(T, t.dir, wt) : null, e2e: hasE2eConfig(wt) }));
     return this.mustTicket(T);
   }
 
@@ -637,6 +637,8 @@ export class Orchestrator {
     const tools: Record<string, ToolImpl> = { request_user_action: async (a) => this.requestUserAction(agentId, a) };
     const m = this.deps.tickets.getManaged(agentId);
     if (m && this.hasCapture(m.runner, m.role, m.mode)) tools.capture = async (a) => this.capture(agentId, a);
+    // theo đúng danh sách tool CLI lúc khởi chạy: config thêm về sau không làm hai bên lệch nhau
+    if (m && this.workers.get(agentId)?.spec.tools.includes(E2E_TOOL)) tools.run_e2e = async (a) => this.runE2e(agentId, a);
     return tools;
   }
 
@@ -651,6 +653,19 @@ export class Orchestrator {
 
   private capturesDir(agentId: string): string {
     return path.join(this.runDir(agentId), 'captures');
+  }
+
+  /** run_e2e: Dev và QC review (claude, có preview) khi worktree có cấu hình Playwright. */
+  private hasE2e(m: Pick<ManagedAgent, 'runner' | 'role' | 'mode'>, worktree: string | null): boolean {
+    return !!this.deps.preview && m.runner === 'claude' && (m.role === 'dev' || m.role === 'qc') && m.mode !== 'cases' && hasE2eConfig(worktree);
+  }
+
+  private async runE2e(agentId: string, args: Record<string, unknown>): Promise<ToolResult> {
+    const m = this.deps.tickets.getManaged(agentId);
+    const t = m && this.deps.tickets.getTicket(m.ticketId);
+    if (!m || !t || !this.deps.preview || !isWorkerLive(m)) return fail('Agent không còn chạy');
+    if (t.status !== 'running' || !t.worktree) return fail('Ticket không còn chạy');
+    return this.deps.preview.runE2e({ ticketId: t.id, agentId, worktree: t.worktree, projectDir: t.dir, mode: this.previewMode(t), file: args.file, grep: args.grep });
   }
 
   private async capture(agentId: string, args: Record<string, unknown>): Promise<ToolResult> {
@@ -851,7 +866,11 @@ export class Orchestrator {
     this.queue.push(id);
     this.pump();
     const ignored = (own.agent !== undefined && own.agent !== agent) || (own.model !== undefined && own.model !== model) || (own.effort !== undefined && own.effort !== effort);
-    const note = ignored ? ' Dùng agent/model/effort theo kế hoạch đã duyệt; tham số bạn truyền khác kế hoạch nên bị bỏ qua.' : '';
+    const ignoredNote = ignored ? ' Dùng agent/model/effort theo kế hoạch đã duyệt; tham số bạn truyền khác kế hoạch nên bị bỏ qua.' : '';
+    // playwright.config có thể xuất hiện sau lúc duyệt: nhắc mỗi lần giao Dev thiếu file e2e
+    const e2eNote = role === 'dev' && this.hasE2e(m, t.worktree) && !files.some((f) => f.startsWith('e2e/'))
+      ? ' Dự án có test e2e (playwright.config): gói Dev nên có e2e/<mã ticket>.spec.ts trong files để chuyển từng TC thành test().' : '';
+    const note = ignoredNote + e2eNote;
     return ok(`Đã tạo ${id} (${role}, ${model}/${effort}).${note} Dùng wait_agents để chờ.`);
   }
 
@@ -1199,12 +1218,12 @@ export class Orchestrator {
         depsNote: role === 'explorer' || m.mode === 'cases' ? undefined : this.depsFailed.get(t.id),
       }),
       systemPrompt: systemPrompt(role, {
-        worktree: wt, files: m.files, denyBash: this.settings.denyBash, checkCommands: this.settings.checkCommands, scratch, mode: m.mode,
+        worktree: wt, files: m.files, denyBash: this.settings.denyBash, checkCommands: this.settings.checkCommands, scratch, mode: m.mode, e2e: this.hasE2e(m, wt),
         preview: this.deps.preview && CAPTURE_ROLES.includes(role)
           ? { mode: this.previewMode(t), accounts: this.deps.preview.accountsFor(t.dir), capture, ticketId: t.id }
           : undefined,
       }),
-      sessionId: m.sessionId, resume: false, ...this.workerTools(m.runner, role, m.mode),
+      sessionId: m.sessionId, resume: false, ...this.workerTools(m.runner, role, m.mode, this.hasE2e(m, wt)),
       addDirs: [scratch], runDir: this.runDir(id),
       // claude: MCP riêng của worker (request_user_action), xác thực bằng token guard; codex chưa nối MCP
       mcp: m.runner === 'claude' ? { url: `http://127.0.0.1:${port}/mcp?agent=${encodeURIComponent(id)}`, token } : null,
@@ -1220,11 +1239,12 @@ export class Orchestrator {
     this.onEnd(spec, handle, (r) => this.onWorkerExit(id, handle, r));
   }
 
-  private workerTools(runner: AgentKind, role: WorkRole, mode?: ManagedAgent['mode']): { tools: string[]; allowedTools: string[] } {
+  private workerTools(runner: AgentKind, role: WorkRole, mode?: ManagedAgent['mode'], e2e = false): { tools: string[]; allowedTools: string[] } {
     // QC viết test case chỉ đọc: không Bash, vì có thể chạy lúc node_modules còn đang cài
     const base = mode === 'cases' ? WORKER_TOOLS[role].filter((x) => x !== 'Bash') : WORKER_TOOLS[role];
     const t = runner === 'claude' ? [...base, USER_ACTION_TOOL] : [...base];
     if (this.hasCapture(runner, role, mode)) t.push(CAPTURE_TOOL);
+    if (e2e) t.push(E2E_TOOL);
     return { tools: t, allowedTools: [...t] };
   }
 

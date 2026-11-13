@@ -92,6 +92,22 @@ describe('systemPrompt: capture, Figma, dữ liệu QC', () => {
     expect(p).not.toContain('pnpm test');
   });
 
+  it('Dev có e2e: mỗi TC một test, goto tương đối, assertion theo quy luật, tài khoản từ E2E_*, chạy run_e2e', () => {
+    const p = systemPrompt('dev', { ...ctx, e2e: true });
+    for (const s of ["test('TC-", 'run_e2e', 'E2E_', 'quy luật', "page.goto('/"]) expect(p).toContain(s);
+    expect(systemPrompt('dev', ctx)).not.toContain('run_e2e');
+    const pv = { mode: 'dev' as const, accounts: [{ name: 'shop-owner', description: 'Chủ' }], capture: true, ticketId: 'T-1' };
+    expect(systemPrompt('dev', { ...ctx, e2e: true, preview: pv })).toContain('`E2E_SHOP_OWNER_USER` / `E2E_SHOP_OWNER_PASS`');
+  });
+
+  it('QC review có e2e: chạy run_e2e, đối chiếu TC ↔ test(), assertion bám dữ liệu dễ đổi là lỗi vừa; QC cases thì không', () => {
+    const p = systemPrompt('qc', { ...ctx, e2e: true });
+    expect(p).toContain('run_e2e');
+    expect(p).toMatch(/lỗi vừa/);
+    expect(systemPrompt('qc', { ...ctx, e2e: true, mode: 'cases' })).not.toContain('run_e2e');
+    expect(systemPrompt('designer', { ...ctx, e2e: true })).not.toContain('run_e2e');
+  });
+
   it('QC review và Dev dùng test case TC-… khi có trong ngữ cảnh', () => {
     expect(systemPrompt('qc', ctx)).toMatch(/từng TC/);
     expect(systemPrompt('dev', ctx)).toMatch(/từng TC/);
@@ -161,6 +177,11 @@ describe('turn', () => {
     expect(turn.restarted().startsWith('Dashboard vừa khởi động lại')).toBe(true);
     expect(turn.continued('thử cách khác', 4)).toContain('thử cách khác');
     expect(turn.nudge()).toContain('finish');
+  });
+
+  it('approved có e2e: Controller thêm e2e/<mã ticket>.spec.ts vào file gói Dev; không cờ thì không nhắc', () => {
+    expect(turn.approved(plan, 'W', { e2e: true })).toContain('e2e/<mã ticket>.spec.ts');
+    expect(turn.approved(plan, 'W')).not.toContain('e2e/');
   });
 
   it('agentsDone có vòng và báo cáo', () => {

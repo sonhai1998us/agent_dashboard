@@ -51,10 +51,12 @@ const git = (cwd: string, args: string[]): Promise<string> =>
   new Promise((resolve) => execFile('git', ['-C', cwd, ...args], { maxBuffer: 64 * 1024 * 1024, windowsHide: true }, (e, out) => resolve(e ? '' : out)));
 
 export async function worktreeSignature(worktree: string): Promise<string> {
+  // test e2e và kết quả của nó không đổi trang: sửa spec không được làm prod build lại
+  const skip = ['--', '.', ':(exclude)e2e', ':(exclude)test-results', ':(exclude)playwright-report'];
   const [head, diff, untracked] = await Promise.all([
     git(worktree, ['rev-parse', 'HEAD']),
-    git(worktree, ['diff', 'HEAD']),
-    git(worktree, ['ls-files', '--others', '--exclude-standard']),
+    git(worktree, ['diff', 'HEAD', ...skip]),
+    git(worktree, ['ls-files', '--others', '--exclude-standard', ...skip]),
   ]);
   const h = createHash('sha1').update(head).update('\0').update(diff).update('\0');
   for (const f of untracked.split('\n').filter(Boolean)) {

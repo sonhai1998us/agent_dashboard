@@ -151,3 +151,28 @@ describe('PreviewServer', () => {
     expect(slow.s.status().state).toBe('stopped');
   });
 });
+
+describe('worktreeSignature', () => {
+  it('bỏ qua e2e/, test-results/, playwright-report/: sửa spec không làm prod build lại', async () => {
+    const { execFileSync } = await import('node:child_process');
+    const { worktreeSignature } = await import('@/src/preview/server');
+    const g = (d: string, ...a: string[]) => execFileSync('git', ['-C', d, ...a], { encoding: 'utf8' });
+    const wt = fs.mkdtempSync(path.join(os.tmpdir(), 'sig-'));
+    g(wt, 'init', '-q');
+    fs.mkdirSync(path.join(wt, 'e2e'));
+    fs.writeFileSync(path.join(wt, 'e2e', 'a.spec.ts'), 'a\n');
+    fs.writeFileSync(path.join(wt, 'page.tsx'), 'x\n');
+    g(wt, 'add', '-A');
+    g(wt, '-c', 'user.name=T', '-c', 'user.email=t@x', 'commit', '-q', '-m', 'init');
+    const s0 = await worktreeSignature(wt);
+    fs.writeFileSync(path.join(wt, 'e2e', 'a.spec.ts'), 'b\n');
+    fs.writeFileSync(path.join(wt, 'e2e', 'moi.spec.ts'), 'c\n');
+    fs.mkdirSync(path.join(wt, 'test-results'));
+    fs.writeFileSync(path.join(wt, 'test-results', 'r.json'), '{}');
+    fs.mkdirSync(path.join(wt, 'playwright-report'));
+    fs.writeFileSync(path.join(wt, 'playwright-report', 'index.html'), '');
+    expect(await worktreeSignature(wt)).toBe(s0);
+    fs.writeFileSync(path.join(wt, 'page.tsx'), 'y\n');
+    expect(await worktreeSignature(wt)).not.toBe(s0);
+  });
+});

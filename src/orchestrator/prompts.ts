@@ -1,3 +1,4 @@
+import { e2eEnvName } from '@/src/preview/captureArgs';
 import type { AgentReport, ManagedAgent, Plan, Role, Ticket } from '@/src/tickets/model';
 import { readableRule } from '@/src/guard/policy';
 
@@ -83,6 +84,16 @@ Quy tắc:
 
 Báo cáo: danh sách test case đánh số TC-1, TC-2…, mỗi cái gồm: tiêu chí nghiệm thu liên quan; các bước (URL, viewport, ngôn ngữ, tài khoản, dữ liệu); kết quả mong đợi cụ thể (chữ, số, thứ tự, trạng thái). Không kết luận đạt / không đạt: chưa có gì để kiểm.`;
 
+const E2E_DEV = `Test e2e (dự án có playwright.config): viết file spec được giao trong e2e/ bằng @playwright/test, để người dùng chạy lại trên staging trước mỗi lần release.
+- Mỗi test case TC-n trong ngữ cảnh là một test('TC-n: <tóm tắt>'), gom trong test.describe('<mã ticket>').
+- Đường dẫn tương đối, vd. page.goto('/en/basketball/...'); không ghi host hay cổng (BASE_URL do môi trường đặt).
+- Selector ổn định: data-testid, role, chữ cố định của giao diện; tránh class Tailwind và vị trí.
+- Assertion theo quy luật, không theo dữ liệu thật hay đổi: thứ tự (giảm dần…), định dạng (dd/MM…), có/không có phần tử, chữ đã dịch, tab ẩn khi rỗng. Không assert tên, số, ngày cụ thể của dữ liệu thể thao; id/slug dữ liệu mẫu chọn cái ổn định và ghi chú lý do trong comment.
+- Cần đăng nhập: lấy tài khoản từ process.env.E2E_<TÊN>_USER và process.env.E2E_<TÊN>_PASS, không ghi mật khẩu vào file.
+- Chạy thử bằng tool run_e2e (file, grep tuỳ chọn) trước khi báo xong; ghi trong báo cáo kết quả và TC nào chưa có test.`;
+
+const E2E_QC = `Test e2e (dự án có playwright.config): chạy file spec của ticket trong e2e/ bằng tool run_e2e. Báo: từng TC đã có test() tương ứng chưa, test nào đỏ và vì sao, assertion nào bám dữ liệu thật hay đổi (tên, số, ngày cụ thể) — đó là lỗi vừa vì sẽ đỏ trên staging dù code đúng. Vẫn kiểm độc lập bằng capture như thường; không sửa file spec.`;
+
 export interface PreviewPromptCtx {
   mode: 'dev' | 'prod';
   /** chỉ tên và mô tả, không bao giờ có mật khẩu */
@@ -126,7 +137,7 @@ function previewParts(role: Role, pv: PreviewPromptCtx | undefined): string[] {
   return parts;
 }
 
-export function systemPrompt(role: Role, ctx: { worktree: string | null; files: string[]; denyBash: string[]; checkCommands?: string[]; preview?: PreviewPromptCtx; scratch?: string; mode?: 'cases' | null }): string {
+export function systemPrompt(role: Role, ctx: { worktree: string | null; files: string[]; denyBash: string[]; checkCommands?: string[]; preview?: PreviewPromptCtx; scratch?: string; mode?: 'cases' | null; e2e?: boolean }): string {
   const cases = role === 'qc' && ctx.mode === 'cases';
   const body = role === 'controller' ? CONTROLLER : role === 'dev' ? DEV : role === 'explorer' ? EXPLORER : cases ? QC_CASES : REVIEWER(role);
   const parts = [`ROLE: ${role}`, body];
@@ -142,6 +153,11 @@ File tạm (ảnh hay khung hình xuất ra để xem, script nháp, log) ghi v�
     if (c) parts.push(c);
   }
   if (!cases) parts.push(...previewParts(role, ctx.preview));
+  if (ctx.e2e && role === 'dev') {
+    const acc = ctx.preview?.accounts ?? [];
+    parts.push(acc.length ? `${E2E_DEV}\nBiến tài khoản test:\n${bullets(acc.map((a) => `\`E2E_${e2eEnvName(a.name)}_USER\` / \`E2E_${e2eEnvName(a.name)}_PASS\` (${a.name}: ${a.description})`))}` : E2E_DEV);
+  }
+  if (ctx.e2e && role === 'qc' && !cases) parts.push(E2E_QC);
   const d = denyList(ctx.denyBash);
   if (d) parts.push(d);
   return parts.join('\n\n');
@@ -192,11 +208,12 @@ export const turn = {
    * `again`: kế hoạch sửa sau góp ý, làm tiếp trên nhánh cũ.
    * `deps`: worktree vừa tạo; 'auto' = dashboard đang cài dependency, 'manual' = Dev phải tự cài, null = không cần.
    */
-  approved: (plan: Plan, worktree: string, opts: { again?: boolean; deps?: 'auto' | 'manual' | null } = {}): string =>
+  approved: (plan: Plan, worktree: string, opts: { again?: boolean; deps?: 'auto' | 'manual' | null; e2e?: boolean } = {}): string =>
     `${opts.again ? 'Kế hoạch sửa đã được duyệt. Làm tiếp trên cùng nhánh: mọi thay đổi trước vẫn còn trong worktree.' : 'Kế hoạch đã được duyệt.'} Worktree của ticket: ${worktree}\n\n` +
     `Kế hoạch được duyệt (người dùng có thể đã sửa):\n${JSON.stringify(plan, null, 2)}\n\n` +
     (opts.deps === 'manual' ? 'Worktree mới tạo chưa cài dependency: Dev đầu tiên cần cài trong worktree (vd. `npm ci` hoặc `npm install`) trước khi các Dev song song chạy build/test.\n\n' : '') +
     (opts.deps === 'auto' ? 'Dashboard đang cài dependency trong worktree: Explorer và QC mode: "cases" chạy được ngay, Dev, Designer, QC review tự chờ tới khi cài xong. Đừng giao việc cài dependency.\n\n' : '') +
+    (opts.e2e ? 'Dự án có test e2e (playwright.config): thêm `e2e/<mã ticket>.spec.ts` vào files của gói Dev (mã Jira trong tiêu đề hay mô tả nếu có, không thì id ticket), và ghi trong task: chuyển từng TC thành một test() rồi chạy run_e2e. QC review chạy lại file đó bằng run_e2e.\n\n' : '') +
     'Hãy giao việc bằng spawn_agent theo các gói, rồi gọi wait_agents và kết thúc lượt.',
   feedback: (text: string, images: string[], imageDir: string): string =>
     'Người dùng đã xem kết quả của ticket và chưa vừa ý.' + (text ? ` Góp ý:\n${text}` : '') + '\n\n' +

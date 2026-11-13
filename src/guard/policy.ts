@@ -30,6 +30,8 @@ export const USER_ACTION_TOOL = 'mcp__acctv__request_user_action';
 
 /** Tool MCP của dashboard: mở trang trên server preview của ticket trong Chrome headless (Dev, Designer, QC). */
 export const CAPTURE_TOOL = 'mcp__acctv__capture';
+export const E2E_TOOL = 'mcp__acctv__run_e2e';
+const E2E_ROLES = new Set(['dev', 'qc']);
 const CAPTURE_ROLES = new Set(['dev', 'designer', 'qc']);
 
 /** Độ dài tối đa của lệnh Bash mà guard chịu kiểm tra. */
@@ -234,6 +236,7 @@ export function checkTool(p: GuardPolicy, toolName: string, input: unknown, cwd:
   }
   if (toolName === USER_ACTION_TOOL) return { allow: true };
   if (toolName === CAPTURE_TOOL && CAPTURE_ROLES.has(p.role)) return { allow: true };
+  if (toolName === E2E_TOOL && E2E_ROLES.has(p.role)) return { allow: true };
   // Explorer và Designer đọc thiết kế (Figma…) qua MCP của người dùng: chỉ tool đọc
   if (p.role === 'explorer' || p.role === 'designer') {
     if (toolName === 'ToolSearch') return { allow: true, explicit: true };

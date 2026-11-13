@@ -2,9 +2,12 @@ import { execFile } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import type { HubEvent } from '@/src/core/model';
-import { killTree } from '@/src/runner/proc';
+import fs from 'node:fs';
+import { createRequire } from 'node:module';
+import { childEnv, killTree } from '@/src/runner/proc';
+import { runArgs } from './dbReset';
 import { LoginError, TicketBrowser, findBrowser as defaultFindBrowser } from './browser';
-import { LIMITS, formatError, formatResult, redact, validateCaptureArgs, type CaptureErrorCode, type CaptureResult } from './captureArgs';
+import { LIMITS, e2eEnvName, formatError, formatResult, redact, validateCaptureArgs, type CaptureErrorCode, type CaptureResult } from './captureArgs';
 import { resolveProject, type ProjectPreview } from './config';
 import { PreviewServer, PreviewServerError, worktreeSignature, type PreviewServerDeps, type PreviewStatus } from './server';
 
@@ -12,6 +15,29 @@ export type ServerLike = Pick<PreviewServer, 'ensure' | 'stop' | 'status' | 'ali
 export type BrowserLike = Pick<TicketBrowser, 'runCapture' | 'close'>;
 
 export interface CaptureRequest { ticketId: string; agentId: string; worktree: string; projectDir: string; mode: 'dev' | 'prod'; outDir: string; args: unknown }
+export interface E2eRequest { ticketId: string; agentId: string; worktree: string; projectDir: string; mode: 'dev' | 'prod'; file: unknown; grep?: unknown }
+type Exec = (cmd: string, args: string[], o: { cwd: string; env: NodeJS.ProcessEnv; timeoutMs: number; signal: AbortSignal }) => Promise<{ code: number | null; tail: string }>;
+export const E2E_TIMEOUT_MS = 600_000;
+/** Số ký tự cuối của log e2e được giữ lại. */
+export const E2E_TAIL = 6000;
+
+/**
+ * CLI của Playwright trong node_modules của worktree; null khi chưa cài (không để npx tự tải bản khác).
+ * Đọc trường bin của package.json: `playwright` không export ./cli.
+ */
+function playwrightCli(worktree: string): string | null {
+  const req = createRequire(path.join(worktree, 'package.json'));
+  for (const pkg of ['@playwright/test', 'playwright']) {
+    try {
+      const pj = req.resolve(`${pkg}/package.json`);
+      const bin = (JSON.parse(fs.readFileSync(pj, 'utf8')) as { bin?: string | Record<string, string> }).bin;
+      const rel = typeof bin === 'string' ? bin : bin?.playwright;
+      if (rel) return path.join(path.dirname(pj), rel);
+    } catch { /* chưa cài gói này: thử gói tiếp theo */ }
+  }
+  return null;
+}
+
 
 export interface PreviewManagerDeps {
   settings(): { projects: Record<string, ProjectPreview> };
@@ -30,10 +56,14 @@ export interface PreviewManagerDeps {
   /** tên file chạy của pid, null nếu không còn */
   procName?: (pid: number) => Promise<string | null>;
   kill?: (pid: number) => Promise<void>;
+  /** chạy lệnh e2e (mặc định runArgs, không qua shell) */
+  exec?: Exec;
 }
 
 interface Waiter { resolve(): void; reject(e: Error): void }
 interface Entry {
+  /** run_e2e đang chạy: không chiếm lượt capture, giữ server khỏi bị tắt vì rảnh, huỷ khi tắt preview */
+  e2e?: AbortController | null;
   ticketId: string;
   worktree: string;
   mode: 'dev' | 'prod';
@@ -120,6 +150,66 @@ export class PreviewManager {
     return (p?.accounts ?? []).map((a) => ({ name: a.name, description: a.description }));
   }
 
+  /** Chạy một file e2e (Playwright) của worktree trên server preview: BASE_URL trỏ vào server, tài khoản test qua env. */
+  async runE2e(req: E2eRequest): Promise<{ text: string; isError?: boolean }> {
+    const project = resolveProject(this.d.settings().projects, req.projectDir);
+    const secrets = (project?.accounts ?? []).map((a) => a.password);
+    const fail = (code: CaptureErrorCode, msg: string) => ({ isError: true, text: redact(formatError(code, msg, undefined, 'e2e'), secrets) });
+    if (!project) return fail('not_configured', `Dự án ${req.projectDir} chưa cấu hình server preview (Settings > Dự án).`);
+    const f = req.file;
+    const norm = typeof f === 'string' ? path.posix.normalize(f.replace(/\\/g, '/')) : '';
+    if (typeof f !== 'string' || path.isAbsolute(f) || norm !== f.replace(/\\/g, '/') || !norm.startsWith('e2e/') || !/\.spec\.(ts|js)$/.test(norm)) {
+      return fail('invalid_args', 'file phải là đường dẫn tương đối trong e2e/, đuôi .spec.ts hoặc .spec.js');
+    }
+    if (!fs.existsSync(path.join(req.worktree, norm))) return fail('invalid_args', `không có file ${norm} trong worktree`);
+    const g = req.grep;
+    if (g !== undefined && (typeof g !== 'string' || g.length > 200 || /[\r\n]/.test(g))) return fail('invalid_args', 'grep phải là chuỗi một dòng, tối đa 200 ký tự');
+    const cli = playwrightCli(req.worktree);
+    if (!cli) return fail('not_configured', 'worktree chưa cài @playwright/test (node_modules): cài dependency của dự án trước rồi chạy lại');
+    const e = this.entry(req, project);
+    if (e.e2e) return fail('busy_cancelled', 'đang có một run_e2e khác của ticket này; chờ nó xong rồi chạy lại');
+    const ac = new AbortController();
+    e.e2e = ac;
+    if (e.idle) clearTimeout(e.idle);
+    e.idle = null;
+    try {
+      let port: number;
+      try {
+        const info = await e.server.ensure();
+        port = info.port;
+        // next dev biên dịch trang lúc mở lần đầu: test đầu tiên dễ quá timeout 30s của Playwright
+        if (info.startedNow && info.mode === 'dev') await (this.d.warm ?? defaultWarm)(`http://localhost:${port}/`);
+      } catch (err) {
+        const tail = err instanceof PreviewServerError && err.logTail ? `\nLog cuối của server:\n${err.logTail}` : '';
+        return fail('server_failed', `${err instanceof Error ? err.message : String(err)}${tail}`);
+      }
+      if (e.stopped) return fail('busy_cancelled', 'server preview đã bị tắt');
+      const env: NodeJS.ProcessEnv = { ...childEnv(), BASE_URL: `http://localhost:${port}` };
+      const byVar = new Map<string, string[]>();
+      for (const a of project.accounts) byVar.set(e2eEnvName(a.name), [...(byVar.get(e2eEnvName(a.name)) ?? []), a.name]);
+      const clash = [...byVar].filter(([, names]) => names.length > 1);
+      for (const a of project.accounts) {
+        const v = e2eEnvName(a.name);
+        if (byVar.get(v)!.length > 1) continue; // trùng tên biến: không đoán tài khoản nào đúng
+        env[`E2E_${v}_USER`] = a.username;
+        env[`E2E_${v}_PASS`] = a.password;
+      }
+      const warn = clash.map(([v, names]) => `Cảnh báo: tài khoản ${names.join(', ')} trùng biến E2E_${v}_*: không đặt biến nào; đổi tên một tài khoản trong Settings.\n`).join('');
+      const args = [cli, 'test', norm, '--reporter=line', ...(typeof g === 'string' && g ? ['--grep', g] : [])];
+      const exec: Exec = this.d.exec ?? ((cmd, a, o) => runArgs(cmd, a, o.cwd, o.env, o.timeoutMs, o.signal, E2E_TAIL));
+      const r = await exec(process.execPath, args, { cwd: req.worktree, env, timeoutMs: E2E_TIMEOUT_MS, signal: ac.signal });
+      // log bị cắt ở đầu: dòng đầu có thể là mẩu mật khẩu mà redact không nhận ra
+      const tail = r.tail.length >= E2E_TAIL ? r.tail.slice(r.tail.indexOf('\n') + 1) : r.tail;
+      if (ac.signal.aborted) return fail('busy_cancelled', 'server preview đã bị tắt (ticket kết thúc hoặc người dùng tắt)');
+      if (r.code === null) return fail('run_failed', `playwright quá ${E2E_TIMEOUT_MS / 1000}s hoặc không chạy được\n${warn}${tail}`);
+      const text = `[e2e] ${r.code === 0 ? 'đạt' : 'lỗi'} (exit ${r.code})\n${warn}${tail}`;
+      return r.code === 0 ? { text: redact(text, secrets) } : { isError: true, text: redact(text, secrets) };
+    } finally {
+      if (e.e2e === ac) e.e2e = null;
+      this.idleLater(e);
+    }
+  }
+
   defaultMode(projectDir: string): 'dev' | 'prod' {
     return resolveProject(this.d.settings().projects, projectDir)?.defaultMode ?? 'dev';
   }
@@ -175,6 +265,7 @@ export class PreviewManager {
     if (!e) return;
     this.entries.delete(ticketId);
     e.stopped = true;
+    e.e2e?.abort();
     if (e.idle) clearTimeout(e.idle);
     e.idle = null;
     for (const w of e.waiting.splice(0)) w.reject(new Error('server preview đã bị tắt (ticket kết thúc hoặc người dùng tắt)'));
@@ -213,7 +304,7 @@ export class PreviewManager {
     this.d.setMeta(PIDS_KEY, '{}');
   }
 
-  private entry(req: CaptureRequest, project: ProjectPreview): Entry {
+  private entry(req: Pick<CaptureRequest, 'ticketId' | 'worktree' | 'mode' | 'projectDir'>, project: ProjectPreview): Entry {
     const cur = this.entries.get(req.ticketId);
     const sKey = serverKey(project);
     if (cur && cur.worktree === req.worktree && cur.mode === req.mode && cur.serverKey === sKey) {
@@ -281,7 +372,11 @@ export class PreviewManager {
     e.active--;
     const next = e.waiting.shift();
     if (next) return next.resolve();
-    if (e.active === 0) {
+    this.idleLater(e);
+  }
+
+  private idleLater(e: Entry): void {
+    if (e.active === 0 && !e.e2e && !e.stopped) {
       e.idle = setTimeout(() => void this.stop(e.ticketId), this.d.idleMs ?? IDLE_MS);
       e.idle.unref?.();
     }

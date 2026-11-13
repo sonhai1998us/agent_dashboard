@@ -8,6 +8,7 @@ afterEach(() => cleanup(env));
 
 const preview = {
   capture: async () => ({ text: '{"steps":[]}' }),
+  runE2e: async () => ({ text: '[e2e] đạt (exit 0)' }),
   stop: async () => {}, stopAll: async () => {}, killOrphans: async () => {},
   accountsFor: () => [], status: () => null, defaultMode: () => 'dev' as const,
 };

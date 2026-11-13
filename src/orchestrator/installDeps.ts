@@ -44,6 +44,11 @@ export function canClone(dir: string, wt: string, lock: string | null): boolean 
   return lockAt !== null && installedAt >= lockAt;
 }
 
+/** Worktree đã chuẩn bị e2e Playwright (playwright.config.*): bật tool run_e2e và hướng dẫn viết spec. */
+export function hasE2eConfig(wt: string | null): boolean {
+  return !!wt && ['ts', 'js', 'mjs', 'cjs'].some((x) => existsSync(path.join(wt, `playwright.config.${x}`)));
+}
+
 const run = promisify(execFile);
 
 /** Chuẩn bị node_modules cho worktree mới; null khi không có gì để làm. Không bao giờ ném lỗi. */
