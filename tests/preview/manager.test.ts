@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
+import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { NEXT_DEFAULTS, type ProjectPreview } from '@/src/preview/config';
 import { LoginError } from '@/src/preview/browser';
 import { PreviewServerError, type PreviewServerDeps, type PreviewStatus, type ServerInfo } from '@/src/preview/server';
-import { PreviewManager, type BrowserLike, type ServerLike } from '@/src/preview/manager';
+import { E2E_TAIL, PreviewManager, type BrowserLike, type ServerLike } from '@/src/preview/manager';
 import type { CaptureArgs, CaptureResult } from '@/src/preview/captureArgs';
 import type { HubEvent } from '@/src/core/model';
 
@@ -31,8 +32,10 @@ class FakeServer implements ServerLike {
   hold() {
     this.hang = new Promise((r) => (this.release = r));
   }
+  failWith: PreviewServerError | null = null;
   async ensure(): Promise<ServerInfo> {
     this.ensures++;
+    if (this.failWith) throw this.failWith;
     if (this.hang) {
       await this.hang;
       if (this.st.state === 'stopped' && this.stops) throw new PreviewServerError('server_failed', 'server preview đã bị tắt', 'log secret1');
@@ -75,7 +78,8 @@ class FakeBrowser implements BrowserLike {
   }
 }
 
-function setup(over: { project?: ProjectPreview | null; fetchOk?: boolean; idleMs?: number; browser?: string | null; meta?: Record<string, string> } = {}) {
+type Exec = NonNullable<ConstructorParameters<typeof PreviewManager>[0]['exec']>;
+function setup(over: { project?: ProjectPreview | null; fetchOk?: boolean; idleMs?: number; browser?: string | null; meta?: Record<string, string>; exec?: Exec; warm?: (u: string) => Promise<void> } = {}) {
   const servers: FakeServer[] = [];
   const browsers: FakeBrowser[] = [];
   const events: HubEvent[] = [];
@@ -103,6 +107,8 @@ function setup(over: { project?: ProjectPreview | null; fetchOk?: boolean; idleM
       return over.fetchOk ?? true;
     },
     idleMs: over.idleMs ?? 60_000,
+    exec: over.exec,
+    ...(over.warm ? { warm: over.warm } : {}),
   });
   return { m, servers, browsers, events, meta, health };
 }
@@ -295,5 +301,143 @@ describe('PreviewManager', () => {
   it('defaultMode theo cấu hình dự án', () => {
     expect(setup({ project: project({ defaultMode: 'prod' }) }).m.defaultMode(DIR)).toBe('prod');
     expect(setup({ project: null }).m.defaultMode(DIR)).toBe('dev');
+  });
+});
+
+describe('PreviewManager.runE2e', () => {
+  const SPEC = 'e2e/T-1.spec.ts';
+  fs.mkdirSync(path.join(WT, 'e2e'), { recursive: true });
+  fs.writeFileSync(path.join(WT, SPEC), "test('TC-1', () => {});\n");
+  // @playwright/test giả trong node_modules của worktree: dashboard gọi thẳng cli.js bằng node, không qua npx
+  // giống gói `playwright` 1.61 thật: exports không có ./cli, CLI chỉ khai trong bin
+  const PW = path.join(WT, 'node_modules', 'playwright');
+  fs.mkdirSync(PW, { recursive: true });
+  fs.writeFileSync(path.join(PW, 'package.json'), JSON.stringify({ name: 'playwright', exports: { '.': './index.js', './package.json': './package.json' }, bin: { playwright: 'cli.js' } }));
+  fs.writeFileSync(path.join(PW, 'cli.js'), '');
+  const CLI = fs.realpathSync(path.join(PW, 'cli.js'));
+  const e2eReq = (file: unknown, grep?: unknown) => ({ ticketId: 'T-1', agentId: 'acctv:T-1:qc-1', worktree: WT, projectDir: DIR, mode: 'dev' as const, file, grep });
+  const recorder = (result: { code: number | null; tail: string } = { code: 0, tail: '1 passed' }) => {
+    const calls: { cmd: string; args: string[]; o: { cwd: string; env: NodeJS.ProcessEnv; timeoutMs: number; signal: AbortSignal } }[] = [];
+    const exec: Exec = async (cmd, args, o) => { calls.push({ cmd, args, o }); return result; };
+    return { calls, exec };
+  };
+
+  it('chạy npx playwright test <file> trong worktree, BASE_URL = server preview, tài khoản qua env', async () => {
+    const r = recorder();
+    const { m } = setup({ exec: r.exec });
+    const out = await m.runE2e(e2eReq(SPEC));
+    expect(out.isError).toBeFalsy();
+    expect(out.text).toMatch(/đạt/);
+    expect(r.calls).toHaveLength(1);
+    expect(r.calls[0].cmd).toBe(process.execPath);
+    expect(r.calls[0].args).toEqual([CLI, 'test', SPEC, '--reporter=line']);
+    expect(r.calls[0].o.cwd).toBe(WT);
+    expect(r.calls[0].o.env.BASE_URL).toBe('http://localhost:3100');
+    expect(r.calls[0].o.env.E2E_OWNER_USER).toBe('o@x');
+    expect(r.calls[0].o.env.E2E_OWNER_PASS).toBe('secret1');
+    await m.stopAll();
+  });
+
+  it('file ngoài e2e/, có .., tuyệt đối, không tồn tại → [e2e:invalid_args], không gọi exec', async () => {
+    const r = recorder();
+    const { m } = setup({ exec: r.exec });
+    for (const f of ['src/a.spec.ts', 'e2e/../src/a.spec.ts', path.join(WT, SPEC), 'e2e/khong-co.spec.ts', 42]) {
+      expect((await m.runE2e(e2eReq(f))).text).toMatch(/^\[e2e:invalid_args\]/);
+    }
+    expect(r.calls).toHaveLength(0);
+  });
+
+  it('grep đi nguyên văn thành argv, không qua shell', async () => {
+    const r = recorder();
+    const { m } = setup({ exec: r.exec });
+    await m.runE2e(e2eReq(SPEC, '"; rm -rf ~'));
+    expect(r.calls[0].args.slice(-2)).toEqual(['--grep', '"; rm -rf ~']);
+    expect((await m.runE2e(e2eReq(SPEC, 'a\nb'))).text).toMatch(/^\[e2e:invalid_args\]/);
+    await m.stopAll();
+  });
+
+  it('exit khác 0 → isError, có log; mật khẩu bị che', async () => {
+    const r = recorder({ code: 1, tail: '1 failed: login with secret1' });
+    const { m } = setup({ exec: r.exec });
+    const out = await m.runE2e(e2eReq(SPEC));
+    expect(out.isError).toBe(true);
+    expect(out.text).toMatch(/lỗi \(exit 1\)/);
+    expect(out.text).toContain('1 failed');
+    expect(out.text).not.toContain('secret1');
+    await m.stopAll();
+  });
+
+  it('worktree chưa cài @playwright/test → [e2e:not_configured], không gọi exec (không để npx tự tải)', async () => {
+    const wt2 = fs.mkdtempSync(path.join(os.tmpdir(), 'wt-nopw-'));
+    fs.mkdirSync(path.join(wt2, 'e2e'));
+    fs.writeFileSync(path.join(wt2, SPEC), '');
+    const r = recorder();
+    const { m } = setup({ exec: r.exec });
+    expect((await m.runE2e({ ...e2eReq(SPEC), worktree: wt2 })).text).toMatch(/^\[e2e:not_configured\].*@playwright\/test/);
+    expect(r.calls).toHaveLength(0);
+  });
+
+  it('e2e không chiếm lượt capture; một ticket chỉ một run_e2e cùng lúc; tắt preview thì huỷ run đang chạy', async () => {
+    let open!: () => void;
+    const gate = new Promise<void>((res) => (open = res));
+    const signals: AbortSignal[] = [];
+    const exec: Exec = async (_c, _a, o) => { signals.push(o.signal); await gate; return { code: 0, tail: '' }; };
+    const { m } = setup({ exec });
+    const running = m.runE2e(e2eReq(SPEC));
+    await sleep(20);
+    expect((await m.runE2e(e2eReq(SPEC))).text).toMatch(/^\[e2e:busy_cancelled\]/);
+    const caps = await Promise.all([m.capture(req({ steps: [{ goto: '/' }] })), m.capture(req({ steps: [{ goto: '/a' }] }))]);
+    expect(caps.every((c) => !c.isError)).toBe(true);
+    expect(signals[0].aborted).toBe(false);
+    await m.stop('T-1');
+    expect(signals[0].aborted).toBe(true);
+    open();
+    await running;
+  });
+
+  it('quá hạn hoặc không chạy được → [e2e:run_failed], không đổ cho server', async () => {
+    const { m } = setup({ exec: recorder({ code: null, tail: 'killed' }).exec });
+    expect((await m.runE2e(e2eReq(SPEC))).text).toMatch(/^\[e2e:run_failed\]/);
+    await m.stopAll();
+  });
+
+  it('hai tài khoản trùng tên biến (a-b, a_b): không đặt biến nào và cảnh báo', async () => {
+    const r = recorder();
+    const accounts = [{ name: 'a-b', description: '', username: 'u1', password: 'p1' }, { name: 'a_b', description: '', username: 'u2', password: 'p2' }, { name: 'owner', description: '', username: 'o@x', password: 'secret1' }];
+    const { m } = setup({ project: project({ accounts }), exec: r.exec });
+    const out = await m.runE2e(e2eReq(SPEC));
+    expect(r.calls[0].o.env.E2E_A_B_USER).toBeUndefined();
+    expect(r.calls[0].o.env.E2E_OWNER_USER).toBe('o@x');
+    expect(out.text).toMatch(/E2E_A_B/);
+    await m.stopAll();
+  });
+
+  it('dev: server vừa bật thì làm nóng trang / trước khi chạy; lần sau không', async () => {
+    const warmed: string[] = [];
+    const { m } = setup({ exec: recorder().exec, warm: async (u) => { warmed.push(u); } });
+    await m.runE2e(e2eReq(SPEC));
+    await m.runE2e(e2eReq(SPEC));
+    expect(warmed).toEqual(['http://localhost:3100/']);
+    await m.stopAll();
+  });
+
+  it('log bị cắt: bỏ dòng đầu dở dang để không lộ một phần mật khẩu', async () => {
+    const short = setup({ exec: recorder({ code: 1, tail: 'cret1 leaked\n' + 'x'.repeat(E2E_TAIL - 20) }).exec });
+    expect((await short.m.runE2e(e2eReq(SPEC))).text).toContain('cret1'); // không bị cắt: giữ nguyên
+    const cut = setup({ exec: recorder({ code: 1, tail: ('cret1 leaked\n' + 'x'.repeat(E2E_TAIL)).slice(0, E2E_TAIL) }).exec });
+    expect((await cut.m.runE2e(e2eReq(SPEC))).text).not.toContain('cret1');
+    await Promise.all([short.m.stopAll(), cut.m.stopAll()]);
+  });
+
+  it('chưa cấu hình dự án → [e2e:not_configured]; server lỗi → [e2e:server_failed] kèm log đã che', async () => {
+    const none = setup({ project: null, exec: recorder().exec });
+    expect((await none.m.runE2e(e2eReq(SPEC))).text).toMatch(/^\[e2e:not_configured\]/);
+    const again = setup({ exec: recorder().exec });
+    await again.m.runE2e(e2eReq(SPEC)); // tạo server
+    again.servers[0].failWith = new PreviewServerError('server_failed', 'next dev chết', 'log secret1');
+    const failed = await again.m.runE2e(e2eReq(SPEC));
+    expect(failed.text).toMatch(/^\[e2e:server_failed\].*next dev chết/s);
+    expect(failed.text).not.toContain('secret1');
+    await again.m.stopAll();
   });
 });

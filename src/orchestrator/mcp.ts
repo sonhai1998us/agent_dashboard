@@ -94,7 +94,7 @@ const CAPTURE_SCHEMA = {
   required: ['steps'],
 };
 
-export const TOOL_DEFS: { name: 'propose_plan' | 'spawn_agent' | 'wait_agents' | 'get_agent_log' | 'finish' | 'request_user_action' | 'capture'; description: string; inputSchema: object }[] = [
+export const TOOL_DEFS: { name: 'propose_plan' | 'spawn_agent' | 'wait_agents' | 'get_agent_log' | 'finish' | 'request_user_action' | 'capture' | 'run_e2e'; description: string; inputSchema: object }[] = [
   {
     name: 'propose_plan',
     description: `Gửi kế hoạch cho người dùng duyệt trước khi giao việc. ${WAIT_NOTE} Chỉ sau khi được duyệt mới được gọi spawn_agent.`,
@@ -172,6 +172,21 @@ export const TOOL_DEFS: { name: 'propose_plan' | 'spawn_agent' | 'wait_agents' |
       'trả ảnh (đường dẫn PNG để Read), số đo DOM, URL, console, request ghi. Không tự bật server hay trình duyệt. ' +
       'Lần đầu có thể mất tới vài phút để bật/build server. Lỗi bắt đầu bằng [capture:<mã>].',
     inputSchema: CAPTURE_SCHEMA,
+  },
+  {
+    name: 'run_e2e',
+    description:
+      'Chạy một file test e2e (Playwright) của ticket trên server preview do dashboard quản lý: BASE_URL tự trỏ vào server, tài khoản test có sẵn qua biến môi trường E2E_<TÊN>_USER / E2E_<TÊN>_PASS. ' +
+      'Chỉ file trong e2e/ (đuôi .spec.ts/.spec.js). Trả số test đạt/lỗi và phần cuối log. Lỗi môi trường bắt đầu bằng [e2e:<mã>].',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        file: { type: 'string', description: 'Đường dẫn tương đối trong worktree, vd. e2e/US-5369.spec.ts.' },
+        grep: { type: 'string', maxLength: 200, description: 'Chỉ chạy test có tên khớp (vd. "TC-2").' },
+      },
+      required: ['file'],
+    },
   },
 ];
 

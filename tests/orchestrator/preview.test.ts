@@ -27,6 +27,7 @@ function fakePreview(defaultMode: 'dev' | 'prod' = 'dev') {
       killOrphans: async () => {
         calls.killOrphans++;
       },
+      runE2e: async () => ({ text: '[e2e] đạt (exit 0)' }),
       accountsFor: () => [{ name: 'owner', description: 'Chủ' }],
       status: () => null,
       defaultMode: () => defaultMode,

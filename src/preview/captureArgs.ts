@@ -41,7 +41,10 @@ export interface CaptureResult {
   measures: { target: string; items: { rect: { x: number; y: number; width: number; height: number }; style: Record<string, string> }[] }[];
   shots: string[];
 }
-export type CaptureErrorCode = 'invalid_args' | 'not_configured' | 'backend_down' | 'login_failed' | 'server_failed' | 'busy_cancelled';
+export type CaptureErrorCode = 'invalid_args' | 'not_configured' | 'backend_down' | 'login_failed' | 'server_failed' | 'busy_cancelled' | 'run_failed';
+
+/** Tên biến môi trường của tài khoản test cho e2e: `E2E_<NAME>_USER` / `_PASS`, NAME viết hoa, ký tự không phải chữ/số thành `_`. */
+export const e2eEnvName = (name: string): string => name.toUpperCase().replace(/[^A-Z0-9]/g, '_');
 
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 const target = (v: unknown): v is string => typeof v === 'string' && v.trim() !== '' && v.length <= 500;
@@ -165,6 +168,6 @@ export function formatResult(r: CaptureResult): string {
   return JSON.stringify(r);
 }
 
-export function formatError(code: CaptureErrorCode, message: string, extra?: Partial<CaptureResult>): string {
-  return `[capture:${code}] ${message}${extra && Object.keys(extra).length ? `\n${JSON.stringify(extra)}` : ''}`;
+export function formatError(code: CaptureErrorCode, message: string, extra?: Partial<CaptureResult>, tool = 'capture'): string {
+  return `[${tool}:${code}] ${message}${extra && Object.keys(extra).length ? `\n${JSON.stringify(extra)}` : ''}`;
 }
