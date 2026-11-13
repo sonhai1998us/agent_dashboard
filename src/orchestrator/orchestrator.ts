@@ -50,7 +50,7 @@ export class OrchestratorError extends Error {
 type Timer = ReturnType<typeof setTimeout>;
 /** `timer`: đang chờ thử lại sau rate limit (lượt vẫn được coi là đang chạy). */
 interface CtrlState { handle: RunHandle | null; message: string | null; queue: string[]; nudges: number; waking: boolean; retries: number; timer: Timer | null }
-/** Giữ slot suốt các lần thử lại sau rate limit; `cost` và `files` cộng dồn qua các lần chạy (--resume không báo lại file cũ). */
+/** Giữ slot suốt các lần thử lại sau rate limit; `cost` là tổng cả session (claude tự cộng dồn), `files` gộp qua các lần chạy (--resume không báo lại file cũ). */
 interface WorkerRun {
   handle: RunHandle; spec: RunSpec; retries: number; timer: Timer | null; cost: number | null; files: string[]; last: RunResult | null;
   /** tiến trình đã thoát sau request_user_action; chờ người dùng trả lời */
@@ -69,6 +69,8 @@ const WORKER_TOOLS: Record<WorkRole, string[]> = {
   qc: ['Read', 'Glob', 'Grep', 'Bash'],
 };
 const ROLE_LABEL: Record<WorkRole, string> = { explorer: 'Explorer', dev: 'Dev', designer: 'Designer', qc: 'QC' };
+const agentLabel = (role: WorkRole, ordinal: number, mode?: ManagedAgent['mode']): string =>
+  `${ROLE_LABEL[role]}-${ordinal}${mode === 'cases' ? ' · test case' : ''}`;
 const WORK_ROLES: WorkRole[] = ['explorer', 'dev', 'designer', 'qc'];
 const AGENTS: AgentKind[] = ['claude', 'codex'];
 const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
@@ -160,19 +162,20 @@ export class Orchestrator {
 
   // ---------- API ----------
 
-  async createTicket(input: { title: string; description: string; dir: string; overrides?: Ticket['overrides'] }): Promise<Ticket> {
+  async createTicket(input: { title: string; description: string; dir: string; overrides?: Ticket['overrides']; baseBranch?: string; baseFrom?: string }): Promise<Ticket> {
     const dir = path.resolve(input.dir);
     const { home, claudeDir, codexDir } = this.deps.cfg;
     if ([home, claudeDir, codexDir].some((r) => inside(dir, r))) throw new OrchestratorError(400, 'Không được tạo ticket trong thư mục của dashboard, Claude hoặc Codex');
     if (!(await this.deps.git.gitInfo(dir)).isGit) throw new OrchestratorError(400, 'Thư mục không phải git repo');
     if (!this.deps.runners.claude) throw new OrchestratorError(400, NO_CLI.claude);
+    const base = await this.checkBase(dir, input.baseBranch, input.baseFrom);
     const id = this.deps.tickets.nextTicketId();
     const now = this.now();
     const t: Ticket = {
       id, seq: Number(id.slice(2)), title: input.title, description: input.description, dir, status: 'draft',
       overrides: input.overrides ?? {}, plan: null, feedback: null, round: 0, maxRounds: this.settings.maxRounds,
       controllerSessionId: this.newSessionId(), branch: null, worktree: null, baseRef: null, pendingWait: null,
-      report: null, diffStat: null, merge: null, createdAt: now, updatedAt: now,
+      report: null, diffStat: null, merge: null, ...base, createdAt: now, updatedAt: now,
     };
     this.deps.tickets.createTicket(t);
     this.deps.hub.publish({ type: 'ticket', ticket: t });
@@ -207,7 +210,7 @@ export class Orchestrator {
     try {
       // ACCTV_HOME mới đánh số ticket lại từ T-1: nhánh cũ cùng tên còn trong repo → thêm hậu tố
       branch = await this.deps.git.uniqueBranch(t.dir, branchName(ticketId, t.title));
-      ({ baseRef } = await this.deps.git.createWorktree(t.dir, branch, wt));
+      ({ baseRef } = await this.deps.git.createWorktree(t.dir, branch, wt, t.baseBranch ? { branch: t.baseBranch, from: t.baseFrom } : undefined));
     } catch (e) {
       // bị huỷ trong lúc chờ thì giữ cancelled
       if (this.mustTicket(ticketId).status === 'running') this.save(ticketId, { status: 'awaiting_approval', plan: t.plan });
@@ -450,7 +453,20 @@ export class Orchestrator {
     return item;
   }
 
-  /** Nhánh đích cho nút Merge: nhánh local của dự án; mặc định main, không có thì nhánh thư mục đang đứng. */
+  /** Nhánh gốc khi tạo ticket: rỗng → không có (HEAD lúc duyệt); chưa có → cần `from` là nhánh có sẵn (tạo lúc duyệt). */
+  private async checkBase(dir: string, name?: string, from?: string): Promise<Pick<Ticket, 'baseBranch' | 'baseFrom'>> {
+    const b = name?.trim();
+    if (!b) return { baseBranch: null, baseFrom: null };
+    if (!(await this.deps.git.validBranchName(dir, b))) throw new OrchestratorError(400, `Tên nhánh gốc không hợp lệ: ${b}`);
+    const { branches } = await this.deps.git.listBranches(dir);
+    if (branches.includes(b)) return { baseBranch: b, baseFrom: null };
+    const f = from?.trim();
+    if (!f) throw new OrchestratorError(400, `Nhánh gốc ${b} chưa có: chọn nhánh để tạo từ đó`);
+    if (!branches.includes(f)) throw new OrchestratorError(400, `Không có nhánh ${f}`);
+    return { baseBranch: b, baseFrom: f };
+  }
+
+  /** Nhánh đích cho nút Merge: nhánh local của dự án; mặc định nhánh gốc của ticket, rồi main, không có thì nhánh thư mục đang đứng. */
   async mergeTargets(ticketId: string): Promise<{ branches: string[]; current: string | null; defaultTarget: string | null }> {
     const t = this.mustTicket(ticketId);
     if (!t.branch) throw new OrchestratorError(409, 'Ticket chưa có nhánh');
@@ -461,7 +477,7 @@ export class Orchestrator {
       throw new OrchestratorError(400, `Không đọc được nhánh của ${t.dir}: ${errMsg(e)}`);
     }
     const branches = list.branches.filter((b) => b !== t.branch);
-    const defaultTarget = branches.includes('main') ? 'main' : list.current && branches.includes(list.current) ? list.current : branches[0] ?? null;
+    const defaultTarget = t.baseBranch && branches.includes(t.baseBranch) ? t.baseBranch : branches.includes('main') ? 'main' : list.current && branches.includes(list.current) ? list.current : branches[0] ?? null;
     return { branches: list.branches, current: list.current, defaultTarget };
   }
 
@@ -620,12 +636,12 @@ export class Orchestrator {
   workerMcpTools(agentId: string): Record<string, ToolImpl> {
     const tools: Record<string, ToolImpl> = { request_user_action: async (a) => this.requestUserAction(agentId, a) };
     const m = this.deps.tickets.getManaged(agentId);
-    if (m && this.hasCapture(m.runner, m.role)) tools.capture = async (a) => this.capture(agentId, a);
+    if (m && this.hasCapture(m.runner, m.role, m.mode)) tools.capture = async (a) => this.capture(agentId, a);
     return tools;
   }
 
-  private hasCapture(runner: AgentKind, role: Role): boolean {
-    return !!this.deps.preview && runner === 'claude' && CAPTURE_ROLES.includes(role as WorkRole);
+  private hasCapture(runner: AgentKind, role: Role, mode?: ManagedAgent['mode']): boolean {
+    return !!this.deps.preview && runner === 'claude' && CAPTURE_ROLES.includes(role as WorkRole) && mode !== 'cases';
   }
 
   /** Chế độ server preview: kế hoạch → cấu hình dự án → dev. */
@@ -777,6 +793,10 @@ export class Orchestrator {
     if (!t || t.status !== 'running' || !t.worktree || !t.plan) return fail(NOT_APPROVED);
     const role = args.role as WorkRole;
     if (!WORK_ROLES.includes(role)) return fail('role phải là explorer, dev, designer hoặc qc');
+    // model hay gửi '' / null cho trường không dùng: coi như không truyền
+    if (args.mode !== undefined && args.mode !== null && args.mode !== '' && args.mode !== 'cases') return fail('mode chỉ nhận "cases"');
+    if (args.mode === 'cases' && role !== 'qc') return fail('mode "cases" chỉ dùng với role qc');
+    const mode = args.mode === 'cases' ? 'cases' as const : null;
     if (role === 'dev' && t.round >= t.maxRounds) {
       return fail(`Đã hết ${t.maxRounds} vòng; hãy gọi finish với status "escalated" và nêu lỗi còn lại`);
     }
@@ -820,11 +840,11 @@ export class Orchestrator {
     const m: ManagedAgent = {
       agentId: id, ticketId: T, role, ordinal, packageId: isStr(args.packageId) && args.packageId ? args.packageId : null,
       task, files, runner: agent, model, effort, sessionId: this.newSessionId(), state: 'queued', stopReason: null,
-      resultText: null, changedFiles: [], costUsd: null, createdAt: now, endedAt: null, userAction: null, contextFrom: ctx,
+      resultText: null, changedFiles: [], costUsd: null, createdAt: now, endedAt: null, userAction: null, contextFrom: ctx, mode,
     };
     this.putManaged(m);
     this.emitAgent({
-      id, source: agent, sessionId: m.sessionId, label: `${ROLE_LABEL[role]}-${ordinal}`, role, parentId: controllerId(T),
+      id, source: agent, sessionId: m.sessionId, label: agentLabel(role, ordinal, mode), role, parentId: controllerId(T),
       model, effort, cwd: t.worktree, status: 'queued', startedAt: now, lastEventAt: now,
     });
     this.log(T, `Controller giao ${id} (${role}, ${model}/${effort})`);
@@ -1023,7 +1043,8 @@ export class Orchestrator {
     this.mcpTokens.delete(T);
     this.guards.delete(id);
     const m = this.deps.tickets.getManaged(id);
-    if (m && r.costUsd !== null) this.saveManaged(id, { costUsd: (m.costUsd ?? 0) + r.costUsd });
+    // claude báo total_cost_usd cộng dồn cả session (kể cả --resume): lấy số mới nhất, không cộng thêm
+    if (m && r.costUsd !== null) this.saveManaged(id, { costUsd: Math.max(m.costUsd ?? 0, r.costUsd) });
 
     const t = this.mustTicket(T);
     if (ENDED_TICKET.includes(t.status)) {
@@ -1135,7 +1156,8 @@ export class Orchestrator {
     // ticket đang cài dependency: chỉ Explorer (chỉ đọc) được chạy, agent khác giữ chỗ trong hàng
     const ready = (id: string): boolean => {
       const m = this.deps.tickets.getManaged(id);
-      return !m || m.role === 'explorer' || !this.installing.has(m.ticketId);
+      // Explorer và QC viết test case chỉ đọc, không cần node_modules
+      return !m || m.role === 'explorer' || m.mode === 'cases' || !this.installing.has(m.ticketId);
     };
     while (!this.closed && active() < this.settings.maxParallel) {
       const i = this.queue.findIndex(ready);
@@ -1158,7 +1180,7 @@ export class Orchestrator {
     const wt = t.worktree;
     const port = this.deps.port();
     const token = newToken();
-    const capture = this.hasCapture(m.runner, role);
+    const capture = this.hasCapture(m.runner, role, m.mode);
     const shots = this.capturesDir(id);
     if (capture) mkdirSync(shots, { recursive: true });
     // file tạm của agent: ngoài worktree để không lọt vào snapshot git
@@ -1167,22 +1189,22 @@ export class Orchestrator {
     // agent chỉ đọc được ảnh capture và thư mục nháp của chính nó, cùng ảnh góp ý của người dùng cho ticket
     this.guards.set(id, { token, policy: { ...this.policy(role, wt, [...(capture ? [shots] : []), scratch, this.feedbackDir(t.id)], m.files), scratch } });
     const spec: RunSpec = {
-      agentId: id, ticketId: t.id, role, agent: m.runner, label: `${ROLE_LABEL[role]}-${m.ordinal}`, parentId: controllerId(t.id),
+      agentId: id, ticketId: t.id, role, agent: m.runner, label: agentLabel(role, m.ordinal, m.mode), parentId: controllerId(t.id),
       cwd: wt, model: m.model, effort: m.effort,
       prompt: workerPrompt(m, t.plan, wt, {
         context: (m.contextFrom ?? []).flatMap((cid) => {
           const c = this.deps.tickets.getManaged(cid);
           return c?.resultText ? [{ id: cid, role: c.role, text: c.resultText }] : [];
         }),
-        depsNote: role === 'explorer' ? undefined : this.depsFailed.get(t.id),
+        depsNote: role === 'explorer' || m.mode === 'cases' ? undefined : this.depsFailed.get(t.id),
       }),
       systemPrompt: systemPrompt(role, {
-        worktree: wt, files: m.files, denyBash: this.settings.denyBash, checkCommands: this.settings.checkCommands, scratch,
+        worktree: wt, files: m.files, denyBash: this.settings.denyBash, checkCommands: this.settings.checkCommands, scratch, mode: m.mode,
         preview: this.deps.preview && CAPTURE_ROLES.includes(role)
           ? { mode: this.previewMode(t), accounts: this.deps.preview.accountsFor(t.dir), capture, ticketId: t.id }
           : undefined,
       }),
-      sessionId: m.sessionId, resume: false, ...this.workerTools(m.runner, role),
+      sessionId: m.sessionId, resume: false, ...this.workerTools(m.runner, role, m.mode),
       addDirs: [scratch], runDir: this.runDir(id),
       // claude: MCP riêng của worker (request_user_action), xác thực bằng token guard; codex chưa nối MCP
       mcp: m.runner === 'claude' ? { url: `http://127.0.0.1:${port}/mcp?agent=${encodeURIComponent(id)}`, token } : null,
@@ -1198,9 +1220,11 @@ export class Orchestrator {
     this.onEnd(spec, handle, (r) => this.onWorkerExit(id, handle, r));
   }
 
-  private workerTools(runner: AgentKind, role: WorkRole): { tools: string[]; allowedTools: string[] } {
-    const t = runner === 'claude' ? [...WORKER_TOOLS[role], USER_ACTION_TOOL] : [...WORKER_TOOLS[role]];
-    if (this.hasCapture(runner, role)) t.push(CAPTURE_TOOL);
+  private workerTools(runner: AgentKind, role: WorkRole, mode?: ManagedAgent['mode']): { tools: string[]; allowedTools: string[] } {
+    // QC viết test case chỉ đọc: không Bash, vì có thể chạy lúc node_modules còn đang cài
+    const base = mode === 'cases' ? WORKER_TOOLS[role].filter((x) => x !== 'Bash') : WORKER_TOOLS[role];
+    const t = runner === 'claude' ? [...base, USER_ACTION_TOOL] : [...base];
+    if (this.hasCapture(runner, role, mode)) t.push(CAPTURE_TOOL);
     return { tools: t, allowedTools: [...t] };
   }
 
@@ -1233,7 +1257,7 @@ export class Orchestrator {
     if (!run || run.handle !== handle) return;
     run.last = r;
     if (run.spec.agent === 'codex' && r.sessionId) this.adoptSession(id, r.sessionId);
-    if (r.costUsd !== null) run.cost = (run.cost ?? 0) + r.costUsd;
+    if (r.costUsd !== null) run.cost = Math.max(run.cost ?? 0, r.costUsd); // cộng dồn cả session, như Controller
     run.files = [...new Set([...run.files, ...relFiles(run.spec.cwd, r.changedFiles)])];
     const m = this.deps.tickets.getManaged(id);
     // agent đã nhờ người dùng (request_user_action): đã có trả lời → chạy tiếp; chưa → chờ, nhả slot

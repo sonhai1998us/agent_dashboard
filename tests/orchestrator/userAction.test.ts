@@ -92,7 +92,8 @@ describe('request_user_action: agent cần người dùng làm gì đó (đăng 
     expect(again.spec.prompt).toContain('đã đăng nhập bằng tài khoản công ty');
     expect(env.tickets.getManaged(dev1)).toMatchObject({ state: 'running', userAction: null });
     expect(logs(env, T).some((l) => l.includes('Người dùng đã làm') && l.includes('Đăng nhập twg'))).toBe(true);
-    again.finish({ text: 'xong', costUsd: 0.2 });
+    // lượt resume báo tổng cả session (0.1 trước đó + 0.2 lượt này), không phải riêng lượt này
+    again.finish({ text: 'xong', costUsd: 0.3 });
     await env.orch.idle();
     expect(env.tickets.getManaged(dev1)).toMatchObject({ state: 'done', costUsd: expect.closeTo(0.3, 5) });
     expect(runOf(env, ctrl)!.spec.prompt.startsWith('Các agent đã xong')).toBe(true);

@@ -6,7 +6,7 @@ import { DirError, listDirs } from '@/src/core/dirs';
 import { deleteSession } from '@/src/core/purge';
 import { inside } from '@/src/core/paths';
 import { agentMetrics, globalMetrics, type AgentMetrics } from '@/src/core/metrics';
-import { gitInfo, gitInit } from '@/src/git/git';
+import { gitInfo, gitInit, listBranches } from '@/src/git/git';
 import { handleMcp } from '@/src/orchestrator/mcp';
 import { maskProjects, unmaskProjects } from '@/src/preview/config';
 import { OrchestratorError, type FeedbackImage } from '@/src/orchestrator/orchestrator';
@@ -210,7 +210,13 @@ const ROUTES: Route[] = [
       if (b.description !== undefined && typeof b.description !== 'string') throw new HttpError(400, 'description phải là chuỗi');
       const dir = absDir(b.dir);
       const ov = overrides(b.overrides, core);
-      return ok(await core.orchestrator.createTicket({ title, description: (b.description as string | undefined) ?? '', dir, overrides: ov }), 201);
+      for (const k of ['baseBranch', 'baseFrom'] as const) {
+        const v = b[k];
+        if (v !== undefined && (typeof v !== 'string' || v.length > 200)) throw new HttpError(400, `${k} phải là chuỗi ≤ 200 ký tự`);
+      }
+      const baseBranch = b.baseBranch as string | undefined;
+      const baseFrom = b.baseFrom as string | undefined;
+      return ok(await core.orchestrator.createTicket({ title, description: (b.description as string | undefined) ?? '', dir, overrides: ov, baseBranch, baseFrom }), 201);
     },
   },
   {
@@ -371,7 +377,15 @@ const ROUTES: Route[] = [
       catch (e) { throw e instanceof DirError ? new HttpError(e.status, e.message) : e; }
     },
   },
-  { method: 'GET', re: /^\/api\/fs\/check$/,run: async ({ url }) => ok(await gitInfo(absDir(url.searchParams.get('dir') ?? undefined))) },
+  {
+    method: 'GET', re: /^\/api\/fs\/check$/,
+    run: async ({ url }) => {
+      const dir = absDir(url.searchParams.get('dir') ?? undefined);
+      const info = await gitInfo(dir);
+      // danh sách cho ô "Nhánh gốc" của form tạo ticket
+      return ok({ ...info, branches: info.isGit ? (await listBranches(dir).catch(() => ({ branches: [] }))).branches : [] });
+    },
+  },
   {
     method: 'POST', re: /^\/api\/fs\/git-init$/,
     run: async ({ req, core }) => {

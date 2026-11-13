@@ -15,7 +15,7 @@ const SCHEMA = `
 CREATE TABLE IF NOT EXISTS tickets (id TEXT PRIMARY KEY, seq INTEGER NOT NULL, title TEXT NOT NULL, description TEXT NOT NULL,
   dir TEXT NOT NULL, status TEXT NOT NULL, overrides TEXT NOT NULL, plan TEXT, feedback TEXT, round INTEGER NOT NULL,
   max_rounds INTEGER NOT NULL, controller_session TEXT NOT NULL, branch TEXT, worktree TEXT, base_ref TEXT,
-  pending_wait TEXT, report TEXT, diff_stat TEXT, merge_info TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+  pending_wait TEXT, report TEXT, diff_stat TEXT, merge_info TEXT, base_branch TEXT, base_from TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS managed_agents (agent_id TEXT PRIMARY KEY, ticket_id TEXT NOT NULL, role TEXT NOT NULL,
   ordinal INTEGER NOT NULL, package_id TEXT, task TEXT NOT NULL, files TEXT NOT NULL, runner TEXT NOT NULL, model TEXT NOT NULL,
   effort TEXT NOT NULL, session_id TEXT NOT NULL, state TEXT NOT NULL, stop_reason TEXT, result_text TEXT,
@@ -38,7 +38,7 @@ function toTicket(r: Row): Ticket {
     round: r.round, maxRounds: r.max_rounds, controllerSessionId: r.controller_session,
     branch: r.branch ?? null, worktree: r.worktree ?? null, baseRef: r.base_ref ?? null,
     pendingWait: unjson(r.pending_wait), report: r.report ?? null, diffStat: r.diff_stat ?? null,
-    merge: unjson(r.merge_info),
+    merge: unjson(r.merge_info), baseBranch: r.base_branch ?? null, baseFrom: r.base_from ?? null,
     createdAt: r.created_at, updatedAt: r.updated_at,
   };
 }
@@ -49,7 +49,7 @@ function toManaged(r: Row): ManagedAgent {
     task: r.task, files: unjson(r.files) ?? [], runner: r.runner, model: r.model, effort: r.effort,
     sessionId: r.session_id, state: r.state, stopReason: r.stop_reason ?? null, resultText: r.result_text ?? null,
     changedFiles: unjson(r.changed_files) ?? [], costUsd: r.cost_usd ?? null, createdAt: r.created_at, endedAt: r.ended_at ?? null,
-    userAction: unjson(r.user_action), contextFrom: unjson(r.context_from) ?? [],
+    userAction: unjson(r.user_action), contextFrom: unjson(r.context_from) ?? [], mode: r.mode ?? null,
   };
 }
 
@@ -57,21 +57,21 @@ const toWait = (r: Row): WaitSpan => ({ id: r.id, agentId: r.agent_id, kind: r.k
 
 const TICKET_COLS = [
   'id', 'seq', 'title', 'description', 'dir', 'status', 'overrides', 'plan', 'feedback', 'round', 'max_rounds',
-  'controller_session', 'branch', 'worktree', 'base_ref', 'pending_wait', 'report', 'diff_stat', 'merge_info', 'created_at', 'updated_at',
+  'controller_session', 'branch', 'worktree', 'base_ref', 'pending_wait', 'report', 'diff_stat', 'merge_info', 'base_branch', 'base_from', 'created_at', 'updated_at',
 ];
 const MANAGED_COLS = [
   'agent_id', 'ticket_id', 'role', 'ordinal', 'package_id', 'task', 'files', 'runner', 'model', 'effort', 'session_id',
-  'state', 'stop_reason', 'result_text', 'changed_files', 'cost_usd', 'created_at', 'ended_at', 'user_action', 'context_from',
+  'state', 'stop_reason', 'result_text', 'changed_files', 'cost_usd', 'created_at', 'ended_at', 'user_action', 'context_from', 'mode',
 ];
 const placeholders = (cols: string[]): string => cols.map(() => '?').join(', ');
 
 const ticketVals = (t: Ticket): unknown[] => [
   t.id, t.seq, t.title, t.description, t.dir, t.status, JSON.stringify(t.overrides), json(t.plan), t.feedback, t.round, t.maxRounds,
-  t.controllerSessionId, t.branch, t.worktree, t.baseRef, json(t.pendingWait), t.report, t.diffStat, json(t.merge ?? null), t.createdAt, t.updatedAt,
+  t.controllerSessionId, t.branch, t.worktree, t.baseRef, json(t.pendingWait), t.report, t.diffStat, json(t.merge ?? null), t.baseBranch ?? null, t.baseFrom ?? null, t.createdAt, t.updatedAt,
 ];
 const managedVals = (m: ManagedAgent): unknown[] => [
   m.agentId, m.ticketId, m.role, m.ordinal, m.packageId, m.task, JSON.stringify(m.files), m.runner, m.model, m.effort, m.sessionId,
-  m.state, m.stopReason, m.resultText, JSON.stringify(m.changedFiles), m.costUsd, m.createdAt, m.endedAt, json(m.userAction ?? null), JSON.stringify(m.contextFrom ?? []),
+  m.state, m.stopReason, m.resultText, JSON.stringify(m.changedFiles), m.costUsd, m.createdAt, m.endedAt, json(m.userAction ?? null), JSON.stringify(m.contextFrom ?? []), m.mode ?? null,
 ];
 
 export class TicketStore {
@@ -84,8 +84,11 @@ export class TicketStore {
     const cols = (this.db.prepare('PRAGMA table_info(managed_agents)').all() as Row[]).map((c) => c.name);
     if (!cols.includes('user_action')) this.db.exec('ALTER TABLE managed_agents ADD COLUMN user_action TEXT');
     if (!cols.includes('context_from')) this.db.exec('ALTER TABLE managed_agents ADD COLUMN context_from TEXT');
+    if (!cols.includes('mode')) this.db.exec('ALTER TABLE managed_agents ADD COLUMN mode TEXT');
     const tcols = (this.db.prepare('PRAGMA table_info(tickets)').all() as Row[]).map((c) => c.name);
     if (!tcols.includes('merge_info')) this.db.exec('ALTER TABLE tickets ADD COLUMN merge_info TEXT');
+    if (!tcols.includes('base_branch')) this.db.exec('ALTER TABLE tickets ADD COLUMN base_branch TEXT');
+    if (!tcols.includes('base_from')) this.db.exec('ALTER TABLE tickets ADD COLUMN base_from TEXT');
   }
 
   nextTicketId(): string {

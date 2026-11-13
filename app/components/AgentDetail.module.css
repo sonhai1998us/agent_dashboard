@@ -3,6 +3,10 @@
 .head { display: flex; align-items: center; justify-content: space-between; gap: 6px; flex-wrap: wrap; }
 .title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .meta { color: var(--muted); font-size: 12px; }
+/* block thời gian trên header: nổi hơn chữ meta để dễ nhìn */
+.time { display: inline-flex; align-items: baseline; gap: 6px; padding: 2px 8px; border-radius: 6px; background: color-mix(in srgb, var(--border) 25%, transparent); white-space: nowrap; }
+.time span { font-size: 10px; color: var(--muted); }
+.time strong { font-size: 13px; }
 .pills { display: flex; flex-wrap: wrap; gap: 4px; }
 .pill { font-size: 10px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--warn); color: var(--warn); white-space: nowrap; }
 .pill[data-level='critical'] { border-color: var(--err); color: var(--err); }
@@ -32,6 +36,10 @@
 .cell { background: color-mix(in srgb, var(--border) 25%, transparent); border-radius: 6px; padding: 4px 6px; min-width: 0; }
 .cell dt { font-size: 10px; color: var(--muted); }
 .cell dd { margin: 0; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* ô công thức token: hàng riêng cuối lưới, tô màu để nổi bật */
+.wide { grid-column: 1 / -1; background: color-mix(in srgb, var(--run) 15%, transparent); outline: 1px solid var(--run); }
+.wide dt { color: var(--fg); }
+.wide dd { font-size: 12px; font-weight: 600; color: var(--run); white-space: normal; overflow-wrap: anywhere; }
 .parse { font-size: 11px; color: var(--warn); }
 
 /* từ 1024px cột phải cuộn riêng: danh sách call kéo dài hết phần còn lại của cột */

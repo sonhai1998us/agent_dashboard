@@ -82,6 +82,34 @@ describe('systemPrompt: capture, Figma, dữ liệu QC', () => {
     expect(systemPrompt('dev', c)).not.toContain('acctv-T-5-');
   });
 
+  it('QC chế độ cases: viết TC từ tiêu chí nghiệm thu, không review, không capture, không lệnh kiểm tra', () => {
+    const p = systemPrompt('qc', { ...c, mode: 'cases', checkCommands: ['pnpm test'] });
+    expect(p.split('\n')[0]).toBe('ROLE: qc');
+    expect(p).toContain('TC-1');
+    expect(p).toMatch(/tiêu chí nghiệm thu/);
+    expect(p).not.toMatch(/review phần Dev vừa làm/);
+    expect(p).not.toMatch(/capture/);
+    expect(p).not.toContain('pnpm test');
+  });
+
+  it('QC review và Dev dùng test case TC-… khi có trong ngữ cảnh', () => {
+    expect(systemPrompt('qc', ctx)).toMatch(/từng TC/);
+    expect(systemPrompt('dev', ctx)).toMatch(/từng TC/);
+  });
+
+  it('Controller: QC cases song song Explorer, Dev nhận test case, QC review chạy từng TC; Figma → explorer bắt buộc', () => {
+    const p = systemPrompt('controller', ctx);
+    expect(p).toContain('mode: "cases"');
+    expect(p).toMatch(/song song với Explorer/);
+    expect(p).toMatch(/từng TC/);
+    expect(p).toMatch(/Figma[^\n]*explorer count ≥ 1 là bắt buộc/);
+    expect(p).toContain('Chờ các agent vừa giao xong');
+    expect(p).not.toContain('Chờ cả hai xong');
+    expect(p).toMatch(/contextFrom tối đa 5 agent/);
+    // vòng sau: Dev mới vẫn nhận danh sách TC
+    expect(p).toMatch(/contextFrom: \[id QC\/Designer, id QC cases\]/);
+  });
+
   it('không có capture (codex hoặc không có server preview): nói rõ; explorer không nhắc capture', () => {
     const p = systemPrompt('qc', { ...c, preview: { ...preview, capture: false } });
     expect(p).toContain('Không có tool capture');
@@ -121,6 +149,7 @@ describe('turn', () => {
     expect(turn.approved(plan, 'D:\\wt', { again: true, deps: null })).toMatch(/^Kế hoạch sửa đã được duyệt\. Làm tiếp trên cùng nhánh/);
     expect(turn.approved(plan, 'D:\\wt', { again: true, deps: null })).not.toContain('chưa cài dependency');
     expect(turn.approved(plan, 'D:\\wt', { deps: 'auto' })).toMatch(/Dashboard đang cài dependency.*Đừng giao việc cài dependency/);
+    expect(turn.approved(plan, 'D:\\wt', { deps: 'auto' })).toMatch(/Explorer và QC mode: "cases" chạy được ngay/);
     expect(turn.approved(plan, 'D:\\wt', { deps: 'auto' })).not.toContain('chưa cài dependency');
     const fb = turn.feedback('nút lệch', ['D:\\h\\runs\\T-1\\feedback\\1-1.png'], 'D:\\h\\runs\\T-1\\feedback');
     expect(fb).toContain('nút lệch');

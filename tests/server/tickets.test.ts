@@ -110,6 +110,10 @@ test('POST /api/tickets: 201 planning; 415; Origin lạ 403; không phải repo 
   expect((await post('/api/tickets', { title: 'x'.repeat(201), dir: repo })).status).toBe(400);
   expect((await post('/api/tickets', { title: 'x', dir: 'relative/dir' })).status).toBe(400);
   expect((await post('/api/tickets', { title: 'x', dir: repo, description: 5 })).status).toBe(400);
+  expect((await post('/api/tickets', { title: 'x', dir: repo, baseBranch: 5 })).status).toBe(400);
+  expect((await post('/api/tickets', { title: 'x', dir: repo, baseBranch: 'feature/x', baseFrom: 5 })).status).toBe(400);
+  const chk = await call('GET', `/api/fs/check?dir=${encodeURIComponent(repo)}`);
+  expect(chk.json.branches).toContain(chk.json.branch);
   expect((await post('/api/tickets', '{bad json')).status).toBe(400);
   expect((await post('/api/tickets', [1, 2])).status).toBe(400);
   const badOv = await post('/api/tickets', { title: 'x', dir: repo, overrides: { dev: { model: 'gpt-x', effort: 'turbo' }, boss: {} } });

@@ -84,6 +84,10 @@ export interface Ticket {
   diffStat: string | null;
   /** Lần merge nhánh ticket vào nhánh của người dùng gần nhất (nút Merge). */
   merge: TicketMerge | null;
+  /** Nhánh worktree tách từ; null: HEAD repo gốc lúc duyệt (ticket cũ). */
+  baseBranch: string | null;
+  /** Nhánh để tạo `baseBranch` lúc duyệt khi nó chưa có; null khi đã có sẵn. */
+  baseFrom: string | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -113,6 +117,8 @@ export interface ManagedAgent {
   userAction: UserAction | null;
   /** Id các agent đã xong mà báo cáo được dashboard chèn nguyên văn vào prompt của agent này. */
   contextFrom?: string[];
+  /** `cases`: QC chỉ viết test case từ tiêu chí nghiệm thu, trước khi Dev làm. */
+  mode?: 'cases' | null;
 }
 
 export interface UserAction {
@@ -152,6 +158,8 @@ export interface AgentReport {
   guardBlocks: number;
   scopeViolations: number;
   topError: string | null;
+  /** Có khi agent là QC viết test case: báo cáo là danh sách TC, không có kết luận đạt / không đạt. */
+  mode?: 'cases';
 }
 
 export const TERMINAL_STATES: ManagedState[] = ['done', 'failed', 'stopped', 'interrupted'];

@@ -23,6 +23,7 @@ export function agentReport(m: ManagedAgent, agent: AgentInfo | undefined, calls
     guardBlocks: tools.filter((c) => c.errorPreview?.startsWith(GUARD)).length,
     scopeViolations: tools.filter((c) => c.errorPreview?.startsWith(GUARD_SCOPE)).length,
     topError: topRepeatedError(calls)?.preview ?? null,
+    ...(m.mode === 'cases' ? { mode: 'cases' as const } : {}),
   };
 }
 

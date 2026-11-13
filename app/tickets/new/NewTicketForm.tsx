@@ -6,11 +6,11 @@ import { useLive } from '../../lib/liveStore';
 import { recentDirs } from '../../lib/recentDirs';
 import { pickerStart } from '../../lib/dirs';
 import FolderPicker from '../../components/FolderPicker';
-import { roleOverrides } from '../../lib/tickets';
+import { baseChoice, defaultBaseFrom, roleOverrides } from '../../lib/tickets';
 import type { AgentKind, Effort, Role, RoleSpec } from '@/src/tickets/model';
 import styles from './NewTicketForm.module.css';
 
-interface GitInfo { exists: boolean; isGit: boolean; branch: string | null; head: string | null; dirty: boolean }
+interface GitInfo { exists: boolean; isGit: boolean; branch: string | null; head: string | null; dirty: boolean; branches?: string[] }
 interface SettingsRes { settings: { allowedModels: Record<AgentKind, string[]>; roleDefaults: Record<Role, RoleSpec> } }
 
 const ROLES: { role: Role; label: string }[] = [
@@ -43,6 +43,8 @@ export default function NewTicketForm({ initialDir = '' }: { initialDir?: string
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [picking, setPicking] = useState(false);
+  const [base, setBase] = useState('');
+  const [baseFrom, setBaseFrom] = useState('');
 
   useEffect(() => {
     json<SettingsRes>('/api/settings').then((r) => {
@@ -53,6 +55,12 @@ export default function NewTicketForm({ initialDir = '' }: { initialDir?: string
     json<Record<AgentKind, boolean>>('/api/capabilities').then((r) => { if (r.status === 200) setCaps(r.body); }).catch(() => {});
   }, []);
 
+  const applyGit = (g: GitInfo | null) => {
+    setGit(g);
+    setBase(g?.branch ?? '');
+    setBaseFrom('');
+  };
+
   useEffect(() => {
     const d = dir.trim();
     setGit(null);
@@ -61,7 +69,11 @@ export default function NewTicketForm({ initialDir = '' }: { initialDir?: string
     let stale = false;
     const h = setTimeout(() => {
       json<GitInfo>(`/api/fs/check?dir=${encodeURIComponent(d)}`)
-        .then((r) => { if (!stale) { setGit(r.status === 200 ? r.body : null); setChecking(false); } })
+        .then((r) => {
+          if (stale) return;
+          applyGit(r.status === 200 ? r.body : null);
+          setChecking(false);
+        })
         .catch(() => { if (!stale) setChecking(false); });
     }, 400);
     return () => { stale = true; clearTimeout(h); };
@@ -73,12 +85,12 @@ export default function NewTicketForm({ initialDir = '' }: { initialDir?: string
     const r = await json<GitInfo & { error?: string }>('/api/fs/git-init', {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ dir: dir.trim() }),
     });
-    if (r.status === 200 || r.status === 201) setGit(r.body);
-    else {
-      setError(r.body.error ?? 'Không khởi tạo được git');
-      const c = await json<GitInfo>(`/api/fs/check?dir=${encodeURIComponent(dir.trim())}`);
-      if (c.status === 200) setGit(c.body);
-    }
+    const inited = r.status === 200 || r.status === 201;
+    if (!inited) setError(r.body.error ?? 'Không khởi tạo được git');
+    // kiểm tra lại để có danh sách nhánh cho ô Nhánh gốc (git-init không trả)
+    const c = await json<GitInfo>(`/api/fs/check?dir=${encodeURIComponent(dir.trim())}`);
+    if (c.status === 200) applyGit(c.body);
+    else if (inited) applyGit(r.body);
   };
 
   const setSpec = (role: Role, patch: Partial<RoleSpec>) => {
@@ -94,6 +106,9 @@ export default function NewTicketForm({ initialDir = '' }: { initialDir?: string
   // gửi lựa chọn đang hiển thị cho mọi vai, kể cả khi trùng mặc định: Controller phải dùng đúng
   const buildOverrides = (): Partial<Record<Role, Partial<RoleSpec>>> => (specs && settings ? roleOverrides(specs) : {});
 
+  const branches = git?.branches ?? [];
+  const { name: baseName, isNew: newBase } = baseChoice(branches, base);
+  const from = baseFrom || defaultBaseFrom(branches, git?.branch ?? null) || '';
   const canSubmit = title.trim() !== '' && git?.isGit === true && !busy;
 
   const submit = async (e: FormEvent) => {
@@ -105,7 +120,8 @@ export default function NewTicketForm({ initialDir = '' }: { initialDir?: string
       const overrides = buildOverrides();
       const r = await json<{ id?: string; error?: string; errors?: string[] }>('/api/tickets', {
         method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ title: title.trim(), description: description.trim() || undefined, dir: dir.trim(), ...(Object.keys(overrides).length ? { overrides } : {}) }),
+        body: JSON.stringify({ title: title.trim(), description: description.trim() || undefined, dir: dir.trim(), ...(Object.keys(overrides).length ? { overrides } : {}),
+          ...(baseName ? { baseBranch: baseName } : {}), ...(newBase ? { baseFrom: from } : {}) }),
       });
       if (r.status === 201 && r.body.id) { router.push(`/?ticket=${encodeURIComponent(r.body.id)}`); return; }
       setError(r.body.error ?? r.body.errors?.join('; ') ?? 'Không tạo được ticket');
@@ -153,11 +169,32 @@ export default function NewTicketForm({ initialDir = '' }: { initialDir?: string
             {!checking && git?.isGit && (
               <>
                 <span className={styles.ok}>✓ git · nhánh {git.branch ?? '(không rõ)'}</span>
-                {git.dirty && <div className={styles.warn}>▲ Có thay đổi chưa commit; worktree được tạo từ HEAD nên sẽ không có các thay đổi này.</div>}
+                {git.dirty && (!baseName || baseName === git.branch) && <div className={styles.warn}>▲ Có thay đổi chưa commit; worktree được tạo từ HEAD nên sẽ không có các thay đổi này.</div>}
               </>
             )}
           </div>
         </div>
+
+        {git?.isGit && branches.length > 0 && (
+          <div className={styles.field}>
+            <label htmlFor="nt-base">Nhánh gốc</label>
+            <input id="nt-base" className="mono" list="nt-branches" value={base} onChange={(e) => setBase(e.target.value)}
+              placeholder="Chọn nhánh có sẵn hoặc gõ tên nhánh mới" aria-describedby="nt-base-status" autoComplete="off" spellCheck={false} />
+            <datalist id="nt-branches">{branches.map((b) => <option key={b} value={b} />)}</datalist>
+            <div id="nt-base-status" className={styles.status} aria-live="polite">
+              {newBase ? (
+                <span className={styles.warn}>
+                  ▲ Nhánh mới, sẽ tạo lúc duyệt plan từ{' '}
+                  <select aria-label="Tạo nhánh mới từ" className="mono" value={from} onChange={(e) => setBaseFrom(e.target.value)}>
+                    {branches.map((b) => <option key={b} value={b}>{b}</option>)}
+                  </select>
+                </span>
+              ) : (
+                <span className={styles.muted}>Worktree của ticket tách từ nhánh này; Merge mặc định về đây.</span>
+              )}
+            </div>
+          </div>
+        )}
 
         <FolderPicker
           open={picking} start={pickerStart(dir, dirs)} recent={dirs}

@@ -510,6 +510,89 @@ describe('điều khiển agent', () => {
   });
 });
 
+describe('nhánh gốc của ticket', () => {
+  beforeEach(() => { env = makeEnv(); });
+  const main = () => g(env.repo, 'symbolic-ref', '--short', 'HEAD').trim();
+  const hasRef = (b: string) => { try { g(env.repo, 'rev-parse', '--verify', '-q', `refs/heads/${b}`); return true; } catch { return false; } };
+  const create = (baseBranch?: string, baseFrom?: string) => env.orch.createTicket({ title: 'x', description: 'y', dir: env.repo, baseBranch, baseFrom });
+  const toApproved = async (T: string) => {
+    await env.orch.mcpTools(T).propose_plan({ plan: validPlan() });
+    env.runs[env.runs.length - 1].finish({});
+    await env.orch.idle();
+    await env.orch.approve(T);
+    await env.orch.idle();
+  };
+
+  it('nhánh gốc có sẵn: worktree tách từ nó, merge mặc định về nó', async () => {
+    const m = main();
+    g(env.repo, 'switch', '-q', '-c', 'feat');
+    writeFileSync(join(env.repo, 'f.txt'), 'f\n');
+    g(env.repo, 'add', '-A');
+    g(env.repo, '-c', 'user.name=T', '-c', 'user.email=t@localhost', 'commit', '-q', '-m', 'feat');
+    g(env.repo, 'switch', '-q', m);
+    const t = await create('feat', m);
+    expect(t).toMatchObject({ baseBranch: 'feat', baseFrom: null });
+    await toApproved(t.id);
+    expect(env.tickets.getTicket(t.id)!.baseRef).toBe(g(env.repo, 'rev-parse', 'feat').trim());
+    await env.orch.cancel(t.id);
+    await env.orch.idle();
+    expect((await env.orch.mergeTargets(t.id)).defaultTarget).toBe('feat');
+  });
+
+  it('nhánh gốc mới: tạo lúc duyệt từ baseFrom, không tạo lúc tạo ticket', async () => {
+    const m = main();
+    const t = await create(' feature/moi ', m);
+    expect(t).toMatchObject({ baseBranch: 'feature/moi', baseFrom: m });
+    expect(hasRef('feature/moi')).toBe(false);
+    await toApproved(t.id);
+    expect(g(env.repo, 'rev-parse', 'feature/moi').trim()).toBe(g(env.repo, 'rev-parse', m).trim());
+  });
+
+  it('nhánh gốc được tạo giữa lúc tạo ticket và lúc duyệt: dùng nhánh đó, bỏ baseFrom', async () => {
+    const m = main();
+    const t = await create('feature/z', m);
+    expect(t.baseFrom).toBe(m);
+    // người khác tạo feature/z từ một commit khác main trước khi duyệt
+    g(env.repo, 'switch', '-q', '-c', 'feature/z');
+    writeFileSync(join(env.repo, 'z.txt'), 'z\n');
+    g(env.repo, 'add', '-A');
+    g(env.repo, '-c', 'user.name=T', '-c', 'user.email=t@localhost', 'commit', '-q', '-m', 'z');
+    g(env.repo, 'switch', '-q', m);
+    const tip = g(env.repo, 'rev-parse', 'feature/z').trim();
+    await toApproved(t.id);
+    const after = env.tickets.getTicket(t.id)!;
+    expect(after.status).toBe('running');
+    expect(after.baseRef).toBe(tip);
+    expect(g(env.repo, 'rev-parse', 'feature/z').trim()).toBe(tip);
+    expect(existsSync(join(after.worktree!, 'z.txt'))).toBe(true);
+  });
+
+  it('huỷ trước khi duyệt: không để lại nhánh gốc mới', async () => {
+    const t = await create('feature/huy', main());
+    await env.orch.cancel(t.id);
+    await env.orch.idle();
+    expect(hasRef('feature/huy')).toBe(false);
+  });
+
+  it('baseFrom bị xoá trước khi duyệt: lỗi 400, ticket về awaiting_approval', async () => {
+    g(env.repo, 'branch', 'tam');
+    const t = await create('feature/y', 'tam');
+    g(env.repo, 'branch', '-D', 'tam');
+    await env.orch.mcpTools(t.id).propose_plan({ plan: validPlan() });
+    env.runs[env.runs.length - 1].finish({});
+    await env.orch.idle();
+    await expect(env.orch.approve(t.id)).rejects.toMatchObject({ status: 400 });
+    expect(env.tickets.getTicket(t.id)!.status).toBe('awaiting_approval');
+  });
+
+  it('createTicket từ chối tên nhánh sai, thiếu baseFrom, baseFrom không có; rỗng = không có nhánh gốc', async () => {
+    await expect(create('feature/a b', main())).rejects.toMatchObject({ status: 400 });
+    await expect(create('feature/moi')).rejects.toMatchObject({ status: 400 });
+    await expect(create('feature/moi', 'khong-co')).rejects.toMatchObject({ status: 400 });
+    expect(await create('  ')).toMatchObject({ baseBranch: null, baseFrom: null });
+  });
+});
+
 describe('huỷ trong lúc duyệt đang tạo worktree', () => {
   const setup = async (createWorktree: typeof git.createWorktree) => {
     env = makeEnv({ git: { createWorktree } });

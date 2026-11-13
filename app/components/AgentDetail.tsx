@@ -135,16 +135,19 @@ export default function AgentDetail() {
   const m = metrics;
   const cost = managed ? managed.costUsd : m ? estimateCost(agent.model, m.tokensIn, m.tokensOut, prices) : null;
   const dash = '—';
-  const cells: Array<[string, string]> = [
+  const fresh = m ? Math.max(0, m.tokensIn - m.cacheRead) : 0;
+  const cells: Array<[string, string, wide?: boolean]> = [
     ['call', m ? String(m.calls) : dash],
     ['lỗi', m ? String(m.errors) : dash],
     ['p50', m?.p50 != null ? fmtDuration(m.p50) : dash],
     ['p95', m?.p95 != null ? fmtDuration(m.p95) : dash],
-    ['token vào', m ? fmtTokens(m.tokensIn) : dash],
+    ['token cache', m ? fmtTokens(m.cacheRead) : dash],
     ['token ra', m ? fmtTokens(m.tokensOut) : dash],
     ['đọc cache', m ? fmtPercent(cacheShare(m.cacheRead, m.tokensIn)) : dash],
-    ['thời gian', m ? fmtDuration(m.durationMs) : dash],
+    // phần token vào tính giá đầy đủ: input chưa cache + ghi cache
+    ['input mới', m ? fmtTokens(fresh) : dash],
     ['chi phí', fmtCost(cost)],
+    ['token vào = token cache + token mới', m ? `${fmtTokens(m.tokensIn)} = ${fmtTokens(m.cacheRead)} + ${fmtTokens(fresh)}` : dash, true],
   ];
   const modelLine = [agent.model, agent.effort].filter(Boolean).join(' · ');
 
@@ -152,6 +155,11 @@ export default function AgentDetail() {
     <aside className={styles.box} aria-label="Chi tiết agent">
       <header className={styles.head}>
         <div className={styles.title}><strong>{agent.label}</strong><span className={styles.meta}> · trực tiếp</span></div>
+        {m && (
+          <div className={styles.time} title="Từ lúc bắt đầu tới event cuối (hoặc tới giờ nếu đang chạy)">
+            <span>Thời gian</span><strong className="mono">{fmtDuration(m.durationMs)}</strong>
+          </div>
+        )}
         {alerts.length > 0 && (
           <div className={styles.pills}>
             {alerts.map((a) => (
@@ -219,8 +227,8 @@ export default function AgentDetail() {
       )}
 
       <dl className={styles.grid}>
-        {cells.map(([k, v]) => (
-          <div key={k} className={styles.cell}><dt>{k}</dt><dd className="mono">{v}</dd></div>
+        {cells.map(([k, v, wide]) => (
+          <div key={k} className={wide ? `${styles.cell} ${styles.wide}` : styles.cell}><dt>{k}</dt><dd className="mono">{v}</dd></div>
         ))}
       </dl>
 

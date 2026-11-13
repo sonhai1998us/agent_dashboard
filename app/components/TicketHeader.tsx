@@ -2,8 +2,8 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { postJson, useLive } from '../lib/liveStore';
-import { canFeedback, canMerge, mergeText, previewLabel, reportBlocks, statusAction, ticketDuration, ticketStatusText, type Inline } from '../lib/tickets';
-import { fmtDuration } from '../lib/format';
+import { canFeedback, canMerge, mergeText, previewLabel, reportBlocks, statusAction, ticketCost, ticketDuration, ticketStatusText, type Inline } from '../lib/tickets';
+import { fmtCost, fmtDuration } from '../lib/format';
 import type { FeedbackEntry, MergeMode, Ticket } from '@/src/tickets/model';
 import FeedbackForm from './FeedbackForm';
 import FeedbackHistory from './FeedbackHistory';
@@ -37,6 +37,13 @@ function Report({ text }: { text: string }) {
 }
 
 /** Tổng thời gian ticket; ticket còn chạy thì đếm mỗi giây. */
+function Cost({ id }: { id: string }) {
+  // selector trả số: chỉ render lại khi tổng đổi
+  const usd = useLive((s) => ticketCost(s.managed, id));
+  if (usd === null) return null;
+  return <span className={`${styles.dur} mono`} title="Tổng chi phí: Controller và mọi agent con">{fmtCost(usd)}</span>;
+}
+
 function Duration({ t }: { t: Ticket }) {
   const agents = useLive((s) => s.agents);
   const waits = useLive((s) => s.waits);
@@ -132,6 +139,7 @@ export default function TicketHeader() {
           <span className={styles.st} data-tone={st.tone}>{badge}</span>
         )}
         <Duration t={t} />
+        <Cost id={t.id} />
         {preview && preview.state !== 'stopped' && (
           <span
             className={`${styles.st} mono`}
@@ -174,6 +182,9 @@ export default function TicketHeader() {
         <div className={`${styles.paths} mono`}>
           {t.branch && (
             <span>nhánh {t.branch} <button type="button" className={styles.copy} aria-label="Sao chép tên nhánh" onClick={() => copy('b', t.branch!)}>{copied === 'b' ? 'đã chép' : 'chép'}</button></span>
+          )}
+          {t.baseBranch && (
+            <span>từ {t.baseBranch}</span>
           )}
           {t.worktree && (
             <span>worktree {t.worktree} <button type="button" className={styles.copy} aria-label="Sao chép đường dẫn worktree" onClick={() => copy('w', t.worktree!)}>{copied === 'w' ? 'đã chép' : 'chép'}</button></span>

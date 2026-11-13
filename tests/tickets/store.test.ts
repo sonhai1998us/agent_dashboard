@@ -20,13 +20,13 @@ const ticket = (over: Partial<Ticket> = {}): Ticket => ({
     },
   },
   feedback: null, round: 1, maxRounds: 3, controllerSessionId: 'sid-c', branch: 'acctv/t-1', worktree: 'w', baseRef: 'abc',
-  pendingWait: ['acctv:T-1:dev-1'], report: null, diffStat: null, merge: null, createdAt: 1000, updatedAt: 1000, ...over,
+  pendingWait: ['acctv:T-1:dev-1'], report: null, diffStat: null, merge: null, baseBranch: null, baseFrom: null, createdAt: 1000, updatedAt: 1000, ...over,
 });
 
 const managed = (over: Partial<ManagedAgent> = {}): ManagedAgent => ({
   agentId: 'acctv:T-1:dev-1', ticketId: 'T-1', role: 'dev', ordinal: 1, packageId: 'p1', task: 'do', files: ['a.ts'],
   runner: 'claude', model: 'claude-sonnet-5-5', effort: 'high', sessionId: 'sid-d', state: 'running', stopReason: null,
-  resultText: null, changedFiles: ['a.ts'], costUsd: 0.5, createdAt: 1000, endedAt: null, userAction: null, contextFrom: ['acctv:T-1:explorer-1'], ...over,
+  resultText: null, changedFiles: ['a.ts'], costUsd: 0.5, createdAt: 1000, endedAt: null, userAction: null, contextFrom: ['acctv:T-1:explorer-1'], mode: null, ...over,
 });
 
 test('Ticket round-trip đủ plan, overrides, pendingWait', () => {
@@ -94,6 +94,32 @@ test('managed: userAction lưu và đọc lại; DB cũ không có cột thì đ
   expect(ts.getManaged('acctv:T-1:dev-1')!.userAction).toEqual(ua);
   ts.updateManaged('acctv:T-1:dev-1', { userAction: null });
   expect(ts.getManaged('acctv:T-1:dev-1')!.userAction).toBeNull();
+  s.close();
+});
+
+test('nhánh gốc lưu và đọc lại; DB cũ không có cột thì được thêm', () => {
+  const s = new Store(':memory:');
+  s.database.exec(`CREATE TABLE tickets (id TEXT PRIMARY KEY, seq INTEGER NOT NULL, title TEXT NOT NULL, description TEXT NOT NULL,
+    dir TEXT NOT NULL, status TEXT NOT NULL, overrides TEXT NOT NULL, plan TEXT, feedback TEXT, round INTEGER NOT NULL,
+    max_rounds INTEGER NOT NULL, controller_session TEXT NOT NULL, branch TEXT, worktree TEXT, base_ref TEXT,
+    pending_wait TEXT, report TEXT, diff_stat TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`);
+  const ts = new TicketStore(s);
+  ts.createTicket(ticket({ baseBranch: 'feature/x', baseFrom: 'dev-main' }));
+  expect(ts.getTicket('T-1')).toMatchObject({ baseBranch: 'feature/x', baseFrom: 'dev-main' });
+  s.close();
+});
+
+test('managed: mode lưu và đọc lại; DB cũ không có cột thì được thêm', () => {
+  const s = new Store(':memory:');
+  s.database.exec(`CREATE TABLE managed_agents (agent_id TEXT PRIMARY KEY, ticket_id TEXT NOT NULL, role TEXT NOT NULL,
+    ordinal INTEGER NOT NULL, package_id TEXT, task TEXT NOT NULL, files TEXT NOT NULL, runner TEXT NOT NULL, model TEXT NOT NULL,
+    effort TEXT NOT NULL, session_id TEXT NOT NULL, state TEXT NOT NULL, stop_reason TEXT, result_text TEXT,
+    changed_files TEXT NOT NULL, cost_usd REAL, created_at INTEGER NOT NULL, ended_at INTEGER)`);
+  const ts = new TicketStore(s);
+  ts.upsertManaged(managed({ agentId: 'acctv:T-1:qc-1', role: 'qc', mode: 'cases' }));
+  expect(ts.getManaged('acctv:T-1:qc-1')!.mode).toBe('cases');
+  ts.upsertManaged(managed());
+  expect(ts.getManaged('acctv:T-1:dev-1')!.mode).toBeNull();
   s.close();
 });
 

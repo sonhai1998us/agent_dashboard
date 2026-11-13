@@ -103,7 +103,8 @@ describe('vòng đời ticket', () => {
     expect(w.isError).toBeFalsy();
     expect(w.text).toMatch(/^Đang chờ 3 agent/);
     expect(tickets.getTicket(T)!.pendingWait).toEqual([dev1, dev2, qc1]);
-    runs[1].finish({ costUsd: 0.25 });
+    // claude --resume báo total_cost_usd cộng dồn cả session: 0.5 (lượt 1) → 0.75 (lượt 2 tốn 0.25)
+    runs[1].finish({ costUsd: 0.75 });
     await orch.idle();
     expect(store.getAgent(ctrl)!.status).toBe('idle');
     expect(openWaits(env, ctrl)).toEqual([expect.objectContaining({ kind: 'agents' })]);

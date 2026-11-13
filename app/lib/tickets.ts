@@ -1,5 +1,5 @@
 import { isManagedId, type AgentInfo } from '@/src/core/model';
-import { FEEDBACK_EXT, FEEDBACK_IMAGE_BYTES, FEEDBACK_IMAGES_MAX, type FeedbackKind, type ManagedState, type Role, type RoleSpec, type Ticket, type TicketMerge, type WaitSpan } from '@/src/tickets/model';
+import { FEEDBACK_EXT, FEEDBACK_IMAGE_BYTES, FEEDBACK_IMAGES_MAX, type FeedbackKind, type ManagedAgent, type ManagedState, type Role, type RoleSpec, type Ticket, type TicketMerge, type WaitSpan } from '@/src/tickets/model';
 import { fmtClock, fmtDuration } from './format';
 import type { PreviewStatus } from '@/src/preview/server';
 
@@ -200,4 +200,24 @@ export function fmtDateTime(ms: number, now = Date.now()): string {
   const p = (n: number) => String(n).padStart(2, '0');
   const year = d.getFullYear() === new Date(now).getFullYear() ? '' : `/${d.getFullYear()}`;
   return `${p(d.getDate())}/${p(d.getMonth() + 1)}${year} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+/** Nhánh mặc định để tạo nhánh gốc mới: dev-main, rồi nhánh đang checkout, rồi nhánh đầu. */
+export function defaultBaseFrom(branches: string[], current: string | null): string | null {
+  if (branches.includes('dev-main')) return 'dev-main';
+  if (current && branches.includes(current)) return current;
+  return branches[0] ?? null;
+}
+
+/** Nhánh gốc từ ô nhập của form; repo chưa có commit (chưa có nhánh nào) → bỏ, worktree tách từ HEAD như ticket cũ. */
+export function baseChoice(branches: string[], input: string): { name: string; isNew: boolean } {
+  const name = branches.length ? input.trim() : '';
+  return { name, isNew: name !== '' && !branches.includes(name) };
+}
+
+/** Tổng chi phí của ticket: Controller + mọi agent con; null khi chưa agent nào báo chi phí. */
+export function ticketCost(managed: Record<string, Pick<ManagedAgent, 'ticketId' | 'costUsd'>>, ticketId: string): number | null {
+  let sum: number | null = null;
+  for (const m of Object.values(managed)) if (m.ticketId === ticketId && m.costUsd !== null) sum = (sum ?? 0) + m.costUsd;
+  return sum;
 }
