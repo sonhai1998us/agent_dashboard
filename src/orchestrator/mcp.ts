@@ -115,6 +115,7 @@ export const TOOL_DEFS: { name: 'propose_plan' | 'spawn_agent' | 'wait_agents' |
           type: 'array', items: { type: 'string' }, maxItems: 5,
           description: 'Id các agent đã xong (vd. explorer-1, qc-1) mà báo cáo đầy đủ sẽ được dashboard chèn nguyên văn vào prompt của agent này. Dùng thay cho việc chép báo cáo vào task: task chỉ cần nêu việc phải làm.',
         },
+        mode: { type: 'string', enum: ['cases'], description: 'Chỉ với role qc: "cases" = QC viết test case TC-… từ tiêu chí nghiệm thu trước khi Dev làm (chỉ đọc, không capture, không chờ cài dependency). Bỏ trống = QC review như thường.' },
         model: { type: 'string', description: 'Không cần truyền: agent/model/effort luôn theo kế hoạch đã duyệt.' },
         effort: { type: 'string', enum: EFFORT },
         agent: { type: 'string', enum: ['claude', 'codex'] },

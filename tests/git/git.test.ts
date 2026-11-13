@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync, readFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { gitInfo, createWorktree, snapshotCommit, diffStat, removeWorktree, gitInit, worktreePath, uniqueBranch, worktreeChanges, GIT_TIMEOUT_MS, listBranches, mergeBranch, squashBranch } from '@/src/git/git';
+import { gitInfo, createWorktree, snapshotCommit, diffStat, removeWorktree, gitInit, worktreePath, uniqueBranch, worktreeChanges, GIT_TIMEOUT_MS, listBranches, mergeBranch, squashBranch, validBranchName } from '@/src/git/git';
 
 const g = (dir: string, ...a: string[]) => execFileSync('git', ['-C', dir, ...a], { encoding: 'utf8' });
 
@@ -181,6 +181,68 @@ describe('merge nhánh ticket vào nhánh của người dùng', () => {
     expect(await mergeBranch(r, 'main', 'acctv/T-1', 'x')).toEqual({ kind: 'merged', head: tip, fastForward: false, upToDate: true });
     expect(head(r)).toBe(tip);
     expect(existsSync(join(r, 'b.txt'))).toBe(true);
+  });
+
+  it('createWorktree từ nhánh gốc có sẵn, kể cả nhánh repo gốc đang checkout', async () => {
+    const r = mkRepo();
+    g(r, 'switch', '-q', '-c', 'feat');
+    commitOn(r, 'f.txt', 'f\n', 'feat');
+    g(r, 'switch', '-q', 'main');
+    const a = await createWorktree(r, 'acctv/T-2', join(r, '..', `${n}-wt-main`), { branch: 'main', from: null });
+    expect(a.baseRef).toBe(head(r));
+    const wt = join(r, '..', `${n}-wt-feat`);
+    const b = await createWorktree(r, 'acctv/T-3', wt, { branch: 'feat', from: 'acctv/T-1' });
+    expect(b.baseRef).toBe(g(r, 'rev-parse', 'feat').trim());
+    expect(existsSync(join(wt, 'f.txt'))).toBe(true);
+  });
+
+  it('createWorktree tạo nhánh gốc mới từ nhánh khác, không đổi HEAD repo gốc', async () => {
+    const r = mkRepo();
+    const { baseRef } = await createWorktree(r, 'acctv/T-2', join(r, '..', `${n}-wt`), { branch: 'feature/moi', from: 'acctv/T-1' });
+    expect(g(r, 'rev-parse', 'feature/moi').trim()).toBe(g(r, 'rev-parse', 'acctv/T-1').trim());
+    expect(baseRef).toBe(g(r, 'rev-parse', 'feature/moi').trim());
+    expect(g(r, 'symbolic-ref', '--short', 'HEAD').trim()).toBe('main');
+  });
+
+  it('createWorktree: nhánh gốc chưa có mà from null hoặc không tồn tại → lỗi', async () => {
+    const r = mkRepo();
+    await expect(createWorktree(r, 'acctv/T-2', join(r, '..', `${n}-wt-a`), { branch: 'x/khong-co', from: null })).rejects.toThrow();
+    await expect(createWorktree(r, 'acctv/T-3', join(r, '..', `${n}-wt-b`), { branch: 'x/khong-co', from: 'nhanh-ma' })).rejects.toThrow();
+  });
+
+  it('validBranchName', async () => {
+    const r = mkRepo();
+    expect(await validBranchName(r, 'feature/US-1-abc')).toBe(true);
+    for (const bad of ['feature/a b', '..x', 'a..b', '-x', 'x.lock', '']) expect(await validBranchName(r, bad)).toBe(false);
+    // check-ref-format --branch mở rộng @{-1} thành nhánh trước đó: không phải tên nhánh thật
+    g(r, 'switch', '-q', 'acctv/T-1');
+    g(r, 'switch', '-q', 'main');
+    expect(await validBranchName(r, '@{-1}')).toBe(false);
+  });
+
+  it('createWorktree: tag trùng tên nhánh gốc không lấn nhánh', async () => {
+    const r = mkRepo();
+    g(r, 'tag', 'rel', 'main');
+    g(r, 'branch', 'rel', 'acctv/T-1');
+    const { baseRef } = await createWorktree(r, 'acctv/T-2', join(r, '..', `${n}-wt-rel`), { branch: 'rel', from: null });
+    expect(baseRef).toBe(g(r, 'rev-parse', 'refs/heads/rel').trim());
+    // nhánh mới tạo từ nhánh `rel`, không từ tag `rel`
+    await createWorktree(r, 'acctv/T-3', join(r, '..', `${n}-wt-rel2`), { branch: 'feature/tu-rel', from: 'rel' });
+    expect(g(r, 'rev-parse', 'refs/heads/feature/tu-rel').trim()).toBe(g(r, 'rev-parse', 'refs/heads/rel').trim());
+  });
+
+  it('hook post-merge của dự án không thấy NODE_ENV của dashboard (husky `yarn` sẽ xoá devDependencies)', async () => {
+    const r = mkRepo();
+    writeFileSync(join(r, '.git', 'hooks', 'post-merge'), '#!/bin/sh\nprintf "%s" "${NODE_ENV-unset}" > hook-env.txt\n', { mode: 0o755 });
+    const env = process.env as Record<string, string | undefined>; // ProcessEnv của Next khai báo NODE_ENV readonly
+    const prev = env.NODE_ENV;
+    env.NODE_ENV = 'production';
+    try {
+      await squashBranch(r, 'main', 'acctv/T-1');
+    } finally {
+      env.NODE_ENV = prev;
+    }
+    expect(readFileSync(join(r, 'hook-env.txt'), 'utf8')).toBe('unset');
   });
 
   it('đang đứng ở nhánh khác: chuyển sang nhánh đích rồi merge', async () => {

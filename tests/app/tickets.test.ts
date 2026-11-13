@@ -2,7 +2,7 @@ import { describe, expect, test } from 'vitest';
 import type { AgentInfo } from '@/src/core/model';
 import type { Ticket } from '@/src/tickets/model';
 import type { WaitSpan } from '@/src/tickets/model';
-import { FEEDBACK_KIND_LABEL, fmtDateTime, canFeedback, feedbackFileError, canMerge, mergeText, agentWorkMs, ticketDuration, controllerIdOf, isExternal, isStartingUp, layoutWaits, managedStateText, replayRange, reportBlocks, roleOverrides, statusAction, ticketStatusText } from '@/app/lib/tickets';
+import { FEEDBACK_KIND_LABEL, fmtDateTime, canFeedback, feedbackFileError, canMerge, mergeText, agentWorkMs, ticketDuration, controllerIdOf, isExternal, isStartingUp, layoutWaits, managedStateText, replayRange, reportBlocks, roleOverrides, statusAction, ticketStatusText, defaultBaseFrom, baseChoice, ticketCost } from '@/app/lib/tickets';
 
 const t = (o: Partial<Ticket>): Ticket => ({ id: 'T-1', status: 'draft', round: 0, maxRounds: 3, ...o } as Ticket);
 
@@ -200,4 +200,27 @@ describe('lịch sử góp ý', () => {
   test('mỗi loại góp ý có nhãn', () => {
     expect(Object.keys(FEEDBACK_KIND_LABEL).sort()).toEqual(['guidance', 'plan', 'result']);
   });
+});
+
+test('defaultBaseFrom: ưu tiên dev-main, rồi nhánh hiện tại, rồi nhánh đầu', () => {
+  expect(defaultBaseFrom(['a', 'dev-main', 'main'], 'main')).toBe('dev-main');
+  expect(defaultBaseFrom(['a', 'main'], 'main')).toBe('main');
+  expect(defaultBaseFrom(['a', 'b'], null)).toBe('a');
+  expect(defaultBaseFrom([], null)).toBe(null);
+});
+
+test('baseChoice: nhánh có sẵn, nhánh mới, rỗng, repo chưa có commit', () => {
+  expect(baseChoice(['dev-main', 'main'], ' main ')).toEqual({ name: 'main', isNew: false });
+  expect(baseChoice(['dev-main', 'main'], 'feature/x')).toEqual({ name: 'feature/x', isNew: true });
+  expect(baseChoice(['main'], '  ')).toEqual({ name: '', isNew: false });
+  // repo chưa có commit: nhánh hiện tại chưa nằm trong danh sách, không có gì để tạo từ → bỏ nhánh gốc
+  expect(baseChoice([], 'main')).toEqual({ name: '', isNew: false });
+});
+
+test('ticketCost: cộng chi phí mọi agent của ticket; chưa agent nào có chi phí → null', () => {
+  const m = (agentId: string, ticketId: string, costUsd: number | null) => ({ agentId, ticketId, costUsd });
+  const all = { a: m('a', 'T-1', 1.04), b: m('b', 'T-1', null), c: m('c', 'T-1', 0.38), d: m('d', 'T-2', 5) };
+  expect(ticketCost(all, 'T-1')).toBeCloseTo(1.42, 6);
+  expect(ticketCost(all, 'T-3')).toBeNull();
+  expect(ticketCost({ b: m('b', 'T-1', null) }, 'T-1')).toBeNull();
 });

@@ -1,8 +1,8 @@
 'use client';
 import { useEffect, useState, type KeyboardEvent } from 'react';
 import { postJson, useLive } from '../lib/liveStore';
-import { fmtCost, fmtDuration } from '../lib/format';
-import { agentWorkMs, managedStateText } from '../lib/tickets';
+import { fmtCost } from '../lib/format';
+import { managedStateText } from '../lib/tickets';
 import { openUserActions } from '../lib/userActions';
 import styles from './ManagedPanel.module.css';
 
@@ -12,14 +12,6 @@ const TASK_LINES = 6;
 export default function ManagedPanel({ agentId }: { agentId: string }) {
   const m = useLive((s) => s.managed[agentId]);
   const label = useLive((s) => s.agents[agentId]?.label ?? agentId);
-  const info = useLive((s) => s.agents[agentId]);
-  const [now, setNow] = useState(() => Date.now());
-  const live = !!info && info.status !== 'ended';
-  useEffect(() => {
-    if (!live) return;
-    const h = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(h);
-  }, [live]);
   const [more, setMore] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -53,7 +45,6 @@ export default function ManagedPanel({ agentId }: { agentId: string }) {
         <span className={`${styles.cost} mono`}>{fmtCost(m.costUsd)}</span>
       </div>
       <div className={`${styles.line} mono`}>{m.runner} · {m.model} · {m.effort}</div>
-      {info && <div className={`${styles.line} mono`} title="Từ lúc được giao tới event cuối">thời gian làm {fmtDuration(agentWorkMs(info, now))}</div>}
       {m.stopReason && <div className={styles.reason}><span aria-hidden="true">▲</span> {m.stopReason}</div>}
       {m.userAction && (
         <div className={styles.need}>

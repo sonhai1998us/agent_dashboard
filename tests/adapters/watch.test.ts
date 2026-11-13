@@ -49,7 +49,7 @@ async function waitFor(fn: () => boolean, ms = 5000): Promise<void> {
 }
 
 function claudeWatcher(on: (e: HubEvent[]) => void = () => {}, s = store) {
-  const w = createClaudeWatcher(cfg, s, on, { livenessMs: 100000 });
+  const w = createClaudeWatcher(cfg, s, on, { livenessMs: 250 });
   closers.push(() => w.stop());
   return w;
 }

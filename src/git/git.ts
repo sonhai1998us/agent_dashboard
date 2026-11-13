@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { basename, join } from 'node:path';
-import { killTree } from '@/src/runner/proc';
+import { childEnv, killTree } from '@/src/runner/proc';
 
 const IDENT = ['-c', 'user.name=Agent CCTV', '-c', 'user.email=acctv@localhost', '-c', 'commit.gpgsign=false'];
 /** Hook hay prompt của git không được treo dashboard: quá hạn thì kill cây tiến trình git và báo lỗi. */
@@ -22,7 +22,8 @@ function git(dir: string, args: string[], timeoutMs = GIT_TIMEOUT_MS.other): Pro
   const name = subcommand(args);
   return new Promise((resolve, reject) => {
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const child = execFile('git', ['-C', dir, ...args], { maxBuffer: 64 * 1024 * 1024, windowsHide: true }, (err, stdout, stderr) => {
+    // hook của dự án (vd. husky post-merge chạy `yarn`) kế thừa env: NODE_ENV=production của dashboard làm yarn xoá devDependencies
+    const child = execFile('git', ['-C', dir, ...args], { env: childEnv(), maxBuffer: 64 * 1024 * 1024, windowsHide: true }, (err, stdout, stderr) => {
       clearTimeout(timer);
       if (!err) return resolve(stdout);
       const msg = String(stderr ?? '').trim();
@@ -49,17 +50,35 @@ export async function gitInfo(dir: string): Promise<GitInfo> {
   return { exists: true, isGit: true, branch, head, dirty };
 }
 
+const hasBranch = (repo: string, name: string): Promise<boolean> =>
+  git(repo, ['rev-parse', '--verify', '-q', `refs/heads/${name}`]).then(() => true, () => false);
+
 /** `base` nếu chưa có nhánh đó, ngược lại `base-2`, `base-3`, … */
 export async function uniqueBranch(repo: string, base: string): Promise<string> {
-  const exists = (b: string) => git(repo, ['rev-parse', '--verify', '-q', `refs/heads/${b}`]).then(() => true, () => false);
-  if (!(await exists(base))) return base;
-  for (let n = 2; ; n++) if (!(await exists(`${base}-${n}`))) return `${base}-${n}`;
+  if (!(await hasBranch(repo, base))) return base;
+  for (let n = 2; ; n++) if (!(await hasBranch(repo, `${base}-${n}`))) return `${base}-${n}`;
 }
 
-export async function createWorktree(repo: string, branch: string, wtPath: string): Promise<{ baseRef: string }> {
-  const baseRef = (await git(repo, ['rev-parse', 'HEAD'])).trim();
-  await git(repo, ['worktree', 'add', '-b', branch, wtPath, 'HEAD']);
+/**
+ * Worktree mới trên nhánh `branch`, tách từ HEAD repo gốc, hoặc từ `base.branch` khi có.
+ * `base.branch` chưa có thì tạo từ `base.from` (`git branch`, không checkout gì trong repo gốc).
+ */
+export async function createWorktree(repo: string, branch: string, wtPath: string, base?: { branch: string; from: string | null }): Promise<{ baseRef: string }> {
+  // ref đầy đủ: tên ngắn thì tag trùng tên thắng nhánh, `@` là HEAD, `-x` thành option
+  const start = base ? `refs/heads/${base.branch}` : 'HEAD';
+  if (base && !(await hasBranch(repo, base.branch))) {
+    if (!base.from) throw new Error(`nhánh gốc ${base.branch} chưa có và không có nhánh để tạo từ`);
+    await git(repo, ['branch', base.branch, `refs/heads/${base.from}`]);
+  }
+  const baseRef = (await git(repo, ['rev-parse', '--verify', `${start}^{commit}`])).trim();
+  await git(repo, ['worktree', 'add', '-b', branch, wtPath, baseRef]);
   return { baseRef };
+}
+
+export async function validBranchName(repo: string, name: string): Promise<boolean> {
+  if (!name) return false;
+  // --branch mở rộng @{-N} thành nhánh khác: chỉ nhận khi git trả lại đúng tên
+  return git(repo, ['check-ref-format', '--branch', name]).then((out) => out.trim() === name, () => false);
 }
 
 /**
