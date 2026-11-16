@@ -1,7 +1,9 @@
 'use client';
 import { useState } from 'react';
-import { emptyProjectForm, type AccountForm, type ProjectForm } from '../lib/projectsForm';
+import { emptyProjectForm, withDir, type AccountForm, type ProjectForm } from '../lib/projectsForm';
 import { postJson } from '../lib/liveStore';
+import { pickerStart } from '../lib/dirs';
+import FolderPicker from '../components/FolderPicker';
 import styles from './SettingsForm.module.css';
 
 interface Props {
@@ -15,7 +17,11 @@ type ResetState = { busy: boolean; out: { code: number | null; tail: string } | 
 /** Settings > Dự án: server preview, đăng nhập test, tài khoản theo vai trò, reset dữ liệu. */
 export default function ProjectsSection({ projects, onChange, errors }: Props) {
   const [reset, setReset] = useState<Record<number, ResetState>>({});
+  const [picking, setPicking] = useState<{ i: number; k: 'dir' | 'resetCwd' } | null>(null);
+  const recent = projects.map((p) => p.dir.trim()).filter(Boolean);
   const set = (i: number, p: Partial<ProjectForm>) => onChange(projects.map((x, j) => (j === i ? { ...x, ...p } : x)));
+  const setPath = (i: number, k: 'dir' | 'resetCwd', v: string) =>
+    k === 'dir' ? onChange(projects.map((x, j) => (j === i ? withDir(x, v) : x))) : set(i, { [k]: v });
   const setAcc = (i: number, k: number, a: Partial<AccountForm>) =>
     set(i, { accounts: projects[i].accounts.map((x, j) => (j === k ? { ...x, ...a } : x)) });
 
@@ -38,6 +44,17 @@ export default function ProjectsSection({ projects, onChange, errors }: Props) {
     </label>
   );
 
+  // Ô đường dẫn tuyệt đối: vẫn gõ tay được, thêm nút mở hộp chọn thư mục.
+  const pathField = (i: number, k: 'dir' | 'resetCwd', label: string, ph: string) => (
+    <label className={styles.sub}>
+      {label}
+      <span className={styles.pathRow}>
+        <input className="mono" spellCheck={false} placeholder={ph} value={projects[i][k]} onChange={(e) => setPath(i, k, e.target.value)} />
+        <button type="button" className={styles.btn} onClick={() => setPicking({ i, k })}>Chọn thư mục…</button>
+      </span>
+    </label>
+  );
+
   return (
     <>
       {projects.map((p, i) => {
@@ -45,7 +62,7 @@ export default function ProjectsSection({ projects, onChange, errors }: Props) {
         return (
           <details key={i} className={styles.project} open={!p.dir}>
             <summary className="mono">{p.dir || '(dự án mới)'}</summary>
-            {text(i, 'dir', 'Thư mục dự án gốc (đường dẫn tuyệt đối)', 'D:\\Work\\app')}
+            {pathField(i, 'dir', 'Thư mục dự án gốc (đường dẫn tuyệt đối)', 'D:\\Work\\app')}
             <div className={styles.two}>
               {text(i, 'dev', 'Lệnh dev ({port})')}
               <label className={styles.sub}>
@@ -80,6 +97,10 @@ export default function ProjectsSection({ projects, onChange, errors }: Props) {
               </label>
               {text(i, 'successValue', p.successKind === 'url' ? 'Chuỗi trong URL' : 'Selector', p.successKind === 'url' ? '/login' : '[data-testid=avatar]')}
             </div>
+            <label className={styles.sub}>
+              Nút bấm trước khi điền, khi form nằm trong modal/menu (mỗi dòng một selector, bấm lần lượt; để trống nếu form có sẵn trên trang)
+              <textarea rows={3} className="mono" spellCheck={false} value={p.loginOpen} onChange={(e) => set(i, { loginOpen: e.target.value })} />
+            </label>
 
             <div className={styles.muted}>Tài khoản test theo vai trò (agent chỉ thấy tên và mô tả)</div>
             {p.accounts.map((a, k) => (
@@ -96,7 +117,7 @@ export default function ProjectsSection({ projects, onChange, errors }: Props) {
             <div className={styles.muted}>Reset dữ liệu (chỉ chạy khi bạn bấm)</div>
             <div className={styles.two}>
               {text(i, 'resetCommand', 'Lệnh reset/seed', 'pnpm db:reset && pnpm db:seed')}
-              {text(i, 'resetCwd', 'Thư mục chạy lệnh (tuyệt đối)', 'D:\\Work\\api')}
+              {pathField(i, 'resetCwd', 'Thư mục chạy lệnh (tuyệt đối)', 'D:\\Work\\api')}
             </div>
             <div className={styles.projectActions}>
               <button type="button" className={styles.btn} disabled={!p.resetCommand.trim() || r?.busy} onClick={() => void runReset(i)}>
@@ -116,6 +137,13 @@ export default function ProjectsSection({ projects, onChange, errors }: Props) {
       {projects.length === 0 && <p className={styles.muted}>Chưa cấu hình dự án nào. Dự án Next.js chưa cấu hình vẫn dùng lệnh mặc định.</p>}
       {errors.length > 0 && <ul className={styles.errBox} role="alert">{errors.map((e, i) => <li key={i}>{e}</li>)}</ul>}
       <div><button type="button" className={styles.btn} onClick={() => onChange([...projects, emptyProjectForm()])}>+ Thêm dự án</button></div>
+      <FolderPicker
+        open={picking !== null}
+        start={picking ? pickerStart(projects[picking.i]?.[picking.k] ?? '', recent) : null}
+        recent={recent}
+        onPick={(dir) => { if (picking) setPath(picking.i, picking.k, dir); setPicking(null); }}
+        onClose={() => setPicking(null)}
+      />
     </>
   );
 }

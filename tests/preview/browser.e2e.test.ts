@@ -45,6 +45,9 @@ beforeAll(async () => {
       return;
     }
     if (url.pathname === '/login') return html(200, FORM);
+    // form chỉ hiện sau hai lần bấm: menu → nút mở modal; đã đăng nhập thì menu không còn nút Sign In
+    if (url.pathname === '/modal' && authed) return html(200, '<h1>Trang chủ</h1>');
+    if (url.pathname === '/modal') return html(200, `<button id="menu" onclick="document.getElementById('pop').hidden=false">☰</button><div id="pop" hidden><button onclick="document.getElementById('dlg').hidden=false">Sign In</button></div><div id="dlg" hidden>${FORM}</div>`);
     if (url.pathname === '/auth/refresh') {
       res.writeHead(401);
       return res.end('no session');
@@ -106,6 +109,18 @@ describe.skipIf(!exe)('TicketBrowser (Chrome thật)', () => {
     }
     await new Promise((r) => setTimeout(r, 500));
     expect(alive(pids[0])).toBe(false);
+  });
+
+  it('form trong modal: bấm openSelectors lần lượt rồi mới điền; đứng ở trang mở modal không bị coi là hết phiên', { timeout: 60000 }, async () => {
+    const login: PreviewLogin = { ...LOGIN, path: '/modal', openSelectors: ['#menu', '#pop button:has-text("Sign In")'] };
+    const b = new TicketBrowser({ executablePath: exe!, origin, login, accounts: [{ name: 'owner', description: '', username: 'owner@x', password: 'secret1' }], onPid: () => {} });
+    const out = fs.mkdtempSync(path.join(os.tmpdir(), 'acctv-shots-'));
+    try {
+      const r = await b.runCapture(args({ as: 'owner', steps: [{ goto: '/home' }, { waitFor: 'h1' }, { goto: '/modal' }, { shot: 'home' }] }), out, wt);
+      expect(r.steps.every((s) => s.ok), JSON.stringify(r.steps)).toBe(true);
+    } finally {
+      await b.close();
+    }
   });
 
   it('sai mật khẩu → LoginError sau đúng một lần thử lại (2 lần POST)', { timeout: 60000 }, async () => {

@@ -3,7 +3,8 @@ import type { PreviewStatus } from '@/src/preview/server';
 import { initialState, reduce } from '@/app/lib/liveStore';
 import { previewLabel } from '@/app/lib/tickets';
 import { NEXT_DEFAULTS, type ProjectPreview } from '@/src/preview/config';
-import { emptyProjectForm, fromProjectForm, parseEnvLines, toProjectForm } from '@/app/lib/projectsForm';
+import { emptyProjectForm, fromProjectForm, parseEnvLines, toProjectForm, withDir } from '@/app/lib/projectsForm';
+import { UNISCORE_LOGIN } from '@/src/preview/defaults';
 
 const st = (o: Partial<PreviewStatus>): PreviewStatus => ({ state: 'stopped', mode: 'dev', port: null, error: null, logTail: '', envFiles: [], startedAt: null, ...o });
 
@@ -26,6 +27,19 @@ describe('liveStore preview', () => {
     expect(s.previews['T-1'].port).toBe(3100);
     s = reduce(s, { type: 'snapshot', generatedAt: 1, agents: [], alerts: [], metrics: {} as never, agentMetrics: {}, previews: { 'T-2': st({ state: 'building' }) } });
     expect(Object.keys(s.previews)).toEqual(['T-2']);
+  });
+});
+
+describe('projectsForm uniscore-client', () => {
+  test('chọn thư mục uniscore-client → điền sẵn đăng nhập; đã điền hay dự án khác thì không đổi; lưu ra đúng cấu hình', () => {
+    const f = withDir(emptyProjectForm(), '/work/uniscore-client/');
+    expect(f.loginPath).toBe('/en');
+    expect(f.loginOpen.split('\n')).toHaveLength(3);
+    const r = fromProjectForm(f);
+    expect(r.ok && r.project.login).toEqual(UNISCORE_LOGIN);
+    expect(withDir({ ...emptyProjectForm(), loginPath: '/login' }, 'D:\\Work\\uniscore-client').loginPath).toBe('/login');
+    expect(withDir(emptyProjectForm(), '/work/other').loginPath).toBe('');
+    expect(toProjectForm('/work/uniscore-client', NEXT_DEFAULTS).successValue).toMatch(/drawer-menu-title] img\[alt="unknown1"\]/);
   });
 });
 

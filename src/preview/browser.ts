@@ -141,6 +141,7 @@ export class TicketBrowser {
     });
     try {
       await page.goto(this.o.origin + l.path, { waitUntil: 'load', timeout: this.navMs() });
+      for (const s of l.openSelectors ?? []) await page.locator(s).first().click({ timeout: LIMITS.stepMs });
       await page.locator(l.usernameSelector).first().fill(a.username, { timeout: LIMITS.stepMs });
       await page.locator(l.passwordSelector).first().fill(a.password, { timeout: LIMITS.stepMs });
       armed = true;
@@ -315,6 +316,8 @@ export class TicketBrowser {
 
     const onLoginPage = (): boolean => {
       if (!account || !this.o.login) return false;
+      // form trong modal: path chỉ là trang mở modal (vd. trang chủ), đứng ở đó không có nghĩa là bị đá ra
+      if (this.o.login.openSelectors?.length) return false;
       try {
         return new URL(page.url()).pathname === this.o.login.path;
       } catch {

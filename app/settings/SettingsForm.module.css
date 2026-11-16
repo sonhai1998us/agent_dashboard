@@ -13,6 +13,8 @@
 .form textarea { resize: vertical; font-size: 12px; }
 .field[data-invalid='true'] input, .field[data-invalid='true'] textarea, .field[data-invalid='true'] select { border-color: var(--err); }
 .form input:focus-visible, .form textarea:focus-visible, .form select:focus-visible, .btn:focus-visible, .primary:focus-visible, .back:focus-visible, .theme:focus-within { outline: 2px solid var(--run); outline-offset: 2px; }
+.pathRow { display: flex; gap: 6px; }
+.pathRow .btn { flex-shrink: 0; }
 .two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .thr { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
 .unitRow { display: flex; align-items: center; gap: 8px; }

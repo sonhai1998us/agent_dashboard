@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { UNISCORE_LOGIN } from '@/src/preview/defaults';
 import { MASK, NEXT_DEFAULTS, maskProjects, resolveProject, unmaskProjects, validateProjects, type ProjectPreview } from '@/src/preview/config';
 
 const WIN = process.platform === 'win32';
@@ -28,7 +29,7 @@ describe('validateProjects', () => {
   it('nhận cấu hình hợp lệ và giữ nguyên dữ liệu', () => {
     const p = proj({
       backend: { healthUrl: 'http://localhost:3001/api/v1/health' },
-      login: { path: '/login', usernameSelector: '#u', passwordSelector: '#p', submitSelector: 'button', success: { urlNotMatching: '/login' } },
+      login: { path: '/login', openSelectors: ['#menu', 'text=Sign in'], usernameSelector: '#u', passwordSelector: '#p', submitSelector: 'button', success: { urlNotMatching: '/login' } },
       db: { resetCommand: 'pnpm db:reset', cwd: DIR },
     });
     const r = validateProjects({ [DIR]: p });
@@ -51,6 +52,10 @@ describe('validateProjects', () => {
     expect(errorsOf({ [DIR]: proj({ db: { resetCommand: 'x', cwd: 'rel' } }) }).join('\n')).toMatch(/db\.cwd/);
     expect(errorsOf({ [DIR]: proj({ env: { A: 1 as unknown as string } }) }).join('\n')).toMatch(/env/);
     expect(errorsOf({ [DIR]: proj({ login: { path: 'login', usernameSelector: '#u', passwordSelector: '#p', submitSelector: 'b', success: { selector: '#ok' } } }) }).join('\n')).toMatch(/login\.path/);
+    const login = { path: '/login', usernameSelector: '#u', passwordSelector: '#p', submitSelector: 'b', success: { selector: '#ok' } };
+    for (const openSelectors of ['#a', ['#a', ' '], Array(6).fill('#a')]) {
+      expect(errorsOf({ [DIR]: proj({ login: { ...login, openSelectors: openSelectors as string[] } }) }).join('\n')).toMatch(/login\.openSelectors/);
+    }
     expect(errorsOf([1]).length).toBeGreaterThan(0);
   });
 });
@@ -96,5 +101,16 @@ describe('resolveProject', () => {
     fs.writeFileSync(path.join(e, 'package.json'), JSON.stringify({ dependencies: { react: '19' } }));
     expect(resolveProject({}, e)).toBeNull();
     expect(resolveProject({}, path.join(e, 'khong-co'))).toBeNull();
+  });
+
+  it('uniscore-client để trống đăng nhập → đăng nhập mặc định của nó; đã điền thì giữ', () => {
+    const u = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'acctv-proj-')), 'uniscore-client');
+    fs.mkdirSync(u);
+    fs.writeFileSync(path.join(u, 'package.json'), JSON.stringify({ dependencies: { next: '14' } }));
+    expect(resolveProject({}, u)!.login).toEqual(UNISCORE_LOGIN);
+    expect(resolveProject({ [u]: proj() }, u)!.login).toEqual(UNISCORE_LOGIN);
+    const own = { path: '/x', usernameSelector: '#u', passwordSelector: '#p', submitSelector: 'b', success: { selector: '#ok' } };
+    expect(resolveProject({ [u]: proj({ login: own }) }, u)!.login).toEqual(own);
+    expect(resolveProject({ [DIR]: proj() }, DIR)!.login).toBeUndefined();
   });
 });

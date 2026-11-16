@@ -1,4 +1,4 @@
-import { NEXT_DEFAULTS, type ProjectPreview } from '@/src/preview/defaults';
+import { NEXT_DEFAULTS, UNISCORE_LOGIN, isUniscore, type PreviewLogin, type ProjectPreview } from '@/src/preview/defaults';
 
 export interface AccountForm { name: string; description: string; username: string; password: string }
 export interface ProjectForm {
@@ -12,6 +12,8 @@ export interface ProjectForm {
   readyPath: string;
   healthUrl: string;
   loginPath: string;
+  /** mỗi dòng một selector, bấm lần lượt trước khi điền */
+  loginOpen: string;
   usernameSelector: string;
   passwordSelector: string;
   submitSelector: string;
@@ -26,8 +28,25 @@ export function emptyProjectForm(): ProjectForm {
   return toProjectForm('', structuredClone(NEXT_DEFAULTS));
 }
 
+const loginFields = (l: PreviewLogin | undefined) => {
+  const s = l?.success;
+  return {
+    loginPath: l?.path ?? '',
+    loginOpen: (l?.openSelectors ?? []).join('\n'),
+    usernameSelector: l?.usernameSelector ?? '',
+    passwordSelector: l?.passwordSelector ?? '',
+    submitSelector: l?.submitSelector ?? '',
+    successKind: s && 'selector' in s ? 'selector' as const : 'url' as const,
+    successValue: s ? ('selector' in s ? s.selector : s.urlNotMatching) : '',
+  };
+};
+
+/** Đổi thư mục dự án: uniscore-client chưa điền đăng nhập thì điền sẵn mặc định của nó. */
+export function withDir(f: ProjectForm, dir: string): ProjectForm {
+  return !f.loginPath.trim() && isUniscore(dir) ? { ...f, dir, ...loginFields(UNISCORE_LOGIN) } : { ...f, dir };
+}
+
 export function toProjectForm(dir: string, p: ProjectPreview): ProjectForm {
-  const s = p.login?.success;
   return {
     dir,
     dev: p.dev.command,
@@ -37,12 +56,7 @@ export function toProjectForm(dir: string, p: ProjectPreview): ProjectForm {
     env: Object.entries(p.env).map(([k, v]) => `${k}=${v}`).join('\n'),
     readyPath: p.readyPath,
     healthUrl: p.backend?.healthUrl ?? '',
-    loginPath: p.login?.path ?? '',
-    usernameSelector: p.login?.usernameSelector ?? '',
-    passwordSelector: p.login?.passwordSelector ?? '',
-    submitSelector: p.login?.submitSelector ?? '',
-    successKind: s && 'selector' in s ? 'selector' : 'url',
-    successValue: s ? ('selector' in s ? s.selector : s.urlNotMatching) : '',
+    ...loginFields(p.login ?? (isUniscore(dir) ? UNISCORE_LOGIN : undefined)),
     accounts: p.accounts.map((a) => ({ ...a })),
     resetCommand: p.db?.resetCommand ?? '',
     resetCwd: p.db?.cwd ?? '',
@@ -77,8 +91,10 @@ export function fromProjectForm(f: ProjectForm): { ok: true; dir: string; projec
   };
   if (f.healthUrl.trim()) project.backend = { healthUrl: f.healthUrl.trim() };
   if (f.loginPath.trim()) {
+    const open = f.loginOpen.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
     project.login = {
       path: f.loginPath.trim(),
+      ...(open.length ? { openSelectors: open } : {}),
       usernameSelector: f.usernameSelector.trim(),
       passwordSelector: f.passwordSelector.trim(),
       submitSelector: f.submitSelector.trim(),

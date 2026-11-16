@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { MASK, NEXT_DEFAULTS, nextDefaults, type PreviewAccount, type PreviewLogin, type ProjectPreview } from './defaults';
+import { MASK, NEXT_DEFAULTS, UNISCORE_LOGIN, isUniscore, nextDefaults, type PreviewAccount, type PreviewLogin, type ProjectPreview } from './defaults';
 
 export { MASK, NEXT_DEFAULTS, type PreviewAccount, type PreviewLogin, type ProjectPreview };
 
@@ -38,11 +38,13 @@ function one(raw: unknown, key: string, errors: string[]): ProjectPreview | null
     const l = isObj(raw.login) ? raw.login : {};
     if (!str(l.path) || !l.path.startsWith('/')) e('login.path phải bắt đầu bằng /');
     for (const k of ['usernameSelector', 'passwordSelector', 'submitSelector'] as const) if (!str(l[k])) e(`login.${k} không được rỗng`);
+    const open = l.openSelectors;
+    if (open !== undefined && (!Array.isArray(open) || open.length > 5 || !open.every(str))) e('login.openSelectors phải là mảng tối đa 5 selector không rỗng');
     const s = isObj(l.success) ? l.success : {};
     const success = str(s.urlNotMatching) ? { urlNotMatching: s.urlNotMatching } : str(s.selector) ? { selector: s.selector } : null;
     if (!success) e('login.success phải có urlNotMatching hoặc selector');
     if (errors.length === n) {
-      login = { path: l.path as string, usernameSelector: l.usernameSelector as string, passwordSelector: l.passwordSelector as string, submitSelector: l.submitSelector as string, success: success! };
+      login = { path: l.path as string, ...(Array.isArray(open) && open.length ? { openSelectors: open as string[] } : {}), usernameSelector: l.usernameSelector as string, passwordSelector: l.passwordSelector as string, submitSelector: l.submitSelector as string, success: success! };
     }
   }
   const accounts: PreviewAccount[] = [];
@@ -158,11 +160,13 @@ export function binRunner(dir: string, packageManager?: unknown): string {
 }
 
 export function resolveProject(projects: Record<string, ProjectPreview>, dir: string): ProjectPreview | null {
+  // uniscore-client để trống đăng nhập thì dùng mặc định của nó
+  const withLogin = (p: ProjectPreview): ProjectPreview => (p.login || !isUniscore(dir) ? p : { ...p, login: UNISCORE_LOGIN });
   const hit = lookup(projects, dir);
-  if (hit) return hit;
+  if (hit) return withLogin(hit);
   try {
     const pkg = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')) as Record<string, Record<string, string> | undefined>;
-    if (pkg.dependencies?.next || pkg.devDependencies?.next) return nextDefaults(binRunner(dir, pkg.packageManager));
+    if (pkg.dependencies?.next || pkg.devDependencies?.next) return withLogin(nextDefaults(binRunner(dir, pkg.packageManager)));
   } catch {
     // không có hoặc hỏng package.json
   }
