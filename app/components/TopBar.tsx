@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { useLive } from '../lib/liveStore';
 import { fmtClock, fmtDuration } from '../lib/format';
 import { openUserActions } from '../lib/userActions';
+import GuideDialog from './GuideDialog';
 import styles from './TopBar.module.css';
 
 export default function TopBar() {
@@ -34,6 +35,7 @@ export default function TopBar() {
       )}
       <Link href="/tickets/new" className={styles.newBtn}>+ Ticket mới</Link>
       <Link href="/settings" className={styles.newBtn}>Cài đặt</Link>
+      <GuideDialog btnClass={styles.newBtn} />
       <span className={styles.spacer} />
       <span className={`${styles.conn} ${conn === 'disconnected' ? styles.connBad : ''}`} role="status" aria-live="polite">
         {label}

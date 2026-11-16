@@ -112,7 +112,7 @@ export default function ProjectsSection({ projects, onChange, errors }: Props) {
                 <button type="button" className={styles.btn} aria-label={`Xoá tài khoản ${a.name || k + 1}`} onClick={() => set(i, { accounts: p.accounts.filter((_, j) => j !== k) })}>Xoá</button>
               </div>
             ))}
-            <div><button type="button" className={styles.btn} onClick={() => set(i, { accounts: [...p.accounts, { name: '', description: '', username: '', password: '' }] })}>+ Thêm tài khoản</button></div>
+            <div><button type="button" className={styles.btn} onClick={() => set(i, { accounts: [...p.accounts, { name: p.accounts.some((a) => a.name.trim() === 'owner') ? '' : 'owner', description: '', username: '', password: '' }] })}>+ Thêm tài khoản</button></div>
 
             <div className={styles.muted}>Reset dữ liệu (chỉ chạy khi bạn bấm)</div>
             <div className={styles.two}>
