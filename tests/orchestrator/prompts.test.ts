@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { systemPrompt, workerPrompt, turn, listPreview } from '@/src/orchestrator/prompts';
+import { systemPrompt, workerPrompt, turn, listPreview, e2eSpecFile } from '@/src/orchestrator/prompts';
 import { DEFAULT_SETTINGS } from '@/src/core/config';
 import type { Plan, Role, Ticket } from '@/src/tickets/model';
 
@@ -153,6 +153,16 @@ describe('workerPrompt', () => {
   });
 });
 
+describe('e2eSpecFile', () => {
+  const t = { id: 'T-3', title: 'Trang login', description: '', createdAt: 36 };
+  it('mã Jira trong tiêu đề, rồi mô tả; không có thì id kèm giờ tạo', () => {
+    expect(e2eSpecFile({ ...t, title: '[UNI-123] Trang login', description: 'xem ABC-9' })).toBe('e2e/UNI-123.spec.ts');
+    expect(e2eSpecFile({ ...t, description: 'https://x.atlassian.net/browse/UNI-45' })).toBe('e2e/UNI-45.spec.ts');
+    expect(e2eSpecFile(t)).toBe('e2e/T-3-10.spec.ts');
+    expect(e2eSpecFile({ ...t, createdAt: 37 })).not.toBe(e2eSpecFile(t));
+  });
+});
+
 describe('turn', () => {
   const t = { id: 'T-1', title: 'Trang login', description: 'Làm trang login', dir: 'D:\\app', overrides: {} } as unknown as Ticket;
 
@@ -179,8 +189,8 @@ describe('turn', () => {
     expect(turn.nudge()).toContain('finish');
   });
 
-  it('approved có e2e: Controller thêm e2e/<mã ticket>.spec.ts vào file gói Dev; không cờ thì không nhắc', () => {
-    expect(turn.approved(plan, 'W', { e2e: true })).toContain('e2e/<mã ticket>.spec.ts');
+  it('approved có e2e: Controller thêm đúng file spec được tính vào gói Dev; không có thì không nhắc', () => {
+    expect(turn.approved(plan, 'W', { e2e: 'e2e/UNI-1.spec.ts' })).toContain('`e2e/UNI-1.spec.ts`');
     expect(turn.approved(plan, 'W')).not.toContain('e2e/');
   });
 

@@ -92,6 +92,17 @@ const E2E_DEV = `Test e2e (dự án có playwright.config): viết file spec đ�
 - Cần đăng nhập: lấy tài khoản từ process.env.E2E_<TÊN>_USER và process.env.E2E_<TÊN>_PASS, không ghi mật khẩu vào file.
 - Chạy thử bằng tool run_e2e (file, grep tuỳ chọn) trước khi báo xong; ghi trong báo cáo kết quả và TC nào chưa có test.`;
 
+/**
+ * File spec e2e của ticket: mã Jira trong tiêu đề (rồi mô tả) nếu có. Không có thì id ticket kèm giờ tạo,
+ * vì T-n đếm riêng trong DB mỗi máy nên hai người trong team dễ ra cùng tên rồi ghi đè spec của nhau.
+ */
+export function e2eSpecFile(t: Pick<Ticket, 'id' | 'title' | 'description' | 'createdAt'>): string {
+  // shortcut: chuỗi kiểu "UTF-8" cũng khớp như mã Jira; tiêu đề ghi mã Jira ở đầu thì luôn đúng
+  const jira = /\b[A-Z][A-Z0-9]+-\d+\b/;
+  const key = jira.exec(t.title)?.[0] ?? jira.exec(t.description)?.[0] ?? `${t.id}-${t.createdAt.toString(36)}`;
+  return `e2e/${key}.spec.ts`;
+}
+
 const E2E_QC = `Test e2e (dự án có playwright.config): chạy file spec của ticket trong e2e/ bằng tool run_e2e. Báo: từng TC đã có test() tương ứng chưa, test nào đỏ và vì sao, assertion nào bám dữ liệu thật hay đổi (tên, số, ngày cụ thể) — đó là lỗi vừa vì sẽ đỏ trên staging dù code đúng. Vẫn kiểm độc lập bằng capture như thường; không sửa file spec.`;
 
 export interface PreviewPromptCtx {
@@ -208,12 +219,12 @@ export const turn = {
    * `again`: kế hoạch sửa sau góp ý, làm tiếp trên nhánh cũ.
    * `deps`: worktree vừa tạo; 'auto' = dashboard đang cài dependency, 'manual' = Dev phải tự cài, null = không cần.
    */
-  approved: (plan: Plan, worktree: string, opts: { again?: boolean; deps?: 'auto' | 'manual' | null; e2e?: boolean } = {}): string =>
+  approved: (plan: Plan, worktree: string, opts: { again?: boolean; deps?: 'auto' | 'manual' | null; e2e?: string | null } = {}): string =>
     `${opts.again ? 'Kế hoạch sửa đã được duyệt. Làm tiếp trên cùng nhánh: mọi thay đổi trước vẫn còn trong worktree.' : 'Kế hoạch đã được duyệt.'} Worktree của ticket: ${worktree}\n\n` +
     `Kế hoạch được duyệt (người dùng có thể đã sửa):\n${JSON.stringify(plan, null, 2)}\n\n` +
     (opts.deps === 'manual' ? 'Worktree mới tạo chưa cài dependency: Dev đầu tiên cần cài trong worktree (vd. `npm ci` hoặc `npm install`) trước khi các Dev song song chạy build/test.\n\n' : '') +
     (opts.deps === 'auto' ? 'Dashboard đang cài dependency trong worktree: Explorer và QC mode: "cases" chạy được ngay, Dev, Designer, QC review tự chờ tới khi cài xong. Đừng giao việc cài dependency.\n\n' : '') +
-    (opts.e2e ? 'Dự án có test e2e (playwright.config): thêm `e2e/<mã ticket>.spec.ts` vào files của gói Dev (mã Jira trong tiêu đề hay mô tả nếu có, không thì id ticket), và ghi trong task: chuyển từng TC thành một test() rồi chạy run_e2e. QC review chạy lại file đó bằng run_e2e.\n\n' : '') +
+    (opts.e2e ? `Dự án có test e2e (playwright.config): thêm \`${opts.e2e}\` vào files của gói Dev (đúng tên này, để không trùng spec của người khác trong team), và ghi trong task: chuyển từng TC thành một test() rồi chạy run_e2e. QC review chạy lại file đó bằng run_e2e.\n\n` : '') +
     'Hãy giao việc bằng spawn_agent theo các gói, rồi gọi wait_agents và kết thúc lượt.',
   feedback: (text: string, images: string[], imageDir: string): string =>
     'Người dùng đã xem kết quả của ticket và chưa vừa ý.' + (text ? ` Góp ý:\n${text}` : '') + '\n\n' +

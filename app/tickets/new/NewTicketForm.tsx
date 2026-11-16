@@ -141,7 +141,7 @@ export default function NewTicketForm({ initialDir = '' }: { initialDir?: string
 
         <div className={styles.field}>
           <label htmlFor="nt-title">Tiêu đề <span className={styles.req}>(bắt buộc)</span></label>
-          <input id="nt-title" value={title} onChange={(e) => setTitle(e.target.value)} autoFocus required aria-required="true" />
+          <input id="nt-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="[UNI-123] Mô tả ngắn: ghi mã Jira ở đầu để đặt tên file test e2e" autoFocus required aria-required="true" />
         </div>
 
         <div className={styles.field}>

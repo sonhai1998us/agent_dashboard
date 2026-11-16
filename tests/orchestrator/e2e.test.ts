@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { E2E_TOOL } from '@/src/guard/policy';
+import { e2eSpecFile } from '@/src/orchestrator/prompts';
 import type { E2eRequest } from '@/src/preview/manager';
 import { createFakeRunner } from '../helpers/fakeRunner';
 import { cleanup, codexPlan, g, makeEnv, runOf, toRunning, validPlan, type Env } from '../helpers/orchestratorEnv';
@@ -101,7 +102,7 @@ describe('tool run_e2e', () => {
     g(env.repo, 'add', '-A');
     g(env.repo, '-c', 'user.name=T', '-c', 'user.email=t@localhost', 'commit', '-q', '-m', 'e2e');
     const T = await toRunning(env, plan());
-    expect(runOf(env, `acctv:${T}:controller`)!.spec.prompt).toContain('e2e/<mã ticket>.spec.ts');
+    expect(runOf(env, `acctv:${T}:controller`)!.spec.prompt).toContain(e2eSpecFile(env.tickets.getTicket(T)!));
     await env.orch.mcpTools(T).spawn_agent({ role: 'dev', task: 'a', files: ['src/a.ts'] });
     expect(runOf(env, `acctv:${T}:dev-1`)!.spec.systemPrompt).toContain('run_e2e');
   });
@@ -114,9 +115,10 @@ describe('tool run_e2e', () => {
   });
 
   it('giao Dev khi dự án có e2e mà files thiếu e2e/: kết quả spawn nhắc Controller', async () => {
-    const { tools } = await start(true);
-    expect((await tools.spawn_agent({ role: 'dev', task: 'a', files: ['src/a.ts'] })).text).toContain('e2e/<mã ticket>.spec.ts');
-    expect((await tools.spawn_agent({ role: 'dev', task: 'b', files: ['src/b.ts', 'e2e/T-1.spec.ts'] })).text).not.toContain('e2e/<mã ticket>');
+    const { T, tools } = await start(true);
+    const spec = e2eSpecFile(env.tickets.getTicket(T)!);
+    expect((await tools.spawn_agent({ role: 'dev', task: 'a', files: ['src/a.ts'] })).text).toContain(spec);
+    expect((await tools.spawn_agent({ role: 'dev', task: 'b', files: ['src/b.ts', spec] })).text).not.toContain(spec);
   });
 
   it('agent đã xong → "Agent không còn chạy"', async () => {

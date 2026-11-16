@@ -18,7 +18,7 @@ import { inside } from '@/src/core/paths';
 import { countTranscripts, purgeItem, removePaths, transcriptPaths, type PurgeItem } from '@/src/core/purge';
 import type { Runner, RunHandle, RunResult, RunSink, RunSpec } from '@/src/runner/types';
 import { USER_ACTION_LIMITS, type ToolImpl, type ToolResult } from './mcp';
-import { listPreview, systemPrompt, turn, workerPrompt } from './prompts';
+import { e2eSpecFile, listPreview, systemPrompt, turn, workerPrompt } from './prompts';
 import { agentLog, agentReport } from './reports';
 import { hasE2eConfig, type DepsResult } from './installDeps';
 
@@ -224,7 +224,7 @@ export class Orchestrator {
     }
     this.closeWaits(controllerId(ticketId));
     this.log(ticketId, `Người dùng duyệt kế hoạch; nhánh ${branch}`);
-    this.runControllerTurn(ticketId, turn.approved(plan, wt, { deps: this.prepareDeps(ticketId, t.dir, wt), e2e: hasE2eConfig(wt) }));
+    this.runControllerTurn(ticketId, turn.approved(plan, wt, { deps: this.prepareDeps(ticketId, t.dir, wt), e2e: hasE2eConfig(wt) ? e2eSpecFile(t) : null }));
     return this.mustTicket(ticketId);
   }
 
@@ -273,7 +273,7 @@ export class Orchestrator {
     if (this.mustTicket(T).status !== 'running') return this.mustTicket(T);
     this.closeWaits(controllerId(T));
     this.log(T, `Người dùng duyệt kế hoạch sửa; làm tiếp trên nhánh ${branch} (tối đa ${maxRounds} vòng)`);
-    this.runControllerTurn(T, turn.approved(plan, wt, { again: true, deps: fresh ? this.prepareDeps(T, t.dir, wt) : null, e2e: hasE2eConfig(wt) }));
+    this.runControllerTurn(T, turn.approved(plan, wt, { again: true, deps: fresh ? this.prepareDeps(T, t.dir, wt) : null, e2e: hasE2eConfig(wt) ? e2eSpecFile(t) : null }));
     return this.mustTicket(T);
   }
 
@@ -869,7 +869,7 @@ export class Orchestrator {
     const ignoredNote = ignored ? ' Dùng agent/model/effort theo kế hoạch đã duyệt; tham số bạn truyền khác kế hoạch nên bị bỏ qua.' : '';
     // playwright.config có thể xuất hiện sau lúc duyệt: nhắc mỗi lần giao Dev thiếu file e2e
     const e2eNote = role === 'dev' && this.hasE2e(m, t.worktree) && !files.some((f) => f.startsWith('e2e/'))
-      ? ' Dự án có test e2e (playwright.config): gói Dev nên có e2e/<mã ticket>.spec.ts trong files để chuyển từng TC thành test().' : '';
+      ? ` Dự án có test e2e (playwright.config): gói Dev nên có \`${e2eSpecFile(t)}\` trong files (đúng tên này) để chuyển từng TC thành test().` : '';
     const note = ignoredNote + e2eNote;
     return ok(`Đã tạo ${id} (${role}, ${model}/${effort}).${note} Dùng wait_agents để chờ.`);
   }
