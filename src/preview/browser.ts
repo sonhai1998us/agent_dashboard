@@ -252,10 +252,20 @@ export class TicketBrowser {
         // service worker
       }
     });
+    const bodies: Promise<void>[] = [];
+    if (args.api.length) res.api = [];
     page.on('response', (r) => {
       const req = r.request();
       const method = req.method();
       if (!SAFE_METHODS.has(method) || r.status() >= 400) res.requests.push({ method, url: r.url(), status: r.status() });
+      if (res.api && bodies.length < LIMITS.apiResponses && method !== 'OPTIONS' && args.api.some((p) => r.url().includes(p))) {
+        const item = { method, url: r.url(), status: r.status(), body: '' };
+        res.api.push(item);
+        bodies.push(r.text().then(
+          (t) => { item.body = t.length > LIMITS.apiChars ? `${t.slice(0, LIMITS.apiChars)}… (cắt bớt ${t.length - LIMITS.apiChars} ký tự)` : t; },
+          (e) => { item.body = `(không đọc được body: ${errMsg(e)})`; },
+        ));
+      }
       try {
         if (req.isNavigationRequest() && req.frame() === page.mainFrame()) {
           if (r.status() >= 300 && r.status() < 400) res.redirects.push(r.url());
@@ -362,6 +372,8 @@ export class TicketBrowser {
           break;
         }
       }
+      // body chưa tải xong (stream dài) thì thôi, không giữ capture quá lâu
+      if (bodies.length) await Promise.race([Promise.all(bodies), new Promise((r) => setTimeout(r, 5000))]);
       res.finalUrl = page.url();
       res.overflow = (await page.evaluate(`(${OVERFLOW_SCRIPT})(${LIMITS.overflowItems})`).catch(() => null)) as Result['overflow'];
     } finally {

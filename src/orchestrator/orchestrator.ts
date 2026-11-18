@@ -927,6 +927,7 @@ export class Orchestrator {
     if (this.liveWorkers(T).length) return fail('Còn agent đang chạy; hãy wait_agents trước khi finish');
     // chuyển trạng thái trước khi await để lượt chờ agent không đánh thức Controller nữa
     this.move(T, status === 'done' ? 'finish_done' : 'finish_escalated', { report, pendingWait: null });
+    this.deps.tickets.addFeedback(T, this.now(), 'report', report, []); // ô report bị lượt sau ghi đè; lịch sử giữ mọi vòng
     this.ctrl(T).queue.length = 0;
     this.log(T, `Controller kết thúc ticket (${status})`);
     if (this.deps.preview) this.track(this.deps.preview.stop(T));
@@ -999,6 +1000,7 @@ export class Orchestrator {
   /** Escalate không qua finish: ticket cần người dùng quyết, dừng mọi worker còn chạy. */
   private async escalate(T: string, report: string): Promise<void> {
     this.move(T, 'finish_escalated', { report, pendingWait: null });
+    this.deps.tickets.addFeedback(T, this.now(), 'report', report, []);
     this.ctrl(T).queue.length = 0;
     await Promise.all([this.stopLiveWorkers(T, ESCALATED), this.deps.preview?.stop(T)]);
   }

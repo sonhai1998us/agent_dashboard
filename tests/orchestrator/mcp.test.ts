@@ -43,7 +43,7 @@ describe('handleMcp', () => {
     expect(cap.description).toMatch(/không tự bật server hay trình duyệt/i);
     expect(cap.inputSchema.required).toEqual(['steps']);
     expect(cap.inputSchema.properties.steps.maxItems).toBe(30);
-    expect(Object.keys(cap.inputSchema.properties).sort()).toEqual(['as', 'colorScheme', 'cookies', 'locale', 'steps', 'viewport']);
+    expect(Object.keys(cap.inputSchema.properties).sort()).toEqual(['api', 'as', 'colorScheme', 'cookies', 'locale', 'steps', 'viewport']);
   });
 
   it('tools/list has the 5 Controller tools with Vietnamese wait hint', async () => {

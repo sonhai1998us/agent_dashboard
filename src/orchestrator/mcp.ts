@@ -89,6 +89,7 @@ const CAPTURE_SCHEMA = {
     colorScheme: { type: 'string', enum: ['light', 'dark'] },
     locale: { type: 'string', description: 'Accept-Language, vd. vi hoặc en-US.' },
     cookies: { type: 'array', maxItems: 20, items: { type: 'object', properties: { name: { type: 'string' }, value: { type: 'string' } }, required: ['name', 'value'] } },
+    api: { type: 'array', maxItems: 10, items: { type: 'string' }, description: 'Chuỗi con của URL API (vd. "/upcoming"). Response trình duyệt nhận khớp mẫu được trả nguyên body trong kết quả (tối đa 10 response, mỗi body 20.000 ký tự) để đối chiếu với giao diện. API gọi ở server (SSR) không thấy được.' },
     steps: { type: 'array', minItems: 1, maxItems: 30, items: STEP_SCHEMA },
   },
   required: ['steps'],
@@ -169,7 +170,7 @@ export const TOOL_DEFS: { name: 'propose_plan' | 'spawn_agent' | 'wait_agents' |
     name: 'capture',
     description:
       'Mở trang của ticket trong Chrome headless trên server preview do dashboard quản lý (đăng nhập theo tên tài khoản test nếu có `as`), chạy các bước, ' +
-      'trả ảnh (đường dẫn PNG để Read), số đo DOM, URL, console, request ghi. Không tự bật server hay trình duyệt. ' +
+      'trả ảnh (đường dẫn PNG để Read), số đo DOM, URL, console, request ghi, và body response API khớp `api`. Không tự bật server hay trình duyệt. ' +
       'Lần đầu có thể mất tới vài phút để bật/build server. Lỗi bắt đầu bằng [capture:<mã>].',
     inputSchema: CAPTURE_SCHEMA,
   },

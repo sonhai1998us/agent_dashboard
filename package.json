@@ -13,7 +13,9 @@
     "test": "vitest run",
     "dev": "cross-env NODE_OPTIONS=--disable-warning=ExperimentalWarning tsx server/index.ts",
     "build": "next build",
-    "start": "cross-env NODE_ENV=production NODE_OPTIONS=--disable-warning=ExperimentalWarning tsx server/index.ts"
+    "start": "cross-env NODE_ENV=production NODE_OPTIONS=--disable-warning=ExperimentalWarning tsx server/index.ts",
+    "telegram": "node --env-file=.env bin/acctv.mjs telegram",
+    "up": "npm run build && (node --env-file=.env bin/acctv.mjs serve & until curl -s http://127.0.0.1:4777/api/tickets >/dev/null; do sleep 1; done; node --env-file=.env bin/acctv.mjs telegram)"
   },
   "dependencies": {
     "@tanstack/react-virtual": "3.14.25",

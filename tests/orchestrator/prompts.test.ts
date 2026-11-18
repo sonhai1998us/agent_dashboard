@@ -22,6 +22,13 @@ describe('systemPrompt', () => {
     }
   });
 
+  it('mọi vai: FE không tự sort/filter trừ khi tiêu chí ghi rõ', () => {
+    for (const r of ['controller', 'explorer', 'dev', 'designer', 'qc'] as Role[]) {
+      expect(systemPrompt(r, ctx)).toContain('không tự sort hay filter');
+    }
+    expect(systemPrompt('qc', { ...ctx, mode: 'cases' })).toContain('không tự sort hay filter');
+  });
+
   it('Controller nêu đủ 5 tool', () => {
     const p = systemPrompt('controller', { worktree: null, files: [], denyBash: [] });
     for (const t of ['propose_plan', 'spawn_agent', 'wait_agents', 'get_agent_log', 'finish']) expect(p).toContain(t);

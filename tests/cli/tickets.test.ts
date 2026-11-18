@@ -96,6 +96,13 @@ test('new, plan, ls, approve (lần hai 409), stop, plan không có ticket', asy
   expect(st.code).toBe(0);
   expect(st.out).toContain('Đã dừng Dev-1, kết quả trả về Controller');
 
+  const bare = await cli('stop', 'T-1');
+  expect(bare.code).toBe(1);
+  expect(bare.err).toContain('cancel T-1');
+  const c = await cli('cancel', 'T-1');
+  expect(c.code).toBe(0);
+  expect(c.out).toContain('T-1 đã huỷ · đã huỷ');
+
   const miss = await cli('plan', 'T-9');
   expect(miss.code).toBe(1);
   expect(miss.err).toMatch(/404|không tìm thấy/i);
@@ -104,4 +111,41 @@ test('new, plan, ls, approve (lần hai 409), stop, plan không có ticket', asy
 test('new thiếu --dir, revise thiếu góp ý', async () => {
   expect((await cli('new', 'x')).code).toBe(1);
   expect((await cli('revise', 'T-1')).code).toBe(1);
+});
+
+test('report, history, feedback, continue: báo cáo từng vòng được giữ lại', async () => {
+  expect((await cli('new', 'Trang đăng nhập', '--dir', repo)).code).toBe(0);
+  const plan = async (nth: number) => {
+    const ctrl = await waitFor(() => runs.filter((x) => x.spec.agentId === 'acctv:T-1:controller')[nth]);
+    expect((await mcp(ctrl.spec.mcp!.token, 'propose_plan', { plan: validPlan() })).status).toBe(200);
+    ctrl.finish({});
+    await waitFor(async () => (await cli('ls')).out.includes('chờ duyệt'));
+    expect((await cli('approve', 'T-1')).code).toBe(0);
+    return waitFor(() => runs.filter((x) => x.spec.agentId === 'acctv:T-1:controller')[nth + 1]);
+  };
+  const finish = async (run: FakeRun, status: string, report: string) => {
+    expect((await mcp(run.spec.mcp!.token, 'finish', { status, report })).status).toBe(200);
+    run.finish({});
+    await waitFor(async () => (await cli('report', 'T-1')).out.includes(report));
+  };
+
+  expect((await cli('report', 'T-1')).out).toContain('T-1 chưa có báo cáo');
+  await finish(await plan(0), 'done', 'Vòng 1: xong login');
+  expect((await cli('continue', 'T-1', 'x')).err).toContain('escalated');
+
+  const fb = await cli('feedback', 'T-1', 'Nút', 'lệch trái');
+  expect(fb.code).toBe(0);
+  expect(fb.out).toContain('T-1 đã nhận góp ý');
+  expect((await cli('feedback', 'T-1')).err).toContain('Thiếu nội dung');
+
+  await finish(await plan(2), 'escalated', 'Vòng 2: cần chọn thư viện');
+  const ct = await cli('continue', 'T-1', 'dùng thư viện có sẵn');
+  expect(ct.code).toBe(0);
+  expect(ct.out).toContain('T-1 đã nhận chỉ đạo');
+
+  const h = (await cli('history', 'T-1')).out;
+  const order = ['Vòng 1: xong login', 'Nút lệch trái', 'Vòng 2: cần chọn thư viện', 'dùng thư viện có sẵn'].map((s) => h.indexOf(s));
+  expect(order.every((i) => i >= 0)).toBe(true);
+  expect([...order].sort((a, b) => a - b)).toEqual(order); // cũ nhất trước
+  expect(h).toContain('Báo cáo của Controller');
 });

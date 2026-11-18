@@ -1,7 +1,7 @@
 import type { AgentInfo, Alert, CallRecord } from '@/src/core/model';
 import { ALERT_LABEL, fmtClock, fmtDuration } from '@/app/lib/format';
-import type { Ticket } from '@/src/tickets/model';
-import { ticketStatusText } from '@/app/lib/tickets';
+import type { FeedbackEntry, Ticket } from '@/src/tickets/model';
+import { FEEDBACK_KIND_LABEL, fmtDateTime, ticketStatusText } from '@/app/lib/tickets';
 import { buildRoots, flattenTree } from '@/app/lib/tree';
 
 const ESC = '\x1b[';
@@ -154,4 +154,13 @@ export function renderPlan(t: Ticket, color: boolean): string {
   lines.push('', bold(color, 'Tiêu chí nghiệm thu'));
   for (const a of plan.acceptance) lines.push(`  - ${a}`);
   return lines.join('\n');
+}
+
+/** Lịch sử báo cáo và góp ý, cũ nhất trước (mới nhất nằm cuối, gần dấu nhắc). API trả mới nhất trước. */
+export function renderHistory(t: Ticket, items: FeedbackEntry[], color: boolean): string {
+  if (!items.length) return `${t.id} chưa có báo cáo hay góp ý nào.`;
+  return [bold(color, `${t.id} · ${t.title}`), ...[...items].reverse().map((f) => {
+    const imgs = f.images.length ? ` · ${f.images.length} ảnh` : '';
+    return `\n${bold(color, `── ${FEEDBACK_KIND_LABEL[f.kind]} · ${fmtDateTime(f.at)}${imgs}`)}\n${f.text || dim(color, '(chỉ có ảnh)')}`;
+  })].join('\n');
 }

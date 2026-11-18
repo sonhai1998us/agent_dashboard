@@ -159,7 +159,7 @@ export default function TicketHeader() {
             <button type="button" className={styles.btn} onClick={() => setFeedbackOpen(true)}>Góp ý để làm tiếp</button>
           )}
           {history.length > 0 && !historyOpen && (
-            <button type="button" className={styles.btn} onClick={() => setHistoryOpen(true)}>Lịch sử góp ý ({history.length})</button>
+            <button type="button" className={styles.btn} onClick={() => setHistoryOpen(true)}>Lịch sử ({history.length})</button>
           )}
           {cancellable && (
             <button

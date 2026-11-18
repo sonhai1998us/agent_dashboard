@@ -192,6 +192,7 @@ export const FEEDBACK_KIND_LABEL: Record<FeedbackKind, string> = {
   plan: 'Góp ý kế hoạch',
   result: 'Góp ý để làm tiếp',
   guidance: 'Chỉ đạo khi tiếp tục',
+  report: 'Báo cáo của Controller',
 };
 
 /** "08/11 14:05" — năm khác năm nay thì thêm năm. */

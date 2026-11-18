@@ -57,6 +57,7 @@
 .historyMeta { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; color: var(--muted); font-size: 11px; }
 .kind { padding: 0 6px; border-radius: 999px; border: 1px solid var(--border); color: var(--fg); }
 .kind[data-kind='result'] { border-color: var(--run); }
+.kind[data-kind='report'] { border-color: var(--ok); background: var(--sel); }
 .historyText { margin: 4px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 a.shot { display: block; }
 .modes { display: flex; flex-wrap: wrap; gap: 4px 14px; flex-basis: 100%; font-size: 12px; }

@@ -20,12 +20,15 @@ export interface CaptureArgs {
   colorScheme: 'light' | 'dark';
   locale: string | null;
   cookies: { name: string; value: string }[];
+  /** Chuỗi con của URL: response khớp được trả nguyên nội dung trong kết quả (để đối chiếu dữ liệu API). */
+  api: string[];
   steps: Step[];
 }
 
 export const LIMITS = {
   steps: 30, shots: 6, stepMs: 10000, totalMs: 120000, fullPageMax: 8000, measurePerTarget: 20,
   consoleLines: 30, consoleChars: 300, overflowItems: 10, minWidth: 320, maxWidth: 1920,
+  apiPatterns: 10, apiResponses: 10, apiChars: 20000,
 } as const;
 
 export interface StepReport { i: number; kind: string; ok: boolean; ms: number; error?: string }
@@ -37,6 +40,8 @@ export interface CaptureResult {
   redirects: string[];
   console: string[];
   requests: { method: string; url: string; status: number | null }[];
+  /** chỉ có khi gọi với api; body cắt ở LIMITS.apiChars */
+  api?: { method: string; url: string; status: number; body: string }[];
   overflow: { scrollWidth: number; clientWidth: number; items: { selector: string; width: number; right: number }[] } | null;
   measures: { target: string; items: { rect: { x: number; y: number; width: number; height: number }; style: Record<string, string> }[] }[];
   shots: string[];
@@ -140,6 +145,10 @@ export function validateCaptureArgs(raw: unknown, accounts: string[], worktree: 
       cookies.push({ name: c.name, value: c.value });
     }
   }
+  const api = raw.api === undefined ? [] : raw.api;
+  if (!Array.isArray(api) || api.length > LIMITS.apiPatterns || !api.every((s) => typeof s === 'string' && s.trim() !== '' && s.length <= 200)) {
+    return fail(`api phải là mảng tối đa ${LIMITS.apiPatterns} chuỗi con của URL (vd. "/upcoming")`);
+  }
   const steps: Step[] = [];
   for (let i = 0; i < raw.steps.length; i++) {
     const s = step(raw.steps[i], i + 1, worktree);
@@ -147,7 +156,7 @@ export function validateCaptureArgs(raw: unknown, accounts: string[], worktree: 
     steps.push(s);
   }
   if (steps.filter((s) => 'shot' in s).length > LIMITS.shots) return fail(`tối đa ${LIMITS.shots} bước shot mỗi lần gọi`);
-  return { ok: true, args: { as, viewport: { width, height }, colorScheme, locale, cookies, steps } };
+  return { ok: true, args: { as, viewport: { width, height }, colorScheme, locale, cookies, api: api as string[], steps } };
 }
 
 /** Thay mọi giá trị trong `secrets` bằng `***` trong mọi chuỗi của kết quả. */

@@ -6,9 +6,9 @@ import { loadConfig } from '@/src/core/config';
 import type { AgentInfo, Alert, CallRecord, HubEvent } from '@/src/core/model';
 import type { AgentMetrics } from '@/src/core/metrics';
 import { isManagedId } from '@/src/core/model';
-import type { Ticket } from '@/src/tickets/model';
+import type { FeedbackEntry, Ticket } from '@/src/tickets/model';
 import { ticketStatusText } from '@/app/lib/tickets';
-import { parseAgentRef, renderList, renderLogs, renderPlan, renderTickets, renderWatch } from './render';
+import { parseAgentRef, renderHistory, renderList, renderLogs, renderPlan, renderTickets, renderWatch } from './render';
 
 export interface CliIo {
   stdout: { write(s: string): unknown };
@@ -36,10 +36,18 @@ const USAGE = `Dùng: acctv <lệnh> [tuỳ chọn]
   approve <T>                   Duyệt kế hoạch
   revise <T> "<góp ý>"          Yêu cầu Controller sửa kế hoạch
   stop <T>/<agent>              Dừng một agent (vd: stop T-3/dev-1)
+  cancel <T>                    Huỷ ticket: dừng Controller và mọi agent của nó
+  report <T>                    Báo cáo mới nhất của Controller
+  history <T>                   Báo cáo từng vòng và các lần góp ý
+  feedback <T> "<nhận xét>"     Góp ý để làm tiếp ticket đã xong
+  continue <T> "<chỉ đạo>"      Chỉ đạo để tiếp tục ticket đang chờ bạn quyết
   watch <id-prefix | T>         Theo dõi trực tiếp một agent hoặc Controller của ticket
   logs <id-prefix | T/agent> [-n 50]
                                 In các call gần nhất của agent
-
+  telegram                      Điều khiển qua bot Telegram (cần TELEGRAM_BOT_TOKEN,
+                                TELEGRAM_ALLOWED_CHAT=2114990591; server phải đang chạy)
+                                Tuỳ chọn: TELEGRAM_CONTACTS=team:-100…,
+                                JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN
 Mọi lệnh nhận --port N (mặc định 4777).`;
 
 class CliError extends Error {}
@@ -233,11 +241,52 @@ async function cmdRevise(api: Api, p: Parsed, io: CliIo): Promise<number> {
 
 async function cmdStop(api: Api, p: Parsed, io: CliIo): Promise<number> {
   const ref = p.positional[1];
+  if (ref && /^T-\d+$/.test(ref)) { io.stderr.write(`stop cần tên agent (vd: stop ${ref}/dev-1). Dừng cả ticket: cancel ${ref}\n`); return 1; }
   const id = ref ? parseAgentRef(ref) : null;
   if (!id) { io.stderr.write('Dùng: acctv stop <T>/<agent> (vd: stop T-3/dev-1)\n'); return 1; }
   await api.post(`/api/agents/${encodeURIComponent(id)}/stop`);
   const slot = id.split(':')[2];
   io.stdout.write(`Đã dừng ${slot[0].toUpperCase()}${slot.slice(1)}, kết quả trả về Controller\n`);
+  return 0;
+}
+
+async function cmdCancel(api: Api, p: Parsed, io: CliIo): Promise<number> {
+  const id = ticketArg(p, io);
+  if (!id) return 1;
+  const t = await api.post<Ticket>(`/api/tickets/${id}/cancel`);
+  io.stdout.write(`${id} đã huỷ · ${ticketStatusText(t).text}\n`);
+  return 0;
+}
+
+async function cmdReport(api: Api, p: Parsed, io: CliIo): Promise<number> {
+  const id = ticketArg(p, io);
+  if (!id) return 1;
+  const { ticket: t } = await api.get<{ ticket: Ticket }>(`/api/tickets/${id}`);
+  io.stdout.write(t.report ? `${t.id} · ${t.title} · ${ticketStatusText(t).text}\n\n${t.report}${t.diffStat ? `\n\n${t.diffStat}` : ''}\n` : `${id} chưa có báo cáo (trạng thái: ${ticketStatusText(t).text})\n`);
+  return 0;
+}
+
+async function cmdHistory(api: Api, p: Parsed, io: CliIo): Promise<number> {
+  const id = ticketArg(p, io);
+  if (!id) return 1;
+  const [{ ticket }, items] = await Promise.all([
+    api.get<{ ticket: Ticket }>(`/api/tickets/${id}`),
+    api.get<FeedbackEntry[]>(`/api/tickets/${id}/feedback-history`),
+  ]);
+  io.stdout.write(renderHistory(ticket, items, io.color) + '\n');
+  return 0;
+}
+
+/** feedback (ticket xong → làm tiếp) và continue (ticket escalated → chỉ đạo). */
+async function cmdSteer(api: Api, p: Parsed, io: CliIo, kind: 'feedback' | 'continue'): Promise<number> {
+  const id = ticketArg(p, io);
+  if (!id) return 1;
+  const text = p.positional.slice(2).join(' ').trim();
+  if (!text) { io.stderr.write(`Thiếu nội dung. Dùng: acctv ${kind} <T> "<${kind === 'feedback' ? 'nhận xét' : 'chỉ đạo'}>"\n`); return 1; }
+  const t = kind === 'feedback'
+    ? await api.post<Ticket>(`/api/tickets/${id}/feedback`, { text, images: [] })
+    : await api.post<Ticket>(`/api/tickets/${id}/continue`, { guidance: text });
+  io.stdout.write(`${id} đã nhận ${kind === 'feedback' ? 'góp ý' : 'chỉ đạo'} · ${ticketStatusText(t).text}\n`);
   return 0;
 }
 
@@ -392,6 +441,21 @@ async function cmdWatch(api: Api, p: Parsed, io: CliIo): Promise<number> {
   });
 }
 
+async function cmdTelegram(api: Api, io: CliIo): Promise<number> {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) { io.stderr.write('Thiếu TELEGRAM_BOT_TOKEN (lấy từ @BotFather).\n'); return 1; }
+  const allowed = new Set((process.env.TELEGRAM_ALLOWED_CHAT ?? '').split(',').map((s) => s.trim()).filter(Boolean));
+  if (!allowed.size) io.stderr.write('TELEGRAM_ALLOWED_CHAT trống: mọi chat bị chặn. Nhắn bot một tin để biết chat_id của bạn.\n');
+  const { runTelegram, parseContacts } = await import('./telegram');
+  let contacts: Map<string, string>;
+  try { contacts = parseContacts(process.env.TELEGRAM_CONTACTS ?? ''); } catch (err) { io.stderr.write(`${(err as Error).message}\n`); return 1; }
+  const { JIRA_BASE_URL: base, JIRA_EMAIL: email, JIRA_API_TOKEN: jiraToken } = process.env;
+  const jiraSet = [base, email, jiraToken].filter(Boolean).length;
+  if (jiraSet && jiraSet < 3) { io.stderr.write('Jira cần đủ cả JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN.\n'); return 1; }
+  const jira = base && email && jiraToken ? { base, email, token: jiraToken } : null;
+  return runTelegram({ token, allowed, contacts, jira, port: api.port, io });
+}
+
 export async function main(argv: string[], io: CliIo): Promise<number> {
   let p: Parsed;
   try {
@@ -412,8 +476,13 @@ export async function main(argv: string[], io: CliIo): Promise<number> {
     if (cmd === 'approve') return await cmdApprove(api, p, io);
     if (cmd === 'revise') return await cmdRevise(api, p, io);
     if (cmd === 'stop') return await cmdStop(api, p, io);
+    if (cmd === 'cancel') return await cmdCancel(api, p, io);
+    if (cmd === 'report') return await cmdReport(api, p, io);
+    if (cmd === 'history') return await cmdHistory(api, p, io);
+    if (cmd === 'feedback' || cmd === 'continue') return await cmdSteer(api, p, io, cmd);
     if (cmd === 'logs') return await cmdLogs(api, p, io);
     if (cmd === 'watch') return await cmdWatch(api, p, io);
+    if (cmd === 'telegram') return await cmdTelegram(api, io);
     io.stderr.write(`Lệnh không biết: ${cmd}\n${USAGE}\n`);
     return 1;
   } catch (err) {

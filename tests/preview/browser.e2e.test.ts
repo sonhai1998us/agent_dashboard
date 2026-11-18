@@ -59,6 +59,11 @@ beforeAll(async () => {
       res.writeHead(403);
       return res.end('forbidden');
     }
+    if (url.pathname === '/api/upcoming') {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      return res.end(JSON.stringify({ events: [{ id: 1, home: 'A' }, { id: 2, home: 'B' }] }));
+    }
+    if (url.pathname === '/list') return html(200, '<ul id="l"></ul><script>fetch("/api/upcoming").then(r=>r.json()).then(d=>{for(const e of d.events){const li=document.createElement("li");li.textContent=e.home;l.appendChild(li)}})</script>');
     if (url.pathname === '/out') return html(200, '<!doctype html><p>đi</p><script>setTimeout(()=>{location.href="https://example.com/"},50)</script>');
     html(404, 'không có');
   });
@@ -109,6 +114,19 @@ describe.skipIf(!exe)('TicketBrowser (Chrome thật)', () => {
     }
     await new Promise((r) => setTimeout(r, 500));
     expect(alive(pids[0])).toBe(false);
+  });
+
+  it('api: trả body response khớp mẫu; không gọi api thì không có trường api', { timeout: 60000 }, async () => {
+    const b = new TicketBrowser({ executablePath: exe!, origin, login: LOGIN, accounts: [], onPid: () => {} });
+    const out = fs.mkdtempSync(path.join(os.tmpdir(), 'acctv-shots-'));
+    try {
+      const r = await b.runCapture(args({ api: ['/api/upcoming'], steps: [{ goto: '/list' }, { waitFor: 'li' }] }, []), out, wt);
+      expect(r.api).toEqual([{ method: 'GET', url: `${origin}/api/upcoming`, status: 200, body: '{"events":[{"id":1,"home":"A"},{"id":2,"home":"B"}]}' }]);
+      const plain = await b.runCapture(args({ steps: [{ goto: '/list' }] }, []), out, wt);
+      expect(plain.api).toBeUndefined();
+    } finally {
+      await b.close();
+    }
   });
 
   it('form trong modal: bấm openSelectors lần lượt rồi mới điền; đứng ở trang mở modal không bị coi là hết phiên', { timeout: 60000 }, async () => {

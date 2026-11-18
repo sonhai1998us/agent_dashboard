@@ -39,7 +39,8 @@ export const FEEDBACK_EXT: Record<string, string> = { 'image/png': '.png', 'imag
 export const FEEDBACK_FILE = /^\d+-\d+\.(png|jpg|webp|gif)$/;
 
 /** plan: góp ý kế hoạch lúc chờ duyệt. result: góp ý để làm tiếp khi ticket đã xong. guidance: chỉ đạo khi cho ticket escalated chạy tiếp. */
-export type FeedbackKind = 'plan' | 'result' | 'guidance';
+/** report: báo cáo Controller khi kết thúc một lượt (done/escalated); các loại khác là lời người dùng. */
+export type FeedbackKind = 'plan' | 'result' | 'guidance' | 'report';
 
 /** Một lần người dùng góp ý cho Controller (lịch sử góp ý). */
 export interface FeedbackEntry {

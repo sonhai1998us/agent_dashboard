@@ -28,6 +28,23 @@ node bin/acctv.mjs logs <id-prefix> [-n 50]
 
 Có thể `npm link` để dùng lệnh `acctv` trực tiếp (`acctv serve|ls|watch|logs`). Mọi lệnh nhận `--port N` (mặc định 4777). `serve` không có `--dev` cần `npm run build` trước.
 
+### Telegram
+
+Điều khiển dashboard bằng chat, không cần mở cổng ra ngoài (bot dùng long-polling):
+
+1. Tạo bot với @BotFather, lấy token.
+2. Bật server (`acctv serve`), rồi ở terminal khác: `TELEGRAM_BOT_TOKEN=<token> acctv telegram`.
+3. Nhắn bot một tin bất kỳ, bot trả về `chat_id` của bạn. Tắt bot, chạy lại với `TELEGRAM_ALLOWED_CHAT=<chat_id>` (nhiều id cách nhau dấu phẩy).
+
+Gõ lệnh như CLI, có hoặc không có `/`: `/ls`, `/plan T-3`, `/approve T-3`, `/revise T-3 "góp ý"`, `/stop T-3/dev-1`, `/cancel T-3` (huỷ cả ticket), `/logs T-3/dev-1 -n 20`, `/new "tiêu đề"` (bot hiện nút chọn thư mục: project trong Settings và thư mục ticket gần đây) hoặc `/new "tiêu đề" --dir /đường/dẫn/tuyệt/đối`. Bot tự báo khi ticket chờ duyệt / cần bạn quyết / xong / huỷ và khi có cảnh báo. Chỉ chat trong `TELEGRAM_ALLOWED_CHAT` được chạy lệnh: ai nhắn được bot là cho agent chạy code trên máy này.
+
+Tin báo và kết quả `/plan T-3` có nút: **Duyệt**, **Xem plan / Báo cáo**, **➡️ <nhóm>** và **💬 Jira**.
+
+Ticket **xong** có thêm nút **💬 Góp ý**, ticket **cần bạn quyết** có **🧭 Chỉ đạo**; bấm vào rồi trả lời tin của bot. Góp ý kèm ảnh được: trả lời bằng ảnh (một hoặc cả album) với chú thích là nhận xét, hoặc gửi ảnh với chú thích `/feedback T-3 "nhận xét"`. Gõ tay: `/report T-3`, `/history T-3` (báo cáo từng vòng xen với các lần góp ý), `/feedback T-3 "…"`, `/continue T-3 "…"`. Mỗi lần Controller kết thúc một vòng, báo cáo được lưu vào lịch sử (nút **Lịch sử** trên web), không còn bị vòng sau ghi đè.
+
+- **Chuyển cho nhóm**: thêm bot vào nhóm, bot nhắn riêng cho bạn `chat_id` của nhóm đó. Rồi đặt `TELEGRAM_CONTACTS=team:-100123,lead:4567`. Nhóm chỉ nhận tin, không chạy được lệnh. Gõ tay: `/send T-3 team "xem giúp phần API"`.
+- **Comment Jira**: đặt `JIRA_BASE_URL=https://<site>.atlassian.net`, `JIRA_EMAIL`, `JIRA_API_TOKEN` (tạo ở id.atlassian.com → Security → API tokens). Mã issue lấy từ tiêu đề ticket (`[US-123] …`). Comment đăng dưới tên bạn nên bot luôn hiện bản xem trước kèm nút **Gửi lên Jira**. Nút gửi plan (hoặc báo cáo nếu ticket đã xong); gõ `/jira T-3 "nội dung"` để gửi lời của bạn.
+
 ## Biến môi trường
 
 | Biến | Mặc định |

@@ -3,12 +3,12 @@ import type { FeedbackEntry } from '@/src/tickets/model';
 import { FEEDBACK_KIND_LABEL, fmtDateTime } from '../lib/tickets';
 import styles from './TicketHeader.module.css';
 
-/** Các lần người dùng góp ý cho Controller của ticket, mới nhất trước. */
+/** Báo cáo từng vòng của Controller xen với các lần người dùng góp ý, mới nhất trước. */
 export default function FeedbackHistory({ ticketId, items, onClose }: { ticketId: string; items: FeedbackEntry[]; onClose: () => void }) {
   return (
-    <section className={styles.history} aria-label="Lịch sử góp ý">
+    <section className={styles.history} aria-label="Lịch sử báo cáo và góp ý">
       <div className={styles.historyHead}>
-        <span>Lịch sử góp ý · {items.length} lần</span>
+        <span>Lịch sử · {items.filter((f) => f.kind === 'report').length} báo cáo · {items.filter((f) => f.kind !== 'report').length} góp ý</span>
         <button type="button" className={styles.btn} onClick={onClose}>Đóng</button>
       </div>
       <ol className={styles.historyList}>

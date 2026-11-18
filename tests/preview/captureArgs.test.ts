@@ -13,7 +13,7 @@ const err = (raw: unknown, accounts?: string[]) => {
 describe('validateCaptureArgs', () => {
   it('mặc định', () => {
     const r = v({ steps: [{ goto: '/' }] });
-    expect(r).toEqual({ ok: true, args: { as: null, viewport: { width: 1440, height: 900 }, colorScheme: 'light', locale: null, cookies: [], steps: [{ goto: '/' }] } });
+    expect(r).toEqual({ ok: true, args: { as: null, viewport: { width: 1440, height: 900 }, colorScheme: 'light', locale: null, cookies: [], api: [], steps: [{ goto: '/' }] } });
   });
 
   it('nhận đủ các loại bước và tuỳ chọn', () => {
@@ -53,10 +53,14 @@ describe('validateCaptureArgs', () => {
     expect(err({ steps: [{ goto: '/', click: 'a' }] })).toMatch(/bước 1/);
     expect(err({ colorScheme: 'blue', steps: [{ goto: '/' }] })).toMatch(/colorScheme/);
     expect(err('x')).toMatch(/steps/);
+    expect(err({ api: 'x', steps: [{ goto: '/' }] })).toMatch(/api/);
+    expect(err({ api: [''], steps: [{ goto: '/' }] })).toMatch(/api/);
+    expect(err({ api: Array.from({ length: 11 }, (_, i) => `/a${i}`), steps: [{ goto: '/' }] })).toMatch(/api/);
+    expect(v({ api: ['/upcoming'], steps: [{ goto: '/' }] })).toMatchObject({ ok: true, args: { api: ['/upcoming'] } });
   });
 
   it('LIMITS đúng spec', () => {
-    expect(LIMITS).toEqual({ steps: 30, shots: 6, stepMs: 10000, totalMs: 120000, fullPageMax: 8000, measurePerTarget: 20, consoleLines: 30, consoleChars: 300, overflowItems: 10, minWidth: 320, maxWidth: 1920 });
+    expect(LIMITS).toEqual({ steps: 30, shots: 6, stepMs: 10000, totalMs: 120000, fullPageMax: 8000, measurePerTarget: 20, consoleLines: 30, consoleChars: 300, overflowItems: 10, minWidth: 320, maxWidth: 1920, apiPatterns: 10, apiResponses: 10, apiChars: 20000 });
   });
 });
 

@@ -106,6 +106,7 @@ describe('điều khiển agent', () => {
     await orch.idle();
     expect(runOf(env, ctrl)!.killed).toBe(true);
     expect(tickets.getTicket(T)).toMatchObject({ status: 'escalated', report: 'Controller lặp vòng (auto-stop: loop)' });
+    expect(tickets.listFeedback(T)[0]).toMatchObject({ kind: 'report', text: 'Controller lặp vòng (auto-stop: loop)' });
     expect(tickets.getManaged(ctrl)).toMatchObject({ state: 'stopped', stopReason: 'auto-stop: loop' });
     expect(store.getAgent(ctrl)!.status).toBe('ended');
     expect(env.runs).toHaveLength(n);

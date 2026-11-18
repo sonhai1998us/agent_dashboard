@@ -198,7 +198,7 @@ describe('lịch sử góp ý', () => {
     expect(fmtDateTime(at, new Date(2027, 0, 1).getTime())).toBe('08/11/2026 09:05');
   });
   test('mỗi loại góp ý có nhãn', () => {
-    expect(Object.keys(FEEDBACK_KIND_LABEL).sort()).toEqual(['guidance', 'plan', 'result']);
+    expect(Object.keys(FEEDBACK_KIND_LABEL).sort()).toEqual(['guidance', 'plan', 'report', 'result']);
   });
 });
 
